@@ -6,21 +6,18 @@ import os, hashlib, datetime, uuid, redis
 # ── CONFIGURATION ──────────────────────────────────────────────────────
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 
-# Configuration CORS pour autoriser votre frontend Render
+# Mise à jour CORS : ajout de PUT et DELETE pour la gestion des candidats
 CORS(app, resources={
     r"/api/*": {
         "origins": ["https://recrutment.onrender.com", "http://localhost:5000"],
-        "methods": ["GET", "POST", "OPTIONS"],
+        "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
         "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 
-app.config['JWT_SECRET_KEY'] = 'gestion-candidatures-secret-2024'
+app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
-
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 POSTES = [
     "Responsable Administration de Crédit",
@@ -31,7 +28,7 @@ POSTES = [
     "IT Réseau & Infrastructure"
 ]
 
-# ── REDIS ──────────────────────────────────────────────────────────────
+# ── CONNEXION REDIS ────────────────────────────────────────────────────
 redis_client = redis.Redis(
     host=os.getenv("REDIS_HOST"),
     port=os.getenv("REDIS_PORT"),
@@ -57,7 +54,7 @@ def init_recruteur():
 
 init_recruteur()
 
-# ── ROUTES API ─────────────────────────────────────────────────────────
+# ── ROUTES PUBLIQUES ───────────────────────────────────────────────────
 
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
@@ -66,30 +63,29 @@ def get_postes():
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.json
+    if not data: return jsonify({'error': 'JSON manquant'}), 400
     email = data.get('email')
     pwd = hash_pwd(data.get('password', ''))
-    
     for key in redis_client.keys("recruteur:*"):
         r = redis_client.hgetall(key)
         if r.get("email") == email and r.get("password") == pwd:
             token = create_access_token(identity=r["id"])
-            return jsonify({'token': token, 'nom': r["nom"]})
+            return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]})
     return jsonify({'error': 'Identifiants incorrects'}), 401
 
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
         nom = request.form.get('nom')
+        prenom = request.form.get('prenom')
         email = request.form.get('email')
         poste = request.form.get('poste')
-        
         if not nom or not email or poste not in POSTES:
             return jsonify({'error': 'Données invalides'}), 400
-
         token = uuid.uuid4().hex
         redis_client.hset(f"candidat:{token}", mapping={
-            "nom": nom, "prenom": request.form.get('prenom'),
-            "email": email, "poste": poste, "statut": "en_attente",
+            "nom": nom, "prenom": prenom, "email": email, "poste": poste,
+            "statut": "en_attente", "note": "", "score": "0",
             "date_candidature": datetime.datetime.now().isoformat()
         })
         return jsonify({'message': 'Succès', 'token': token}), 201
@@ -100,6 +96,49 @@ def postuler():
 def get_statut(token):
     data = redis_client.hgetall(f"candidat:{token}")
     return jsonify(data) if data else (jsonify({'error': 'Introuvable'}), 404)
+
+# ── ROUTES RECRUTEUR (PROTÉGÉES PAR JWT) ──────────────────────────────
+
+@app.route('/api/recruteur/candidats', methods=['GET'])
+@jwt_required()
+def list_candidats():
+    keys = redis_client.keys("candidat:*")
+    candidats = []
+    for k in keys:
+        c = redis_client.hgetall(k)
+        c['id'] = k.split(':')[-1]
+        candidats.append(c)
+    # Tri par date décroissante
+    candidats.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
+    return jsonify(candidats), 200
+
+@app.route('/api/recruteur/stats', methods=['GET'])
+@jwt_required()
+def get_stats():
+    keys = redis_client.keys("candidat:*")
+    stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0, "by_poste": []}
+    counts_poste = {}
+    for k in keys:
+        c = redis_client.hgetall(k)
+        s = c.get('statut', 'en_attente')
+        if s in stats: stats[s] += 1
+        p = c.get('poste', 'Inconnu')
+        counts_poste[p] = counts_poste.get(p, 0) + 1
+    stats['by_poste'] = [{'poste': k, 'n': v} for k, v in counts_poste.items()]
+    return jsonify(stats), 200
+
+@app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
+@jwt_required()
+def update_candidat(token):
+    key = f"candidat:{token}"
+    if not redis_client.exists(key): return jsonify({"error": "Non trouvé"}), 404
+    data = request.json
+    redis_client.hset(key, mapping={
+        "statut": data.get('statut'),
+        "note": data.get('note', ''),
+        "score": str(data.get('score', '0'))
+    })
+    return jsonify({"message": "Mis à jour"}), 200
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
