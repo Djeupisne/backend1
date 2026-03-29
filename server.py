@@ -6,7 +6,13 @@ from werkzeug.utils import secure_filename
 
 # ── CONFIG ──────────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
-CORS(app)
+
+# Autoriser CORS pour ton frontend Render et le dev local
+CORS(app, origins=[
+    "http://localhost:5000",              # pour tester en local
+    "https://recrutment.onrender.com"     # ton site frontend en prod
+])
+
 app.config['JWT_SECRET_KEY'] = 'gestion-candidatures-secret-2024'
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB
