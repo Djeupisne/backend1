@@ -5,7 +5,7 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-import os, hashlib, datetime, uuid, redis, json, re, threading
+import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes
 from werkzeug.utils import secure_filename
 
 # ── PARSING DOCUMENTS ──────────────────────────────────────────────────────
@@ -221,7 +221,7 @@ KEYWORD_MAPPING = {
     "Mention de : comités de crédit": ["comité crédit", "commission crédit", "credit committee", "validation comité", "comité des engagements"],
     
     "CV trop « relation client »": ["relation client", "accueil client", "service client", "customer service"],
-    "Aucune notion de risque": ["risque", "risk", "gestion des risques"],  # Négatif: absence = alerte
+    "Aucune notion de risque": ["risque", "risk", "gestion des risques"],
     "Expériences très courtes sans progression": ["CDD", "contrat court", "expérience courte", "moins d'un an"],
     
     # === Archiviste (Administration Crédit) ===
@@ -427,23 +427,18 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         is_present, found_keywords = check_criterion_match(crit, full_text)
         
         # Les critères éliminatoires sont formulés NÉGATIVEMENT
-        # Ex: "Pas d'expérience bancaire" → ÉLIMINATOIRE si l'expérience est ABSENTE
         is_negative = any(neg in crit.lower() for neg in ['pas d', 'aucun', 'sans ', 'incapacité', 'absence', 'manque de'])
         
         if is_negative:
-            # Critère négatif : "Pas d'expérience X"
             if not is_present:
-                # L'expérience X n'est PAS trouvée → critère éliminatoire DÉCLENCHE
                 flags_elim.append(crit)
                 checklist[key] = False
                 details['alertes_attention'].append(f"🔴 Éliminatoire: {crit}")
                 details['matching_details'][crit] = {'found': False, 'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:3]}
             else:
-                # L'expérience X est trouvée → bon signe, critère non déclenché
                 checklist[key] = True
                 details['matching_details'][crit] = {'found': True, 'matched': found_keywords}
         else:
-            # Critère positif standard
             checklist[key] = is_present
             if not is_present:
                 flags_elim.append(crit)
@@ -461,7 +456,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         details['matching_details'][crit] = {'found': is_present, 'matched': found_keywords if is_present else None}
         
         if is_present:
-            points_bloc2 += 1  # +1 point pour cohérence
+            points_bloc2 += 1
             details['criteres_valides_bloc2'].append(f"🟠 {crit}")
     
     # ═══════════════════════════════════════════════════════════════
@@ -475,7 +470,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         details['matching_details'][crit] = {'found': is_present, 'matched': found_keywords if is_present else None}
         
         if is_present:
-            points_bloc3 += 2  # +2 points pour signal fort (pondération élevée)
+            points_bloc3 += 2
             signaux.append(crit)
             details['signaux_valides_bloc3'].append(f"🟡 {crit}")
     
@@ -496,17 +491,12 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
     # 🧮 CALCUL DU SCORE FINAL (0-5 étoiles) — STRICT
     # ═══════════════════════════════════════════════════════════════
     if flags_elim:
-        # 🔴 Éliminatoire déclenché = Score 0 immédiat, non négociable
         score_final = 0
         details['alertes_attention'].insert(0, f"🚫 Score bloqué à 0 : {len(flags_elim)} critère(s) éliminatoire(s)")
     else:
-        # Calcul basé sur Bloc 2 + Bloc 3
         total_raw = points_bloc2 + points_bloc3
-        # Normalisation : ~10-12 points max → échelle 0-5
-        # Seuil: 2.5 pts ≈ 1 étoile, 5 pts ≈ 2 étoiles, etc.
         score_final = min(5, max(0, round(total_raw / 2.5)))
     
-    # Breakdown transparent pour le frontend/recruteur
     score_breakdown = {
         'bloc1_eliminatoire': len(flags_elim) > 0,
         'flags_eliminatoires_count': len(flags_elim),
@@ -530,27 +520,20 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
 
 
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filename, poste):
-    """
-    Fonction exécutée en arrière-plan (thread) pour analyser les documents d'un candidat.
-    Déclenchée automatiquement après soumission → zéro intervention recruteur.
-    """
+    """Fonction exécutée en arrière-plan pour analyser les documents d'un candidat."""
     try:
         key = f"candidat:{token}"
         
-        # Chemins des fichiers uploadés
         cv_path = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
         lettre_path = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
         attestation_path = os.path.join(UPLOAD_FOLDER, attestation_filename) if attestation_filename else None
         
-        # Extraction des textes depuis les fichiers
         cv_text = extract_text_from_file(cv_path, cv_filename) if cv_path else ""
         lettre_text = extract_text_from_file(lettre_path, lettre_filename) if lettre_path else ""
         attestation_text = extract_text_from_file(attestation_path, attestation_filename) if attestation_path else ""
         
-        # 🧠 Analyse automatique EXACTE contre la grille Word
         result = analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste)
         
-        # 💾 Sauvegarde des résultats dans Redis (accessible au recruteur)
         redis_client.hset(key, mapping={
             "score": str(result['score']),
             "checklist": json.dumps(result['checklist'], ensure_ascii=False),
@@ -562,8 +545,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             "analyse_status": "completed"
         })
         
-        print(f"✅ Analyse auto terminée pour {token}: score={result['score']}/5, "
-              f"élim={len(result['flags_eliminatoires'])}, signaux={len(result['signaux_detectes'])}")
+        print(f"✅ Analyse auto terminée pour {token}: score={result['score']}/5")
         
     except Exception as e:
         print(f"⚠️ Erreur analyse auto pour candidat {token}: {e}")
@@ -580,12 +562,10 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
-    """Liste des postes disponibles pour la candidature"""
     return jsonify(POSTES), 200
 
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
-    """Retourne la grille de présélection pour un poste donné"""
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
@@ -594,7 +574,6 @@ def get_grille(poste):
 # ── AUTH ───────────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Authentification du recruteur"""
     data = request.json
     if not data:
         return jsonify({'error': 'JSON manquant'}), 400
@@ -612,11 +591,6 @@ def login():
 # ── CANDIDATURE ────────────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
-    """
-    Soumission de candidature par un candidat.
-    → Analyse automatique EXACTE lancée en arrière-plan IMMÉDIATEMENT.
-    → Le recruteur ne voit que les résultats finaux (score, signaux, alertes).
-    """
     try:
         nom      = (request.form.get('nom') or '').strip()
         prenom   = (request.form.get('prenom') or '').strip()
@@ -627,13 +601,11 @@ def postuler():
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
-        # Vérifier email unique
         for k in redis_client.keys("candidat:*"):
             existing = redis_client.hgetall(k)
             if existing.get('email', '').lower() == email:
                 return jsonify({'error': 'Un candidat avec cet email existe déjà'}), 409
 
-        # Sauvegarde des fichiers
         cv_filename = ''
         lettre_filename = ''
         attestation_filename = ''
@@ -661,26 +633,14 @@ def postuler():
 
         token = uuid.uuid4().hex
         redis_client.hset(f"candidat:{token}", mapping={
-            "nom":                    nom,
-            "prenom":                 prenom,
-            "email":                  email,
-            "telephone":              telephone,
-            "poste":                  poste,
-            "cv_filename":            cv_filename,
-            "lettre_filename":        lettre_filename,
-            "attestation_filename":   attestation_filename,
-            "statut":                 "en_attente",
-            "note":                   "",
-            "score":                  "0",
-            "checklist":              "",
-            "flags_eliminatoires":    "",
-            "signaux_detectes":       "",
-            "score_breakdown":        "",
-            "analyse_status":         "pending",
-            "date_candidature":       datetime.datetime.now().isoformat()
+            "nom": nom, "prenom": prenom, "email": email, "telephone": telephone,
+            "poste": poste, "cv_filename": cv_filename, "lettre_filename": lettre_filename,
+            "attestation_filename": attestation_filename, "statut": "en_attente",
+            "note": "", "score": "0", "checklist": "", "flags_eliminatoires": "",
+            "signaux_detectes": "", "score_breakdown": "", "analyse_status": "pending",
+            "date_candidature": datetime.datetime.now().isoformat()
         })
 
-        # 🚀 LANCEMENT ANALYSE AUTO EN ARRIÈRE-PLAN
         threading.Thread(
             target=run_analysis_for_candidat,
             args=(token, cv_filename, lettre_filename, attestation_filename, poste),
@@ -690,7 +650,7 @@ def postuler():
         return jsonify({
             'message': 'Candidature soumise avec succès',
             'token': token,
-            'analyse': 'L\'analyse automatique de votre dossier est en cours (résultats disponibles sous 30-60s)'
+            'analyse': 'L\'analyse automatique de votre dossier est en cours'
         }), 201
 
     except Exception as e:
@@ -699,7 +659,6 @@ def postuler():
 
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
-    """Consultation du statut par le candidat"""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidature introuvable'}), 404
@@ -717,22 +676,13 @@ def get_statut(token):
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
-    """Statistiques globales pour le dashboard recruteur"""
     keys = redis_client.keys("candidat:*")
-    stats = {
-        "total": len(keys),
-        "en_attente": 0,
-        "retenu": 0,
-        "rejete": 0,
-        "entretien": 0,
-        "by_poste": []
-    }
+    stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0, "by_poste": []}
     counts = {}
     for k in keys:
         c = redis_client.hgetall(k)
         s = c.get('statut', 'en_attente')
-        if s in stats:
-            stats[s] += 1
+        if s in stats: stats[s] += 1
         p = c.get('poste', 'Inconnu')
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
@@ -741,78 +691,57 @@ def get_stats():
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
-    """Liste des candidats avec filtres"""
-    poste_filter  = request.args.get('poste', '')
+    poste_filter = request.args.get('poste', '')
     statut_filter = request.args.get('statut', '')
-    search        = request.args.get('search', '').lower()
-    min_score     = request.args.get('min_score', type=int)
+    search = request.args.get('search', '').lower()
+    min_score = request.args.get('min_score', type=int)
 
     keys = redis_client.keys("candidat:*")
     result = []
     for k in keys:
         c = redis_client.hgetall(k)
         c['id'] = k.split(':', 1)[1]
-
-        if poste_filter and c.get('poste') != poste_filter:
-            continue
-        if statut_filter and c.get('statut') != statut_filter:
-            continue
-        if min_score is not None and int(c.get('score', 0)) < min_score:
-            continue
+        if poste_filter and c.get('poste') != poste_filter: continue
+        if statut_filter and c.get('statut') != statut_filter: continue
+        if min_score is not None and int(c.get('score', 0)) < min_score: continue
         if search:
             haystack = f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')} {c.get('poste','')}".lower()
-            if search not in haystack:
-                continue
-
-        # Parse score_breakdown pour le frontend
+            if search not in haystack: continue
         if c.get('score_breakdown'):
             try: c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
             except: pass
-        
         result.append(c)
-
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
 
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
-    """Détail complet d'un candidat pour le modal recruteur"""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
     data['id'] = token
-    
-    # Parse tous les champs JSON pour le frontend
     for field in ['checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown']:
         if data.get(field):
             try: data[f'{field}_parsed'] = json.loads(data[field])
             except: pass
-    
     return jsonify(data), 200
 
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
-    """Mise à jour du statut par le recruteur"""
     key = f"candidat:{token}"
     if not redis_client.exists(key):
         return jsonify({'error': 'Candidat introuvable'}), 404
-
     data = request.json or {}
-    statut    = data.get('statut', 'en_attente')
-    note      = data.get('note', '')
-    score     = str(min(5, max(0, int(data.get('score', 0)))))
+    statut = data.get('statut', 'en_attente')
+    note = data.get('note', '')
+    score = str(min(5, max(0, int(data.get('score', 0)))))
     checklist = data.get('checklist', '')
-
     if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
         return jsonify({'error': 'Statut invalide'}), 400
-
     redis_client.hset(key, mapping={
-        "statut":    statut,
-        "note":      note,
-        "score":     score,
-        "checklist": checklist,
+        "statut": statut, "note": note, "score": score, "checklist": checklist,
         "decision_date": datetime.datetime.now().isoformat(),
         "decided_by": get_jwt_identity()
     })
@@ -821,53 +750,39 @@ def update_candidat(token):
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
-    """Re-déclenche l'analyse automatique"""
     key = f"candidat:{token}"
     data = redis_client.hgetall(key)
-    
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
-    
     cv_filename = data.get('cv_filename')
     lettre_filename = data.get('lettre_filename')
     attestation_filename = data.get('attestation_filename')
     poste = data.get('poste')
-    
     if not cv_filename:
         return jsonify({'error': 'CV manquant pour analyse'}), 400
-    
     redis_client.hset(key, mapping={
         "analyse_status": "pending",
         "analyse_manual_trigger": datetime.datetime.now().isoformat()
     })
-    
     threading.Thread(
         target=run_analysis_for_candidat,
         args=(token, cv_filename, lettre_filename, attestation_filename, poste),
         daemon=True
     ).start()
-    
-    return jsonify({
-        'message': 'Analyse automatique re-déclenchée',
-        'token': token,
-        'estimated_time': '30-60 secondes'
-    }), 202
+    return jsonify({'message': 'Analyse automatique re-déclenchée', 'token': token}), 202
 
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
-    """Génération d'email type selon le statut"""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
-
     body = request.json or {}
     msg_type = body.get('type', data.get('statut', 'en_attente'))
-
     nom_complet = f"{data.get('prenom', '')} {data.get('nom', '')}"
-    poste       = data.get('poste', '')
-    to_email    = data.get('email', '')
-
+    poste = data.get('poste', '')
+    to_email = data.get('email', '')
+    
     if msg_type == 'retenu':
         sujet = f"Félicitations – Votre candidature pour le poste {poste} a été retenue"
         corps = f"""Madame, Monsieur {nom_complet},
@@ -881,7 +796,6 @@ Dans l'attente, nous restons disponibles pour toute question.
 Cordialement,
 L'équipe Ressources Humaines
 RecrutBank"""
-
     elif msg_type == 'entretien':
         sujet = f"Invitation à un entretien – Poste {poste}"
         corps = f"""Madame, Monsieur {nom_complet},
@@ -893,7 +807,6 @@ Nous prendrons contact avec vous dans les meilleurs délais pour convenir d'une 
 Cordialement,
 L'équipe Ressources Humaines
 RecrutBank"""
-
     else:
         sujet = f"Réponse à votre candidature – Poste {poste}"
         corps = f"""Madame, Monsieur {nom_complet},
@@ -907,23 +820,37 @@ Nous vous encourageons vivement à postuler à nouveau pour toute opportunité f
 Cordialement,
 L'équipe Ressources Humaines
 RecrutBank"""
+    
+    return jsonify({'to': to_email, 'nom': nom_complet, 'sujet': sujet, 'corps': corps}), 200
 
-    return jsonify({
-        'to':    to_email,
-        'nom':   nom_complet,
-        'sujet': sujet,
-        'corps': corps
-    }), 200
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔓 SERVIR LES FICHIERS UPLOADÉS (sans JWT pour affichage navigateur)
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
-@jwt_required()
+# 🔓 Pas de @jwt_required() → permet l'affichage direct dans le navigateur
+# 🔐 Sécurité assurée par noms UUID uniques (impossibles à deviner)
 def serve_upload(filename):
-    """Servir les fichiers uploadés — accès recruteur uniquement"""
+    """Servir les fichiers uploadés — sécurisé par noms UUID uniques"""
+    # Validation stricte du filename
     safe = secure_filename(filename)
+    if not safe or safe != filename:
+        return jsonify({'error': 'Nom de fichier invalide'}), 400
+    
     filepath = os.path.join(UPLOAD_FOLDER, safe)
     if not os.path.exists(filepath):
         return jsonify({'error': 'Fichier introuvable'}), 404
-    return send_from_directory(UPLOAD_FOLDER, safe)
+    
+    # Détection du type MIME pour affichage correct dans le navigateur
+    mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+    
+    # as_attachment=False → affiche dans le navigateur au lieu de télécharger
+    return send_from_directory(
+        UPLOAD_FOLDER, 
+        safe, 
+        mimetype=mime_type,
+        as_attachment=False
+    )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ENDPOINT TEST (à désactiver en production)
@@ -931,27 +858,21 @@ def serve_upload(filename):
 
 @app.route('/api/test/analyze', methods=['POST'])
 def test_analyze():
-    """Endpoint de test pour valider l'analyse sans upload"""
     data = request.json or {}
     poste = data.get('poste', 'Analyste Crédit CCB')
     cv_text = data.get('cv_text', '')
     lettre_text = data.get('lettre_text', '')
     attestation_text = data.get('attestation_text', '')
-    
     result = analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste)
-    
     return jsonify(result), 200
 
 @app.route('/api/test/matching', methods=['POST'])
 def test_matching():
-    """Test de matching EXACT pour debug"""
     data = request.json or {}
     texte = data.get('texte', '').lower()
     critere = data.get('critere', '')
-    
     mots_cles = KEYWORD_MAPPING.get(critere, [])
     found = [kw for kw in mots_cles if kw.lower() in texte]
-    
     return jsonify({
         'critere': critere,
         'keywords_searched': mots_cles,
@@ -968,4 +889,5 @@ if __name__ == '__main__':
     print(f"🚀 Serveur RecrutBank démarré sur le port {port}")
     print(f"📋 Grille de présélection chargée: {len(GRILLE)} postes")
     print(f"🔍 Analyse auto: 3 blocs (éliminatoire / cohérence / signaux) — VÉRIFICATION EXACTE")
+    print(f"📁 Fichiers uploadés accessibles via /api/recruteur/uploads/<filename>")
     app.run(host="0.0.0.0", port=port, debug=False)
