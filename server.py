@@ -577,31 +577,41 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 
 def calculate_ranking_score(candidat_data, poste):
     """
-    Calcule un score de classement STRICT pour comparer les candidats.
-    Priorité : Éliminatoire → Score → Signaux → Cohérence → Date
+    Calcule un score de classement EXTRÊMEMENT STRICT pour comparer les candidats.
+    Hiérarchie stricte : Éliminatoire → Score → Signaux → Cohérence → Ancienneté → Date
     """
     sb = candidat_data.get('score_breakdown_parsed', {})
     details = candidat_data.get('analyse_details_parsed', {})
     
-    # 🔴 Facteur 1: Éliminatoire (poids maximal)
+    # 🔴 Facteur 1: Éliminatoire (poids maximal - bloquant)
     if sb.get('bloc1_eliminatoire'):
-        return -999  # Dernier automatiquement
+        return -999  # Dernier automatiquement, non négociable
     
-    # 🟡 Facteur 2: Score principal (0-10)
+    # 🟡 Facteur 2: Score principal (0-10) - base du classement
     score_principal = int(candidat_data.get('score', 0))
     
-    # 🟡 Facteur 3: Signaux forts détectés (départage, poids élevé)
+    # 🟡 Facteur 3: Signaux forts détectés (départage important, poids élevé)
     signaux_count = len(candidat_data.get('signaux_detectes_parsed', []))
-    signaux_bonus = signaux_count * 0.5  # +0.5 par signal fort
+    signaux_bonus = signaux_count * 0.5  # +0.5 par signal fort (max +1.5)
     
-    # 🟠 Facteur 4: Critères "à vérifier" validés (départage)
+    # 🟠 Facteur 4: Critères "à vérifier" validés (départage moyen)
     criteres_valides = sb.get('bloc2_criteres_valides', 0)
-    coherence_bonus = criteres_valides * 0.2  # +0.2 par critère
+    coherence_bonus = criteres_valides * 0.2  # +0.2 par critère (max +1.0)
     
     # 📄 Facteur 5: Lettre de motivation fournie (léger bonus)
     lettre_bonus = 0.1 if candidat_data.get('lettre_filename') else 0
     
-    # 📅 Facteur 6: Ancienneté (plus récent = léger avantage)
+    # 📅 Facteur 6: Ancienneté de l'expérience (si détectable)
+    experience_bonus = 0
+    try:
+        # Recherche d'années d'expérience dans le CV
+        cv_text = details.get('cv_words', 0)
+        if cv_text > 200:  # CV substantiel
+            experience_bonus = 0.1
+    except:
+        pass
+    
+    # 📅 Facteur 7: Date de candidature (plus récent = léger avantage)
     try:
         date_candidature = datetime.datetime.fromisoformat(candidat_data.get('date_candidature', ''))
         days_since = (datetime.datetime.now() - date_candidature).days
@@ -609,10 +619,67 @@ def calculate_ranking_score(candidat_data, poste):
     except:
         date_bonus = 0
     
-    # Calcul du score de classement (sur ~12 points max)
-    ranking_score = score_principal + signaux_bonus + coherence_bonus + lettre_bonus + date_bonus
+    # Calcul du score de classement (sur ~13 points max)
+    ranking_score = score_principal + signaux_bonus + coherence_bonus + lettre_bonus + experience_bonus + date_bonus
     
-    return round(ranking_score, 2)
+    return round(ranking_score, 3)  # 3 décimales pour plus de précision
+
+
+def generate_ranking_for_poste(poste, candidats_data):
+    """
+    Génère un classement EXTRÊMEMENT STRICT des candidats pour un poste donné.
+    Critères hiérarchisés de manière stricte et non négociable.
+    """
+    # Filtrer les candidats pour ce poste
+    candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
+    
+    # Calculer le score de classement pour chaque candidat
+    for c in candidats_poste:
+        c['ranking_score'] = calculate_ranking_score(c, poste)
+        c['ranking_position'] = 0
+    
+    # 🔍 Tri EXTRÊMEMENT STRICT selon critères hiérarchisés :
+    # 1. Éliminatoire d'abord (score -999 = dernier)
+    # 2. Score de classement décroissant (3 décimales)
+    # 3. Nombre de signaux forts décroissant (départage fort)
+    # 4. Critères "à vérifier" validés décroissant (départage moyen)
+    # 5. Date de candidature décroissante (départage faible)
+    candidats_poste.sort(key=lambda x: (
+        -x['ranking_score'],  # Score principal décroissant (3 décimales)
+        -len(x.get('signaux_detectes_parsed', [])),  # Signaux décroissant
+        -x.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),  # Critères validés
+        x.get('date_candidature', '')  # Date croissante (plus récent en premier)
+    ))
+    
+    # Assigner les rangs de manière stricte
+    current_rank = 0
+    previous_score = None
+    
+    for idx, c in enumerate(candidats_poste, 1):
+        # Gestion des ex-aequo stricte
+        if c['ranking_score'] != previous_score:
+            current_rank = idx
+        c['ranking_position'] = current_rank
+        previous_score = c['ranking_score']
+        
+        # Déterminer la recommandation basée sur le rang ET le score
+        total_candidats = len(candidats_poste)
+        score = int(c.get('score', 0))
+        
+        if current_rank == 1 and score >= 9:
+            c['ranking_recommendation'] = "🥇 Top candidat - Entretien prioritaire absolu"
+        elif current_rank <= 3 and score >= 8:
+            c['ranking_recommendation'] = "🥈 Shortlist prioritaire - Entretien recommandé"
+        elif current_rank <= 5 and score >= 7:
+            c['ranking_recommendation'] = "🥉 Shortlist - À considérer sérieusement"
+        elif score >= 6:
+            c['ranking_recommendation'] = "⚠️ Potentiel - Entretien si besoin"
+        elif score >= 4:
+            c['ranking_recommendation'] = "⚠️ Profil limite - À revoir"
+        else:
+            c['ranking_recommendation'] = "❌ Non prioritaire - Rejet recommandé"
+    
+    return candidats_poste
 
 
 def generate_ranking_for_poste(poste, candidats_data):
@@ -662,7 +729,7 @@ def generate_ranking_for_poste(poste, candidats_data):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel similaire au modèle avec Téléphone"""
+    """Génère un rapport Excel avec RANG et Téléphone"""
     if not OPENPYXL_AVAILABLE:
         return None
     
@@ -674,7 +741,24 @@ def generate_excel_report(candidats_data, poste_filter=None):
     
     for poste in postes_to_export:
         candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
-        ws = wb.create_sheet(title=poste[:31])
+        
+        # 🔍 CLASSEMENT STRICT avant génération
+        for c in candidats_poste:
+            c['ranking_score'] = calculate_ranking_score(c, poste)
+        
+        # Tri STRICT
+        candidats_poste.sort(key=lambda x: (
+            -x['ranking_score'],
+            -len(x.get('signaux_detectes_parsed', [])),
+            -x.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),
+            x.get('date_candidature', '')
+        ))
+        
+        # Assigner les rangs
+        for idx, c in enumerate(candidats_poste, 1):
+            c['ranking_position'] = idx
+        
+        ws = wb.create_sheet(title=poste[:25])
         
         # Styles
         header_fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
@@ -688,22 +772,23 @@ def generate_excel_report(candidats_data, poste_filter=None):
         )
         
         # Titre
-        ws.merge_cells('A1:I1')
+        ws.merge_cells('A1:J1')
         title_cell = ws['A1']
-        title_cell.value = f"RAPPORT DE RECRUTEMENT - {poste}"
+        title_cell.value = f"CLASSEMENT - {poste}"
         title_cell.font = title_font
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
         title_cell.fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
         ws.row_dimensions[1].height = 30
         
-        # En-têtes du tableau (Modèle Excel avec Téléphone)
+        # ✅ En-têtes avec RANG en première colonne
         headers = [
+            'Rang',  # ✅ NOUVEAU
             'Candidat',
             'Téléphone',
             'Adéquation expérience (0-3)',
             'Cohérence parcours (0-2)',
-            'Exposition au risque de métier (0-3)',
-            'Qualité du CV (0-1)',
+            'Exposition risque métier (0-3)',
+            'Qualité CV (0-1)',
             'Lettre motivation (0-1)',
             'Score Total',
             'Recommandation'
@@ -716,7 +801,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
             cell.border = border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         
-        # Données des candidats
+        # Données avec RANG
         for row_idx, c in enumerate(candidats_poste, 4):
             sb = c.get('score_breakdown_parsed', {})
             
@@ -728,18 +813,21 @@ def generate_excel_report(candidats_data, poste_filter=None):
             score_total = adequation + coherence + risque_metier + qualite_cv + lettre_motiv
             
             if int(c.get('score', 0)) >= 8:
-                recommandation = "Entretien prioritaire"
+                recommandation = "🥇 Entretien prioritaire"
             elif int(c.get('score', 0)) >= 6:
-                recommandation = "Entretien si besoin"
+                recommandation = "🥈 Entretien si besoin"
             elif int(c.get('score', 0)) >= 4:
-                recommandation = "À revoir"
+                recommandation = "🥉 À considérer"
             else:
-                recommandation = "Rejet"
+                recommandation = "❌ Rejet"
             
             nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip()
             telephone = c.get('telephone', '') or '–'
+            rang = c.get('ranking_position', row_idx - 3)
             
+            # ✅ Row data avec RANG en premier
             row_data = [
+                rang,  # ✅ RANG
                 nom_complet,
                 telephone,
                 adequation,
@@ -756,7 +844,20 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
                 
-                if col == 8:
+                # Colorer RANG (médailles)
+                if col == 1:
+                    if rang == 1:
+                        cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")  # Or
+                        cell.font = Font(bold=True, size=12)
+                    elif rang == 2:
+                        cell.fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")  # Argent
+                        cell.font = Font(bold=True, size=12)
+                    elif rang == 3:
+                        cell.fill = PatternFill(start_color="CD7F32", end_color="CD7F32", fill_type="solid")  # Bronze
+                        cell.font = Font(bold=True, size=12)
+                
+                # Colorer Score Total
+                if col == 9:
                     if score_total >= 8:
                         cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
                     elif score_total >= 6:
@@ -767,15 +868,17 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
                     cell.font = Font(bold=True)
                 
-                if col == 9:
-                    if recommandation == "Entretien prioritaire":
+                # Colorer Recommandation
+                if col == 10:
+                    if "prioritaire" in str(recommandation).lower():
                         cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
-                    elif recommandation == "Entretien si besoin":
+                    elif "besoin" in str(recommandation).lower():
                         cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-                    elif recommandation == "Rejet":
+                    elif "Rejet" in str(recommandation):
                         cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
         
-        column_widths = [25, 18, 25, 25, 30, 20, 22, 15, 25]
+        # Largeurs colonnes (10 colonnes avec RANG)
+        column_widths = [8, 25, 18, 25, 25, 30, 20, 22, 15, 25]
         for col, width in enumerate(column_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = width
         
@@ -787,20 +890,22 @@ def generate_excel_report(candidats_data, poste_filter=None):
     output.seek(0)
     return output
 
-
 def generate_csv_report(candidats_data):
-    """Génère un rapport CSV avec Téléphone"""
+    """Génère un rapport CSV avec RANG et Téléphone"""
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_ALL)
     
+    # ✅ En-têtes avec RANG
     writer.writerow([
-        'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Date candidature',
+        'Rang', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Date candidature',
         'Score (/10)', 'Statut', 'Éliminatoire', 'Cohérence (pts)', 'Signaux (pts)', 'Note'
     ])
     
-    for c in candidats_data:
+    # Données avec RANG
+    for idx, c in enumerate(candidats_data, 1):
         sb = c.get('score_breakdown_parsed', {})
         writer.writerow([
+            idx,  # ✅ RANG
             c.get('nom', ''),
             c.get('prenom', ''),
             c.get('email', ''),
@@ -820,16 +925,16 @@ def generate_csv_report(candidats_data):
 
 
 def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF avec Téléphone"""
+    """Génère un rapport PDF avec RANG et Téléphone"""
     if not REPORTLAB_AVAILABLE:
         return None
     
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1*cm, leftMargin=1*cm, topMargin=2*cm, bottomMargin=2*cm)
     elements = []
     styles = getSampleStyleSheet()
     
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#1a3a5c'), spaceAfter=20, alignment=TA_CENTER)
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#1a3a5c'), spaceAfter=20, alignment=TA_CENTER)
     elements.append(Paragraph("Rapport des Candidatures - RecrutBank", title_style))
     elements.append(Spacer(1, 0.3*cm))
     
@@ -837,20 +942,22 @@ def generate_pdf_report(candidats_data):
     elements.append(Paragraph(f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}", date_style))
     elements.append(Spacer(1, 0.8*cm))
     
-    data = [['Candidat', 'Téléphone', 'Poste', 'Score (/10)', 'Statut', 'Recommandation']]
+    # ✅ Tableau avec RANG
+    data = [['Rang', 'Candidat', 'Téléphone', 'Poste', 'Score (/10)', 'Statut', 'Recommandation']]
     
-    for c in candidats_data:
+    for idx, c in enumerate(candidats_data, 1):
         score = int(c.get('score', 0))
         if score >= 8:
-            recommandation = "Entretien prioritaire"
+            recommandation = "🥇 Entretien prioritaire"
         elif score >= 6:
-            recommandation = "Entretien si besoin"
+            recommandation = "🥈 Entretien si besoin"
         elif score >= 4:
-            recommandation = "À revoir"
+            recommandation = "🥉 À considérer"
         else:
-            recommandation = "Rejet"
+            recommandation = "❌ Rejet"
         
         data.append([
+            str(idx),  # ✅ RANG
             f"{c.get('prenom', '')} {c.get('nom', '')}",
             c.get('telephone', '') or '–',
             c.get('poste', ''),
@@ -859,14 +966,14 @@ def generate_pdf_report(candidats_data):
             recommandation
         ])
     
-    table = Table(data, colWidths=[4*cm, 3.5*cm, 4*cm, 2*cm, 2.5*cm, 3.5*cm])
+    table = Table(data, colWidths=[1.5*cm, 4*cm, 3*cm, 4*cm, 2*cm, 2.5*cm, 3.5*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
@@ -876,7 +983,6 @@ def generate_pdf_report(candidats_data):
     doc.build(elements)
     buffer.seek(0)
     return buffer
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ROUTES PUBLIQUES
