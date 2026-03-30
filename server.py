@@ -1,6 +1,6 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique EXACTE des CV
 # Basé sur la grille Word : 3 blocs (Éliminatoire / Cohérence / Signaux)
-# Notation sur 10 + Export rapports multi-formats
+# Notation sur 10 + Export rapports multi-formats (Excel, PDF, CSV)
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -17,24 +17,24 @@ from docx import Document
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
     print("⚠️ reportlab non installé. L'export PDF sera désactivé.")
-    print("   Installez-le avec: pip install reportlab")
 
 try:
     import openpyxl
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Color
+    from openpyxl.utils import get_column_letter
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
     print("⚠️ openpyxl non installé. L'export Excel sera désactivé.")
-    print("   Installez-le avec: pip install openpyxl")
 
 app = Flask(__name__)
 
@@ -464,7 +464,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
     else:
         total_raw = points_bloc2 + points_bloc3
         # ✅ NOTATION SUR 10 (au lieu de 5)
-        # Facteur de conversion : 10/9 ≈ 1.11 (ou 1.25 pour être plus strict)
         score_final = min(10, max(0, round(total_raw / 1.25)))
     
     score_breakdown = {
@@ -540,11 +539,154 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 📄 FONCTIONS D'EXPORT DE RAPPORTS
+# 📄 FONCTIONS D'EXPORT DE RAPPORTS (Similaires au modèle Excel)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def generate_excel_report(candidats_data, poste_filter=None):
+    """Génère un rapport Excel similaire au modèle uploadé"""
+    if not OPENPYXL_AVAILABLE:
+        return None
+    
+    wb = Workbook()
+    
+    # Supprimer la feuille par défaut
+    if 'Sheet' in wb.sheetnames:
+        del wb['Sheet']
+    
+    # Créer une feuille par poste ou une feuille globale
+    if poste_filter:
+        postes_to_export = [poste_filter]
+    else:
+        postes_to_export = list(set(c.get('poste', 'Inconnu') for c in candidats_data))
+    
+    for idx, poste in enumerate(postes_to_export):
+        # Filtrer les candidats pour ce poste
+        candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
+        
+        # Créer la feuille
+        ws = wb.create_sheet(title=poste[:31])  # Excel limite à 31 caractères
+        
+        # Styles
+        header_fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
+        header_font = Font(color="FFFFFF", bold=True, size=11)
+        title_font = Font(bold=True, size=14, color="1a3a5c")
+        border = Border(
+            left=Side(style='thin', color='000000'),
+            right=Side(style='thin', color='000000'),
+            top=Side(style='thin', color='000000'),
+            bottom=Side(style='thin', color='000000')
+        )
+        
+        # Titre
+        ws.merge_cells('A1:H1')
+        title_cell = ws['A1']
+        title_cell.value = f"RAPPORT DE RECRUTEMENT - {poste}"
+        title_cell.font = title_font
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        title_cell.fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
+        ws.row_dimensions[1].height = 30
+        
+        # En-têtes du tableau (similaire au modèle)
+        headers = [
+            'Candidat',
+            'Adéquation expérience (0-3)',
+            'Cohérence parcours (0-2)',
+            'Exposition au risque de métier (0-3)',
+            'Qualité du CV (0-1)',
+            'Lettre motivation (0-1)',
+            'Score Total',
+            'Recommandation'
+        ]
+        
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=3, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        
+        # Données des candidats
+        for row_idx, c in enumerate(candidats_poste, 4):
+            sb = c.get('score_breakdown_parsed', {})
+            
+            # Mapping des scores selon le modèle
+            adequation = min(3, sb.get('bloc2_criteres_valides', 0))  # Sur 3
+            coherence = min(2, sb.get('bloc2_points', 0))  # Sur 2
+            risque_metier = min(3, sb.get('bloc3_signaux_detectes', 0))  # Sur 3
+            qualite_cv = 1 if int(c.get('score', 0)) >= 5 else 0  # Sur 1
+            lettre_motiv = 1 if c.get('lettre_filename') else 0  # Sur 1
+            
+            # Score total (somme)
+            score_total = adequation + coherence + risque_metier + qualite_cv + lettre_motiv
+            
+            # Recommandation basée sur le score
+            if int(c.get('score', 0)) >= 8:
+                recommandation = "Entretien prioritaire"
+            elif int(c.get('score', 0)) >= 6:
+                recommandation = "Entretien si besoin"
+            elif int(c.get('score', 0)) >= 4:
+                recommandation = "À revoir"
+            else:
+                recommandation = "Rejet"
+            
+            # Nom complet du candidat
+            nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip()
+            
+            row_data = [
+                nom_complet,
+                adequation,
+                coherence,
+                risque_metier,
+                qualite_cv,
+                lettre_motiv,
+                score_total,
+                recommandation
+            ]
+            
+            for col, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_idx, column=col, value=value)
+                cell.border = border
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                
+                # Colorer selon le score
+                if col == 7:  # Colonne Score Total
+                    if score_total >= 8:
+                        cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+                    elif score_total >= 6:
+                        cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+                    elif score_total >= 4:
+                        cell.fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+                    else:
+                        cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
+                    cell.font = Font(bold=True)
+                
+                # Colorer la recommandation
+                if col == 8:
+                    if recommandation == "Entretien prioritaire":
+                        cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+                    elif recommandation == "Entretien si besoin":
+                        cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
+                    elif recommandation == "Rejet":
+                        cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
+        
+        # Ajuster les largeurs de colonnes
+        column_widths = [25, 25, 25, 30, 20, 22, 15, 25]
+        for col, width in enumerate(column_widths, 1):
+            ws.column_dimensions[get_column_letter(col)].width = width
+        
+        # Hauteur des lignes
+        for row in range(3, ws.max_row + 1):
+            ws.row_dimensions[row].height = 20
+    
+    # Sauvegarder dans un buffer
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+
 def generate_csv_report(candidats_data):
-    """Génère un rapport CSV des candidats"""
+    """Génère un rapport CSV simple"""
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_ALL)
     
@@ -576,94 +718,8 @@ def generate_csv_report(candidats_data):
     return output.getvalue()
 
 
-def generate_excel_report(candidats_data):
-    """Génère un rapport Excel des candidats"""
-    if not OPENPYXL_AVAILABLE:
-        return None
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Candidats"
-    
-    # Styles
-    header_fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
-    header_font = Font(color="FFFFFF", bold=True)
-    border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
-    # En-têtes
-    headers = [
-        'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Date candidature',
-        'Score (/10)', 'Statut', 'Éliminatoire', 'Cohérence (pts)', 'Signaux (pts)', 'Note'
-    ]
-    ws.append(headers)
-    
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.border = border
-        cell.alignment = Alignment(horizontal='center')
-    
-    # Données
-    for c in candidats_data:
-        sb = c.get('score_breakdown_parsed', {})
-        row = [
-            c.get('nom', ''),
-            c.get('prenom', ''),
-            c.get('email', ''),
-            c.get('telephone', ''),
-            c.get('poste', ''),
-            c.get('date_candidature', ''),
-            int(c.get('score', 0)),
-            c.get('statut', ''),
-            'OUI' if sb.get('bloc1_eliminatoire') else 'NON',
-            sb.get('bloc2_points', 0),
-            sb.get('bloc3_points', 0),
-            sb.get('note', '')
-        ]
-        ws.append(row)
-        
-        # Colorer selon le score
-        score_cell = ws[f"G{ws.max_row}"]
-        score = int(c.get('score', 0))
-        if score >= 8:
-            score_cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
-        elif score >= 6:
-            score_cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-        elif score >= 4:
-            score_cell.fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
-        else:
-            score_cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
-        
-        for cell in ws[ws.max_row]:
-            cell.border = border
-    
-    # Ajuster les largeurs
-    for column in ws.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(cell.value)
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[column_letter].width = adjusted_width
-    
-    # Sauvegarder dans un buffer
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output
-
-
 def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF des candidats"""
+    """Génère un rapport PDF simple"""
     if not REPORTLAB_AVAILABLE:
         return None
     
@@ -672,15 +728,17 @@ def generate_pdf_report(candidats_data):
     elements = []
     styles = getSampleStyleSheet()
     
-    # Titre
+    # Style personnalisé pour le titre
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=24,
+        fontSize=20,
         textColor=colors.HexColor('#1a3a5c'),
         spaceAfter=30,
-        alignment=1  # Center
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
     )
+    
     elements.append(Paragraph("Rapport des Candidatures - RecrutBank", title_style))
     elements.append(Spacer(1, 0.5*cm))
     
@@ -690,18 +748,28 @@ def generate_pdf_report(candidats_data):
     elements.append(Spacer(1, 1*cm))
     
     # Tableau
-    data = [['Nom', 'Prénom', 'Poste', 'Score', 'Statut']]
+    data = [['Candidat', 'Poste', 'Score (/10)', 'Statut', 'Recommandation']]
     
     for c in candidats_data:
+        score = int(c.get('score', 0))
+        if score >= 8:
+            recommandation = "Entretien prioritaire"
+        elif score >= 6:
+            recommandation = "Entretien si besoin"
+        elif score >= 4:
+            recommandation = "À revoir"
+        else:
+            recommandation = "Rejet"
+        
         data.append([
-            c.get('nom', ''),
-            c.get('prenom', ''),
+            f"{c.get('prenom', '')} {c.get('nom', '')}",
             c.get('poste', ''),
-            f"{c.get('score', '0')}/10",
-            c.get('statut', '')
+            f"{score}/10",
+            c.get('statut', ''),
+            recommandation
         ])
     
-    table = Table(data, colWidths=[4*cm, 4*cm, 6*cm, 2*cm, 3*cm])
+    table = Table(data, colWidths=[5*cm, 5*cm, 2.5*cm, 3*cm, 4*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -969,7 +1037,7 @@ def trigger_analyze(token):
 def export_candidates(format):
     """
     Export des candidats en différents formats
-    Formats supportés: csv, excel, pdf
+    Formats supportés: csv, excel, xlsx, pdf
     """
     try:
         # Récupérer tous les candidats
@@ -984,16 +1052,18 @@ def export_candidates(format):
             result.append(c)
         result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
         
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         if format.lower() == 'csv':
             csv_data = generate_csv_report(result)
             return send_file(
                 io.BytesIO(csv_data.encode('utf-8-sig')),
                 mimetype='text/csv',
                 as_attachment=True,
-                download_name=f'candidats_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+                download_name=f'rapport_candidats_{timestamp}.csv'
             )
         
-        elif format.lower() == 'excel' or format.lower() == 'xlsx':
+        elif format.lower() in ['excel', 'xlsx']:
             if not OPENPYXL_AVAILABLE:
                 return jsonify({'error': 'Export Excel non disponible. Installez openpyxl.'}), 503
             excel_data = generate_excel_report(result)
@@ -1003,7 +1073,7 @@ def export_candidates(format):
                 excel_data,
                 mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 as_attachment=True,
-                download_name=f'candidats_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+                download_name=f'rapport_candidats_{timestamp}.xlsx'
             )
         
         elif format.lower() == 'pdf':
@@ -1016,7 +1086,7 @@ def export_candidates(format):
                 pdf_data,
                 mimetype='application/pdf',
                 as_attachment=True,
-                download_name=f'candidats_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf'
+                download_name=f'rapport_candidats_{timestamp}.pdf'
             )
         
         else:
@@ -1148,7 +1218,7 @@ if __name__ == '__main__':
     print(f"📋 Grille de présélection chargée: {len(GRILLE)} postes")
     print(f"🔍 Analyse auto: 3 blocs (éliminatoire / cohérence / signaux) — NOTATION SUR 10")
     print(f"📁 Upload multiple certificats supporté via attestation_filenames[]")
-    print(f"📄 Export rapports: CSV, Excel, PDF")
+    print(f"📄 Export rapports: CSV, Excel (similaire au modèle), PDF")
     if REPORTLAB_AVAILABLE:
         print(f"   ✅ reportlab installé (PDF)")
     if OPENPYXL_AVAILABLE:
