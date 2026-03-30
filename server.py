@@ -1,4 +1,5 @@
-# server.py - Backend Flask pour RecrutBank avec analyse automatique des CV
+# server.py - Backend Flask pour RecrutBank avec analyse automatique EXACTE des CV
+# Basé sur la grille Word : 3 blocs (Éliminatoire / Cohérence / Signaux)
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory
@@ -55,11 +56,11 @@ POSTES = [
     "IT Réseau & Infrastructure"
 ]
 
-# ── GRILLE DE PRÉSÉLECTION (logique du Word - 3 blocs) ─────────────────────────
-# Bloc 1: 🔴 Adéquation structurelle (filtre dur / éliminatoire)
-# Bloc 2: 🟠 Cohérence du parcours (détecte profils à risque / +1 pt)
-# Bloc 3: 🟡 Signaux de qualité (priorisation entretien / +2 pts)
-# + ⚠️ Points d'attention (alertes uniquement)
+# ── GRILLE DE PRÉSÉLECTION (3 blocs Word - vérification EXACTE) ───────────────
+# 🔴 Bloc 1: Adéquation structurelle (filtre dur) → Score = 0 si déclenché
+# 🟠 Bloc 2: Cohérence du parcours → +1 point par critère validé EXACTEMENT
+# 🟡 Bloc 3: Signaux de qualité → +2 points par signal détecté EXACTEMENT
+# ⚠️ Points d'attention → Alertes uniquement (pas d'impact score)
 
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -69,14 +70,14 @@ GRILLE = {
             "Aucune exposition aux garanties ou conformité"
         ],
         "a_verifier": [
-            "A-t-il déjà validé des dossiers de crédit ?",
+            "A-t-il déjà validé des dossiers ?",
             "A-t-il géré des garanties ?",
             "A-t-il participé à des audits ?"
         ],
         "signaux_forts": [
-            "Mention IFRS 9",
-            "Mention COBAC / conformité",
-            "Suivi portefeuille / impayés"
+            "Mention de : IFRS 9",
+            "Mention de : COBAC / conformité",
+            "Mention de : suivi portefeuille / impayés"
         ],
         "points_attention": [
             "Parcours trop « comptable pur »",
@@ -91,14 +92,15 @@ GRILLE = {
             "Incapacité à lire des états financiers"
         ],
         "a_verifier": [
-            "Type de clients : PME ? Particuliers ?",
-            "A-t-il structuré un crédit ?",
-            "A-t-il donné un avis de crédit ?"
+            "Type de clients : PME ?",
+            "Type de clients : particuliers ?",
+            "A-t-il déjà structuré un crédit ?",
+            "A-t-il déjà donné un avis ?"
         ],
         "signaux_forts": [
-            "Mention cash-flow analysis",
-            "Mention montage de crédit",
-            "Mention comités de crédit"
+            "Mention de : cash-flow analysis",
+            "Mention de : montage de crédit",
+            "Mention de : comités de crédit"
         ],
         "points_attention": [
             "CV trop « relation client »",
@@ -112,16 +114,16 @@ GRILLE = {
             "Absence de rigueur démontrée"
         ],
         "a_verifier": [
-            "Expérience avec archivage physique + électronique ?",
-            "Gestion de dossiers sensibles ?"
+            "Expérience avec : archivage physique + électronique",
+            "Expérience avec : gestion des dossiers sensibles"
         ],
         "signaux_forts": [
             "Expérience en banque / juridique",
             "Manipulation de garanties ou contrats"
         ],
         "points_attention": [
-            "Profil trop généraliste (assistant admin sans spécialisation)",
-            "CV désorganisé (ironie révélatrice)"
+            "Profils trop généralistes (assistants administratifs sans spécialisation)",
+            "CV désorganisé"
         ]
     },
     "Senior Finance Officer": {
@@ -167,7 +169,7 @@ GRILLE = {
             "Aucune expérience en administration système"
         ],
         "a_verifier": [
-            "Expérience avec environnements bancaires sécurisés ?",
+            "Expérience environnements bancaires sécurisés ?",
             "Gestion d'incidents en production ?"
         ],
         "signaux_forts": [
@@ -180,6 +182,101 @@ GRILLE = {
             "Manque d'expérience en environnement haute disponibilité"
         ]
     }
+}
+
+# ── MAPPING MOTS-CLÉS EXACTS (pour vérification stricte) ─────────────────────
+# Chaque critère a ses variantes EXACTES acceptées
+# Seul un match EXACT valide le critère
+
+KEYWORD_MAPPING = {
+    # === Responsable Administration de Crédit ===
+    "Pas d'expérience bancaire": ["expérience bancaire", "secteur bancaire", "établissement bancaire", "banque commerciale", "métier bancaire"],
+    "Moins de 3 ans en crédit / risque": ["3 ans crédit", "trois ans crédit", "3 années crédit", "expérience crédit", "gestion risque crédit", "3 ans risque"],
+    "Aucune exposition aux garanties ou conformité": ["garanties", "nantissement", "hypothèque", "sûreté", "conformité", "COBAC", "réglementation bancaire", "BCAC"],
+    
+    "A-t-il déjà validé des dossiers ?": ["validation dossier", "instruction crédit", "approbation crédit", "dossier crédit", "validation des dossiers"],
+    "A-t-il géré des garanties ?": ["gestion garanties", "suivi garanties", "garanties réelles", "sûretés", "portefeuille garanties"],
+    "A-t-il participé à des audits ?": ["audit", "contrôle interne", "inspection", "review", "compliance audit", "audit interne"],
+    
+    "Mention de : IFRS 9": ["IFRS 9", "IAS 39", "normes IFRS", "comptabilité IFRS", "IFRS"],
+    "Mention de : COBAC / conformité": ["COBAC", "conformité bancaire", "régulation bancaire", "BCEAO", "BCAC", "commission bancaire"],
+    "Mention de : suivi portefeuille / impayés": ["portefeuille crédit", "impayés", "recouvrement", "contentieux", "encours", "suivi portefeuille"],
+    
+    "Parcours trop « comptable pur »": ["comptable", "comptabilité", "expert comptable"],
+    "Rôle uniquement administratif sans responsabilité": ["administratif", "secrétariat", "assistant sans responsabilité"],
+    "CV flou (missions génériques)": ["missions génériques", "diverses missions", "tâches variées"],
+    
+    # === Analyste Crédit CCB ===
+    "Pas d'expérience en analyse crédit": ["analyse crédit", "credit analysis", "évaluation crédit", "scoring crédit", "analyse financière crédit"],
+    "Profil purement commercial sans analyse": ["commercial", "vente", "business development", "chargé d'affaires commercial"],
+    "Incapacité à lire des états financiers": ["états financiers", "bilan", "compte de résultat", "ratios financiers", "analyse financière"],
+    
+    "Type de clients : PME ?": ["PME", "petites entreprises", "moyennes entreprises", "TPE", "entreprises"],
+    "Type de clients : particuliers ?": ["particuliers", "clients particuliers", "retail", "clientèle particulière"],
+    "A-t-il déjà structuré un crédit ?": ["structuration crédit", "montage crédit", "dossier de crédit", "structurer un crédit"],
+    "A-t-il déjà donné un avis ?": ["avis crédit", "recommandation crédit", "opinion crédit", "credit opinion", "avis de crédit"],
+    
+    "Mention de : cash-flow analysis": ["cash-flow", "cash flow", "flux de trésorerie", "FCF", "free cash flow", "cash-flow analysis"],
+    "Mention de : montage de crédit": ["montage crédit", "structuration", "dossier de crédit", "montage de dossiers"],
+    "Mention de : comités de crédit": ["comité crédit", "commission crédit", "credit committee", "validation comité", "comité des engagements"],
+    
+    "CV trop « relation client »": ["relation client", "accueil client", "service client", "customer service"],
+    "Aucune notion de risque": ["risque", "risk", "gestion des risques"],  # Négatif: absence = alerte
+    "Expériences très courtes sans progression": ["CDD", "contrat court", "expérience courte", "moins d'un an"],
+    
+    # === Archiviste (Administration Crédit) ===
+    "Aucune expérience en gestion documentaire structurée": ["gestion documentaire", "archivage", "GED", "records management", "classement", "documentation"],
+    "Absence de rigueur démontrée": ["rigueur", "méthode", "organisation", "procédures", "processus", "traçabilité"],
+    
+    "Expérience avec : archivage physique + électronique": ["archivage physique", "archivage électronique", "dématérialisation", "numérisation", "archives"],
+    "Expérience avec : gestion des dossiers sensibles": ["dossiers sensibles", "confidentiel", "sécurisé", "accès restreint", "données sensibles"],
+    
+    "Expérience en banque / juridique": ["banque", "établissement financier", "juridique", "droit bancaire", "secteur bancaire"],
+    "Manipulation de garanties ou contrats": ["garanties", "contrats", "conventions", "actes juridiques", "documentation juridique"],
+    
+    "Profils trop généralistes (assistants administratifs sans spécialisation)": ["assistant administratif", "secrétaire", "généraliste", "polyvalent"],
+    "CV désorganisé": ["désorganisé", "non structuré", "confus"],
+    
+    # === Senior Finance Officer ===
+    "Pas d'expérience en finance senior": ["finance senior", "finance manager", "contrôle de gestion", "reporting financier", "direction financière"],
+    "Aucune maîtrise des outils de reporting financier": ["reporting", "tableaux de bord", "KPI", "indicateurs", "Power BI", "Excel avancé"],
+    
+    "Maîtrise des normes IFRS ?": ["IFRS", "normes internationales", "comptabilité internationale", "IAS", "IFRS consolidation"],
+    "Expérience en pilotage budgétaire ?": ["pilotage budgétaire", "budget", "forecast", "prévisions", "contrôle budgétaire", "budget forecasting"],
+    
+    "Expérience en consolidation financière": ["consolidation", "comptes consolidés", "groupe", "IFRS consolidation", "consolidation financière"],
+    "Maîtrise Excel avancé / Power BI": ["Excel avancé", "Power BI", "VBA", "macros", "pivot", "DAX", "Power Query"],
+    
+    "Profil trop opérationnel sans vision stratégique": ["opérationnel", "exécution", "tâches", "sans vision"],
+    "Manque d'expérience en environnement bancaire": ["banque", "établissement financier", "secteur bancaire"],
+    
+    # === Market Risk Officer ===
+    "Pas d'expérience en gestion des risques de marché": ["risque marché", "market risk", "VaR", "trading", "salle des marchés", "risques de marché"],
+    "Aucune connaissance des produits financiers": ["produits financiers", "dérivés", "obligations", "actions", "forex", "instruments financiers"],
+    
+    "Maîtrise des modèles VaR / stress testing ?": ["VaR", "Value at Risk", "stress testing", "back-testing", "scénarios", "value at risk"],
+    "Expérience en back-testing ?": ["back-testing", "backtesting", "validation modèle", "test historique", "back test"],
+    
+    "Mention Basel III / IV": ["Basel III", "Basel IV", "Bâle 3", "Bâle 4", "accords de Bâle", "réglementation Bâle"],
+    "Expérience en salle des marchés": ["salle des marchés", "trading", "front office", "markets", "trading floor"],
+    "Maîtrise Python / R pour modélisation": ["Python", "R", "modélisation", "quantitative", "pandas", "numpy", "scikit-learn"],
+    
+    "Profil purement académique sans expérience terrain": ["académique", "université", "recherche", "thèse", "sans expérience"],
+    "Expérience uniquement en risque crédit": ["risque crédit", "credit risk", "sans risque marché"],
+    
+    # === IT Réseau & Infrastructure ===
+    "Pas de certification réseau (Cisco, CompTIA…)": ["CCNA", "CCNP", "CCIE", "Cisco", "CompTIA", "Network+", "Juniper", "certification réseau"],
+    "Aucune expérience en administration système": ["administration système", "sysadmin", "Windows Server", "Linux", "Active Directory", "système"],
+    
+    "Expérience environnements bancaires sécurisés ?": ["banque", "secteur financier", "PCI-DSS", "sécurité bancaire", "environnement sécurisé", "financier"],
+    "Gestion d'incidents en production ?": ["incident", "production", "P1", "P2", "support", "ITIL", "résolution", "incident management"],
+    
+    "Certification CCNA / CCNP": ["CCNA", "CCNP", "Cisco Certified", "CCIE"],
+    "Expérience en cybersécurité": ["cybersécurité", "security", "firewall", "IDS", "IPS", "SIEM", "pentest", "sécurité"],
+    "Maîtrise virtualisation (VMware, Hyper-V)": ["VMware", "Hyper-V", "virtualisation", "vSphere", "ESXi", "Nutanix", "hyperviseur"],
+    
+    "Profil trop orienté développement": ["développement", "developer", "code", "programmation", "software"],
+    "Manque d'expérience en environnement haute disponibilité": ["haute disponibilité", "HA", "cluster", "failover", "disponibilité", "SLA"]
 }
 
 # ── HELPERS AUTH ───────────────────────────────────────────────────────────────
@@ -253,94 +350,36 @@ def normalize_text(text):
     return text
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE CV CONTRE GRILLE (3 blocs Word)
+# 🧠 MOTEUR D'ANALYSE CV — VÉRIFICATION EXACTE (3 blocs Word)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def extract_keywords_from_criterion(criterion):
+def check_criterion_match(criterion, full_text):
     """
-    Extrait des mots-clés pertinents d'un critère pour la recherche.
-    Mapping enrichi basé sur la grille Word (termes bancaires, IT, finance).
+    Vérifie EXACTEMENT si un critère est validé.
+    Retourne: (is_validated, matched_keywords)
     """
-    keyword_map = {
-        # === Finance / Comptabilité / Régulation ===
-        'ifrs 9': ['ifrs 9', 'ifrs9', 'norme ifrs', 'ias 39', 'normes comptables internationales', 'ifrs'],
-        'cobac': ['cobac', 'régulation bancaire', 'conformité bancaire', 'bcac', 'commission bancaire', 'bceao'],
-        'conformité': ['conformité', 'compliance', 'aml', 'kyc', 'lutte blanchiment', 'anti-blanchiment'],
-        'reporting': ['reporting', 'tableaux de bord', 'indicateurs', 'kpi', 'pilotage'],
-        'consolidation': ['consolidation', 'comptes consolidés', 'groupe', 'ifrs consolidation'],
-        
-        # === Crédit / Risque ===
-        'cash-flow': ['cash flow', 'cashflow', 'flux de trésorerie', 'cash-flow analysis', 'flux trésorerie', 'fcf'],
-        'montage de crédit': ['montage crédit', 'structuration crédit', 'dossier crédit', 'octroi crédit', 'analyse crédit', 'instruction crédit'],
-        'comités de crédit': ['comité crédit', 'commission crédit', 'validation crédit', 'approbation crédit', 'credit committee', 'comité des engagements'],
-        'garanties': ['garantie', 'nantissement', 'hypothèque', 'sûreté', 'collatéral', 'caution', 'gage', 'sûretés'],
-        'portefeuille': ['portefeuille', 'encours', 'impayés', 'recouvrement', 'contentieux', 'provision', 'dépréciation'],
-        'risque': ['risque crédit', 'risque marché', 'risque opérationnel', 'risk management', 'gestion risques', 'credit risk'],
-        'états financiers': ['états financiers', 'bilan', 'compte de résultat', 'cash flow', 'ratios financiers', 'solvabilité', 'liquidité'],
-        'analyse financière': ['analyse financière', 'ratios', 'diagnostic financier', 'scoring', 'cotation'],
-        
-        # === Risk Management avancé ===
-        'var': ['var', 'value at risk', 'valeur à risque', 'stress testing', 'back-testing', 'monte carlo', 'simulation'],
-        'basel': ['basel iii', 'basel iv', 'bâle 3', 'bâle 4', 'accords de bâle', 'ratio bâle', 'pillar 1', 'pillar 2', 'pillar 3'],
-        'stress testing': ['stress test', 'scénarios', 'crise', 'résilience', 'sensibilité'],
-        
-        # === IT / Infrastructure / Cybersécurité ===
-        'ccna': ['ccna', 'ccnp', 'ccie', 'cisco', 'certification réseau', 'comptia', 'network+', 'juniper', 'fortinet'],
-        'vmware': ['vmware', 'hyper-v', 'virtualisation', 'vsphere', 'vcenter', 'hyperviseur', 'esxi', 'nutanix'],
-        'cybersécurité': ['cybersécurité', 'security', 'pentest', 'iso 27001', 'firewall', 'ids', 'ips', 'soc', 'siem'],
-        'python': ['python', 'r language', 'modélisation', 'data science', 'scripting', 'pandas', 'numpy', 'scikit'],
-        'power bi': ['power bi', 'tableau software', 'qlik', 'reporting avancé', 'bi tools', 'dashboard', 'visualisation'],
-        'infrastructure': ['infrastructure', 'datacenter', 'haute disponibilité', 'cluster', 'load balancing', 'failover'],
-        
-        # === Archivage / Gestion documentaire ===
-        'archivage': ['archivage', 'ged', 'gestion documentaire', 'classement', 'records management', 'dms', 'dématérialisation'],
-        'audit': ['audit', 'contrôle interne', 'inspection', 'compliance', 'conformité', 'sox', 'audit interne'],
-        'rigueur': ['rigueur', 'méthode', 'organisation', 'procédures', 'processus', 'traçabilité'],
-        
-        # === Management / Leadership ===
-        'pilotage': ['pilotage', 'management', 'encadrement', 'équipe', 'responsable', 'chef de', 'coordination'],
-        'stratégie': ['stratégie', 'vision', 'planification', 'roadmap', 'feuille de route', 'orientations'],
-        'expérience bancaire': ['banque', 'établissement financier', 'institution financière', 'secteur bancaire'],
-        'expérience senior': ['senior', 'confirmé', 'expert', 'lead', 'principal', 'chef', 'responsable'],
-    }
+    mots_cles = KEYWORD_MAPPING.get(criterion, [])
+    if not mots_cles:
+        return False, []
     
-    crit_lower = criterion.lower()
-    keywords = []
+    # 🔍 Recherche EXACTE : au moins UNE variante doit être trouvée TELLE QUELLE
+    found_keywords = [kw for kw in mots_cles if kw.lower() in full_text]
+    is_present = len(found_keywords) > 0
     
-    # Ajoute les mots individuels significatifs (>3 lettres, hors stopwords)
-    stopwords = {'dans', 'des', 'aux', 'une', 'un', 'sur', 'pour', 'avec', 'sans', 'déjà', 'été', 'avoir', 
-                 'le', 'la', 'les', 'de', 'du', 'par', 'et', 'ou', 'à', 'en', 'il', 'elle', 'on', 'ce', 'cet'}
-    words = re.findall(r'\b[a-zà-ÿ\-]{4,}\b', crit_lower)
-    keywords.extend([w for w in words if w not in stopwords])
-    
-    # Ajoute les mappings spécifiques si le critère correspond (recherche substring)
-    for key, mappings in keyword_map.items():
-        if key in crit_lower:
-            keywords.extend(mappings)
-    
-    return list(set(keywords))
+    return is_present, found_keywords
 
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
     """
-    Analyse automatique du CV + lettre + attestation contre la grille de présélection Word.
+    Analyse STRICTE selon grille Word (3 blocs).
+    Un critère n'est validé QUE si ses mots-clés EXACTS sont trouvés.
+    Pas de fuzzy matching, pas d'approximation.
     
-    3 BLOCS DE NOTATION :
-    🔴 Bloc 1 - Adéquation structurelle (filtre dur) : éliminatoire immédiat si déclenché → Score = 0
-    🟠 Bloc 2 - Cohérence du parcours : +1 point par critère validé
-    🟡 Bloc 3 - Signaux de qualité : +2 points par signal détecté (priorisation entretien)
-    ⚠️ Points d'attention : alertes pour le recruteur (pas d'impact sur le score)
-    
-    Retourne: {
-        'score': int (0-5),
-        'checklist': dict,
-        'flags_eliminatoires': list,
-        'signaux_detectes': list,
-        'details': dict,
-        'score_breakdown': dict  # Transparence du calcul
-    }
+    🔴 Bloc 1: Éliminatoire → Score = 0 si déclenché
+    🟠 Bloc 2: Cohérence → +1 point par critère validé
+    🟡 Bloc 3: Signaux → +2 points par signal détecté
+    ⚠️ Points d'attention → Alertes uniquement
     """
-    # ── Validation entrée ─────────────────────────────────────────────
     if not cv_text or len(cv_text.strip()) < 50:
         return {
             'score': 0,
@@ -348,7 +387,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
             'flags_eliminatoires': ['CV non analysable (trop court ou vide)'],
             'signaux_detectes': [],
             'details': {'error': 'CV vide ou non parsé', 'cv_length': len(cv_text) if cv_text else 0},
-            'score_breakdown': {'bloc1_elim': True, 'bloc2_pts': 0, 'bloc3_pts': 0, 'total_raw': 0}
+            'score_breakdown': {'bloc1_eliminatoire': True, 'bloc2_pts': 0, 'bloc3_pts': 0, 'total_raw': 0}
         }
     
     grille = GRILLE.get(poste)
@@ -362,104 +401,99 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
             'score_breakdown': {}
         }
     
-    # ── Préparation des textes ────────────────────────────────────────
+    # Texte complet normalisé (minuscules, sans ponctuation excessive)
     full_text = normalize_text(cv_text + " " + (lettre_text or "") + " " + (attestation_text or ""))
     
-    # ── Initialisation des résultats ──────────────────────────────────
     checklist = {}
-    flags_elim = []           # 🔴 Éliminatoires déclenchés
-    signaux = []              # 🟡 Signaux forts détectés
-    points_bloc2 = 0          # 🟠 Cohérence : +1 pt / critère
-    points_bloc3 = 0          # 🟡 Signaux : +2 pts / signal
+    flags_elim = []
+    signaux = []
+    points_bloc2 = 0
+    points_bloc3 = 0
     details = {
         'cv_words': len(cv_text.split()) if cv_text else 0,
         'lettre_words': len(lettre_text.split()) if lettre_text else 0,
         'attestation_words': len(attestation_text.split()) if attestation_text else 0,
-        'keywords_found': [],
-        'criteres_valides_bloc2': [],  # 🟠 Validés
-        'signaux_valides_bloc3': [],   # 🟡 Validés
-        'alertes_attention': []         # ⚠️ Points d'attention
+        'criteres_valides_bloc2': [],
+        'signaux_valides_bloc3': [],
+        'alertes_attention': [],
+        'matching_details': {}  # 🔍 Debug: quel critère a matché quoi
     }
     
     # ═══════════════════════════════════════════════════════════════
-    # 🔴 BLOC 1 : ADEQUATION STRUCTURELLE (Filtre dur - Éliminatoire)
+    # 🔴 BLOC 1 : ÉLIMINATOIRE (filtre dur — Score = 0 si déclenché)
     # ═══════════════════════════════════════════════════════════════
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
-        mots_cles = extract_keywords_from_criterion(crit)
-        
-        # Recherche des mots-clés dans le texte complet
-        present = any(mot in full_text for mot in mots_cles if len(mot) > 3)
+        is_present, found_keywords = check_criterion_match(crit, full_text)
         
         # Les critères éliminatoires sont formulés NÉGATIVEMENT
-        # Ex: "Pas d'expérience bancaire" → éliminatoire si l'expérience est ABSENTE
-        is_negative_criterion = any(neg in crit.lower() for neg in ['pas d', 'aucun', 'sans ', 'incapacité', 'absence', 'manque de'])
+        # Ex: "Pas d'expérience bancaire" → ÉLIMINATOIRE si l'expérience est ABSENTE
+        is_negative = any(neg in crit.lower() for neg in ['pas d', 'aucun', 'sans ', 'incapacité', 'absence', 'manque de'])
         
-        if is_negative_criterion:
+        if is_negative:
             # Critère négatif : "Pas d'expérience X"
-            if not present:
+            if not is_present:
                 # L'expérience X n'est PAS trouvée → critère éliminatoire DÉCLENCHE
                 flags_elim.append(crit)
-                checklist[key] = False  # Non validé (éliminatoire)
+                checklist[key] = False
                 details['alertes_attention'].append(f"🔴 Éliminatoire: {crit}")
+                details['matching_details'][crit] = {'found': False, 'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:3]}
             else:
                 # L'expérience X est trouvée → bon signe, critère non déclenché
                 checklist[key] = True
-                details['criteres_valides_bloc2'].append(f"✅ {crit} (non déclenché)")
+                details['matching_details'][crit] = {'found': True, 'matched': found_keywords}
         else:
-            # Critère positif standard (rare dans les éliminatoires)
-            checklist[key] = present
-            if not present:
+            # Critère positif standard
+            checklist[key] = is_present
+            if not is_present:
                 flags_elim.append(crit)
                 details['alertes_attention'].append(f"🔴 Éliminatoire: {crit}")
-        
-        # Enrichir les keywords trouvés pour le debug
-        if present:
-            details['keywords_found'].extend([m for m in mots_cles if m in full_text])
+            details['matching_details'][crit] = {'found': is_present, 'matched': found_keywords if is_present else None}
     
     # ═══════════════════════════════════════════════════════════════
-    # 🟠 BLOC 2 : COHÉRENCE DU PARCOURS (+1 point par critère validé)
+    # 🟠 BLOC 2 : COHÉRENCE DU PARCOURS (+1 point par critère VALIDÉ EXACTEMENT)
     # ═══════════════════════════════════════════════════════════════
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
-        mots_cles = extract_keywords_from_criterion(crit)
-        present = any(mot in full_text for mot in mots_cles if len(mot) > 3)
-        checklist[key] = present
+        is_present, found_keywords = check_criterion_match(crit, full_text)
         
-        if present:
+        checklist[key] = is_present
+        details['matching_details'][crit] = {'found': is_present, 'matched': found_keywords if is_present else None}
+        
+        if is_present:
             points_bloc2 += 1  # +1 point pour cohérence
             details['criteres_valides_bloc2'].append(f"🟠 {crit}")
-            details['keywords_found'].extend([m for m in mots_cles if m in full_text])
     
     # ═══════════════════════════════════════════════════════════════
-    # 🟡 BLOC 3 : SIGNAUX DE QUALITÉ (+2 points par signal détecté)
+    # 🟡 BLOC 3 : SIGNAUX DE QUALITÉ (+2 points par signal DÉTECTÉ EXACTEMENT)
     # ═══════════════════════════════════════════════════════════════
     for i, crit in enumerate(grille['signaux_forts']):
         key = f"signal_{i}"
-        mots_cles = extract_keywords_from_criterion(crit)
-        present = any(mot in full_text for mot in mots_cles if len(mot) > 3)
-        checklist[key] = present
+        is_present, found_keywords = check_criterion_match(crit, full_text)
         
-        if present:
+        checklist[key] = is_present
+        details['matching_details'][crit] = {'found': is_present, 'matched': found_keywords if is_present else None}
+        
+        if is_present:
             points_bloc3 += 2  # +2 points pour signal fort (pondération élevée)
             signaux.append(crit)
             details['signaux_valides_bloc3'].append(f"🟡 {crit}")
-            details['keywords_found'].extend([m for m in mots_cles if m in full_text])
     
     # ═══════════════════════════════════════════════════════════════
-    # ⚠️ POINTS D'ATTENTION (Alertes uniquement - pas d'impact score)
+    # ⚠️ POINTS D'ATTENTION (Alertes uniquement — pas d'impact score)
     # ═══════════════════════════════════════════════════════════════
     for i, crit in enumerate(grille['points_attention']):
         key = f"attn_{i}"
-        mots_cles = extract_keywords_from_criterion(crit)
-        present = any(mot in full_text for mot in mots_cles if len(mot) > 3)
-        checklist[key] = present
+        is_present, found_keywords = check_criterion_match(crit, full_text)
         
-        if present:
+        checklist[key] = is_present
+        details['matching_details'][crit] = {'found': is_present, 'matched': found_keywords if is_present else None}
+        
+        if is_present:
             details['alertes_attention'].append(f"⚠️ {crit}")
     
     # ═══════════════════════════════════════════════════════════════
-    # 🧮 CALCUL DU SCORE FINAL (0-5 étoiles)
+    # 🧮 CALCUL DU SCORE FINAL (0-5 étoiles) — STRICT
     # ═══════════════════════════════════════════════════════════════
     if flags_elim:
         # 🔴 Éliminatoire déclenché = Score 0 immédiat, non négociable
@@ -468,14 +502,9 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
     else:
         # Calcul basé sur Bloc 2 + Bloc 3
         total_raw = points_bloc2 + points_bloc3
-        
-        # Normalisation vers échelle 0-5 :
-        # - Max théorique: ~3 critères bloc2 (3pts) + 3 signaux bloc3 (6pts) = 9pts
-        # - Seuil: 2.5 pts ≈ 1 étoile, 5 pts ≈ 2 étoiles, etc.
+        # Normalisation : ~10-12 points max → échelle 0-5
+        # Seuil: 2.5 pts ≈ 1 étoile, 5 pts ≈ 2 étoiles, etc.
         score_final = min(5, max(0, round(total_raw / 2.5)))
-    
-    # Nettoyage des keywords en doublon
-    details['keywords_found'] = list(set(details['keywords_found']))
     
     # Breakdown transparent pour le frontend/recruteur
     score_breakdown = {
@@ -496,7 +525,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         'flags_eliminatoires': flags_elim,
         'signaux_detectes': signaux,
         'details': details,
-        'score_breakdown': score_breakdown  # ✅ Pour transparence et debug
+        'score_breakdown': score_breakdown
     }
 
 
@@ -518,7 +547,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         lettre_text = extract_text_from_file(lettre_path, lettre_filename) if lettre_path else ""
         attestation_text = extract_text_from_file(attestation_path, attestation_filename) if attestation_path else ""
         
-        # 🧠 Analyse automatique contre la grille
+        # 🧠 Analyse automatique EXACTE contre la grille Word
         result = analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste)
         
         # 💾 Sauvegarde des résultats dans Redis (accessible au recruteur)
@@ -528,7 +557,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False),
             "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False),
             "analyse_details": json.dumps(result['details'], ensure_ascii=False),
-            "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),  # ✅ Nouveau
+            "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),
             "analyse_auto_date": datetime.datetime.now().isoformat(),
             "analyse_status": "completed"
         })
@@ -556,7 +585,7 @@ def get_postes():
 
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
-    """Retourne la grille de présélection pour un poste donné (pour affichage/audit)"""
+    """Retourne la grille de présélection pour un poste donné"""
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
@@ -585,7 +614,7 @@ def login():
 def postuler():
     """
     Soumission de candidature par un candidat.
-    → Analyse automatique lancée en arrière-plan IMMÉDIATEMENT après upload.
+    → Analyse automatique EXACTE lancée en arrière-plan IMMÉDIATEMENT.
     → Le recruteur ne voit que les résultats finaux (score, signaux, alertes).
     """
     try:
@@ -595,17 +624,16 @@ def postuler():
         telephone= (request.form.get('telephone') or '').strip()
         poste    = (request.form.get('poste') or '').strip()
 
-        # Validation champs obligatoires
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
-        # Vérifier email unique (pas de doublon)
+        # Vérifier email unique
         for k in redis_client.keys("candidat:*"):
             existing = redis_client.hgetall(k)
             if existing.get('email', '').lower() == email:
                 return jsonify({'error': 'Un candidat avec cet email existe déjà'}), 409
 
-        # Sauvegarde sécurisée des fichiers uploadés
+        # Sauvegarde des fichiers
         cv_filename = ''
         lettre_filename = ''
         attestation_filename = ''
@@ -631,7 +659,6 @@ def postuler():
                 attestation_filename = f"{uuid.uuid4().hex}_attestation.{ext}"
                 attestation.save(os.path.join(UPLOAD_FOLDER, attestation_filename))
 
-        # Création de l'entrée candidat dans Redis
         token = uuid.uuid4().hex
         redis_client.hset(f"candidat:{token}", mapping={
             "nom":                    nom,
@@ -644,21 +671,20 @@ def postuler():
             "attestation_filename":   attestation_filename,
             "statut":                 "en_attente",
             "note":                   "",
-            "score":                  "0",  # Sera mis à jour par l'analyse auto
+            "score":                  "0",
             "checklist":              "",
             "flags_eliminatoires":    "",
             "signaux_detectes":       "",
-            "score_breakdown":        "",  # ✅ Nouveau champ
+            "score_breakdown":        "",
             "analyse_status":         "pending",
             "date_candidature":       datetime.datetime.now().isoformat()
         })
 
-        # 🚀 LANCEMENT ANALYSE AUTO EN ARRIÈRE-PLAN (thread daemon)
-        # → Aucune attente pour le candidat, analyse asynchrone
+        # 🚀 LANCEMENT ANALYSE AUTO EN ARRIÈRE-PLAN
         threading.Thread(
             target=run_analysis_for_candidat,
             args=(token, cv_filename, lettre_filename, attestation_filename, poste),
-            daemon=True  # Thread s'arrête si le serveur s'arrête
+            daemon=True
         ).start()
 
         return jsonify({
@@ -673,11 +699,10 @@ def postuler():
 
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
-    """Consultation du statut par le candidat (données publiques uniquement)"""
+    """Consultation du statut par le candidat"""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidature introuvable'}), 404
-    # On ne renvoie PAS les données sensibles (noms de fichiers, checklist interne)
     public = {k: v for k, v in data.items() if k not in (
         'cv_filename', 'lettre_filename', 'attestation_filename', 
         'checklist', 'flags_eliminatoires', 'signaux_detectes', 
@@ -716,14 +741,11 @@ def get_stats():
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
-    """
-    Liste des candidats avec filtres.
-    Inclut le score et le breakdown pour décision éclairée.
-    """
+    """Liste des candidats avec filtres"""
     poste_filter  = request.args.get('poste', '')
     statut_filter = request.args.get('statut', '')
     search        = request.args.get('search', '').lower()
-    min_score     = request.args.get('min_score', type=int)  # Filtre par score minimum
+    min_score     = request.args.get('min_score', type=int)
 
     keys = redis_client.keys("candidat:*")
     result = []
@@ -731,7 +753,6 @@ def list_candidats():
         c = redis_client.hgetall(k)
         c['id'] = k.split(':', 1)[1]
 
-        # Filtres
         if poste_filter and c.get('poste') != poste_filter:
             continue
         if statut_filter and c.get('statut') != statut_filter:
@@ -750,10 +771,7 @@ def list_candidats():
         
         result.append(c)
 
-    # Tri : score décroissant, puis date récente
-    result.sort(key=lambda x: (-int(x.get('score', 0)), x.get('date_candidature', '')), reverse=False)
-    result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)  # Priorité date
-    
+    result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
 
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
@@ -776,7 +794,7 @@ def get_candidat_detail(token):
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
-    """Mise à jour du statut par le recruteur (retenu/entretien/rejeté)"""
+    """Mise à jour du statut par le recruteur"""
     key = f"candidat:{token}"
     if not redis_client.exists(key):
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -784,7 +802,7 @@ def update_candidat(token):
     data = request.json or {}
     statut    = data.get('statut', 'en_attente')
     note      = data.get('note', '')
-    score     = str(min(5, max(0, int(data.get('score', 0)))))  # Clamp score
+    score     = str(min(5, max(0, int(data.get('score', 0)))))
     checklist = data.get('checklist', '')
 
     if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
@@ -803,7 +821,7 @@ def update_candidat(token):
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
-    """Re-déclenche l'analyse automatique (si fichiers mis à jour ou bug)"""
+    """Re-déclenche l'analyse automatique"""
     key = f"candidat:{token}"
     data = redis_client.hgetall(key)
     
@@ -818,13 +836,11 @@ def trigger_analyze(token):
     if not cv_filename:
         return jsonify({'error': 'CV manquant pour analyse'}), 400
     
-    # Mise à jour statut analyse
     redis_client.hset(key, mapping={
         "analyse_status": "pending",
         "analyse_manual_trigger": datetime.datetime.now().isoformat()
     })
     
-    # Lancement async
     threading.Thread(
         target=run_analysis_for_candidat,
         args=(token, cv_filename, lettre_filename, attestation_filename, poste),
@@ -840,7 +856,7 @@ def trigger_analyze(token):
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
-    """Génération d'email type selon le statut (côté serveur pour cohérence)"""
+    """Génération d'email type selon le statut"""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -878,7 +894,7 @@ Cordialement,
 L'équipe Ressources Humaines
 RecrutBank"""
 
-    else:  # rejete
+    else:
         sujet = f"Réponse à votre candidature – Poste {poste}"
         corps = f"""Madame, Monsieur {nom_complet},
 
@@ -902,7 +918,7 @@ RecrutBank"""
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 @jwt_required()
 def serve_upload(filename):
-    """Servir les fichiers uploadés (CV, lettres, attestations) — accès recruteur uniquement"""
+    """Servir les fichiers uploadés — accès recruteur uniquement"""
     safe = secure_filename(filename)
     filepath = os.path.join(UPLOAD_FOLDER, safe)
     if not os.path.exists(filepath):
@@ -915,10 +931,7 @@ def serve_upload(filename):
 
 @app.route('/api/test/analyze', methods=['POST'])
 def test_analyze():
-    """
-    Endpoint de test pour valider l'analyse sans upload.
-    Usage: curl -X POST ... -d '{"poste":"...", "cv_text":"..."}'
-    """
+    """Endpoint de test pour valider l'analyse sans upload"""
     data = request.json or {}
     poste = data.get('poste', 'Analyste Crédit CCB')
     cv_text = data.get('cv_text', '')
@@ -929,6 +942,23 @@ def test_analyze():
     
     return jsonify(result), 200
 
+@app.route('/api/test/matching', methods=['POST'])
+def test_matching():
+    """Test de matching EXACT pour debug"""
+    data = request.json or {}
+    texte = data.get('texte', '').lower()
+    critere = data.get('critere', '')
+    
+    mots_cles = KEYWORD_MAPPING.get(critere, [])
+    found = [kw for kw in mots_cles if kw.lower() in texte]
+    
+    return jsonify({
+        'critere': critere,
+        'keywords_searched': mots_cles,
+        'found': found,
+        'is_validated': len(found) > 0
+    }), 200
+
 # ══════════════════════════════════════════════════════════════════════════════
 # DÉMARRAGE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -937,5 +967,5 @@ if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     print(f"🚀 Serveur RecrutBank démarré sur le port {port}")
     print(f"📋 Grille de présélection chargée: {len(GRILLE)} postes")
-    print(f"🔍 Analyse auto: 3 blocs (éliminatoire / cohérence / signaux)")
+    print(f"🔍 Analyse auto: 3 blocs (éliminatoire / cohérence / signaux) — VÉRIFICATION EXACTE")
     app.run(host="0.0.0.0", port=port, debug=False)
