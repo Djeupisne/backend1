@@ -290,8 +290,8 @@ def init_recruteur():
         if not redis_client.exists("recruteur:1"):
             redis_client.hset("recruteur:1", mapping={
                 "id": "1",
-                "email": "recruteur@banque.com",
-                "password": hash_pwd("admin123"),
+                "email": "sougnabeoualoumibank@gmail.com",
+                "password": hash_pwd("AdminLaurent123"),
                 "nom": "Responsable RH"
             })
             print("✅ Compte recruteur créé dans Redis.")
