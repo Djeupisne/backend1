@@ -1,5 +1,6 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique EXACTE des CV
 # Basé sur la grille Word : 3 blocs (Éliminatoire / Cohérence / Signaux)
+# Support upload multiple de certificats analysés ensemble
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory
@@ -402,6 +403,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         }
     
     # Texte complet normalisé (minuscules, sans ponctuation excessive)
+    # Concaténation CV + Lettre + TOUS les certificats
     full_text = normalize_text(cv_text + " " + (lettre_text or "") + " " + (attestation_text or ""))
     
     checklist = {}
@@ -519,21 +521,44 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
     }
 
 
-def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filename, poste):
-    """Fonction exécutée en arrière-plan pour analyser les documents d'un candidat."""
+def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
+    """
+    Fonction exécutée en arrière-plan pour analyser les documents d'un candidat.
+    attestation_filenames peut être une liste de fichiers ou une chaîne vide.
+    """
     try:
         key = f"candidat:{token}"
         
+        # Gestion attestation_filenames (liste ou chaîne)
+        if isinstance(attestation_filenames, str):
+            try:
+                attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
+            except:
+                attestation_filenames = [attestation_filenames] if attestation_filenames else []
+        
+        # Extraction CV
         cv_path = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
-        lettre_path = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
-        attestation_path = os.path.join(UPLOAD_FOLDER, attestation_filename) if attestation_filename else None
-        
         cv_text = extract_text_from_file(cv_path, cv_filename) if cv_path else ""
-        lettre_text = extract_text_from_file(lettre_path, lettre_filename) if lettre_path else ""
-        attestation_text = extract_text_from_file(attestation_path, attestation_filename) if attestation_path else ""
         
+        # Extraction Lettre
+        lettre_path = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
+        lettre_text = extract_text_from_file(lettre_path, lettre_filename) if lettre_path else ""
+        
+        # Extraction TOUS les certificats (concaténation pour analyse globale)
+        attestation_texts = []
+        if attestation_filenames:
+            for att_filename in attestation_filenames:
+                att_path = os.path.join(UPLOAD_FOLDER, att_filename)
+                if os.path.exists(att_path):
+                    att_text = extract_text_from_file(att_path, att_filename)
+                    if att_text:
+                        attestation_texts.append(att_text)
+        attestation_text = " ".join(attestation_texts)  # Concaténation pour analyse
+        
+        # 🧠 Analyse automatique EXACTE avec TOUS les textes
         result = analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste)
         
+        # 💾 Sauvegarde des résultats dans Redis
         redis_client.hset(key, mapping={
             "score": str(result['score']),
             "checklist": json.dumps(result['checklist'], ensure_ascii=False),
@@ -591,6 +616,10 @@ def login():
 # ── CANDIDATURE ────────────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
+    """
+    Soumission de candidature avec support MULTIPLE fichiers certificats.
+    → Analyse automatique EXACTE lancée en arrière-plan IMMÉDIATEMENT.
+    """
     try:
         nom      = (request.form.get('nom') or '').strip()
         prenom   = (request.form.get('prenom') or '').strip()
@@ -601,15 +630,14 @@ def postuler():
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
+        # Vérifier email unique
         for k in redis_client.keys("candidat:*"):
             existing = redis_client.hgetall(k)
             if existing.get('email', '').lower() == email:
                 return jsonify({'error': 'Un candidat avec cet email existe déjà'}), 409
 
+        # Sauvegarde CV (obligatoire)
         cv_filename = ''
-        lettre_filename = ''
-        attestation_filename = ''
-
         if 'cv' in request.files:
             cv = request.files['cv']
             if cv and cv.filename and allowed_file(cv.filename):
@@ -617,40 +645,55 @@ def postuler():
                 cv_filename = f"{uuid.uuid4().hex}_cv.{ext}"
                 cv.save(os.path.join(UPLOAD_FOLDER, cv_filename))
 
+        # Sauvegarde Lettre (optionnel)
+        lettre_filename = ''
         if 'lettre' in request.files:
             lettre = request.files['lettre']
             if lettre and lettre.filename and allowed_file(lettre.filename):
                 ext = lettre.filename.rsplit('.', 1)[1].lower()
                 lettre_filename = f"{uuid.uuid4().hex}_lettre.{ext}"
                 lettre.save(os.path.join(UPLOAD_FOLDER, lettre_filename))
-                
+        
+        # 🎓 Sauvegarde MULTIPLES Certificats (optionnel)
+        attestation_filenames = []
         if 'attestation' in request.files:
-            attestation = request.files['attestation']
-            if attestation and attestation.filename and allowed_file(attestation.filename):
-                ext = attestation.filename.rsplit('.', 1)[1].lower()
-                attestation_filename = f"{uuid.uuid4().hex}_attestation.{ext}"
-                attestation.save(os.path.join(UPLOAD_FOLDER, attestation_filename))
+            # getlist() récupère TOUS les fichiers avec le nom "attestation"
+            attestation_files = request.files.getlist('attestation')
+            for att in attestation_files:
+                if att and att.filename and allowed_file(att.filename):
+                    ext = att.filename.rsplit('.', 1)[1].lower()
+                    att_filename = f"{uuid.uuid4().hex}_attestation.{ext}"
+                    att.save(os.path.join(UPLOAD_FOLDER, att_filename))
+                    attestation_filenames.append(att_filename)
+        
+        # Stockage liste certificats en JSON
+        attestation_filenames_json = json.dumps(attestation_filenames, ensure_ascii=False) if attestation_filenames else ""
 
         token = uuid.uuid4().hex
         redis_client.hset(f"candidat:{token}", mapping={
             "nom": nom, "prenom": prenom, "email": email, "telephone": telephone,
-            "poste": poste, "cv_filename": cv_filename, "lettre_filename": lettre_filename,
-            "attestation_filename": attestation_filename, "statut": "en_attente",
-            "note": "", "score": "0", "checklist": "", "flags_eliminatoires": "",
-            "signaux_detectes": "", "score_breakdown": "", "analyse_status": "pending",
+            "poste": poste, 
+            "cv_filename": cv_filename, 
+            "lettre_filename": lettre_filename,
+            "attestation_filenames": attestation_filenames_json,  # ← Liste JSON
+            "statut": "en_attente", "note": "", "score": "0", 
+            "checklist": "", "flags_eliminatoires": "", "signaux_detectes": "",
+            "score_breakdown": "", "analyse_status": "pending",
             "date_candidature": datetime.datetime.now().isoformat()
         })
 
+        # 🚀 LANCEMENT ANALYSE AUTO EN ARRIÈRE-PLAN avec TOUS les fichiers
         threading.Thread(
             target=run_analysis_for_candidat,
-            args=(token, cv_filename, lettre_filename, attestation_filename, poste),
+            args=(token, cv_filename, lettre_filename, attestation_filenames, poste),
             daemon=True
         ).start()
 
+        nb_certs = len(attestation_filenames)
         return jsonify({
             'message': 'Candidature soumise avec succès',
             'token': token,
-            'analyse': 'L\'analyse automatique de votre dossier est en cours'
+            'analyse': f'L\'analyse automatique de votre dossier (CV + lettre + {nb_certs} certificat{"s" if nb_certs!=1 else ""}) est en cours'
         }), 201
 
     except Exception as e:
@@ -663,7 +706,7 @@ def get_statut(token):
     if not data:
         return jsonify({'error': 'Candidature introuvable'}), 404
     public = {k: v for k, v in data.items() if k not in (
-        'cv_filename', 'lettre_filename', 'attestation_filename', 
+        'cv_filename', 'lettre_filename', 'attestation_filenames', 
         'checklist', 'flags_eliminatoires', 'signaux_detectes', 
         'analyse_details', 'score_breakdown'
     )}
@@ -721,10 +764,20 @@ def get_candidat_detail(token):
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
     data['id'] = token
+    
+    # Parse attestation_filenames (liste JSON)
+    if data.get('attestation_filenames'):
+        try: 
+            data['attestation_filenames_parsed'] = json.loads(data['attestation_filenames'])
+        except: 
+            data['attestation_filenames_parsed'] = []
+    
+    # Parse tous les autres champs JSON
     for field in ['checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown']:
         if data.get(field):
             try: data[f'{field}_parsed'] = json.loads(data[field])
             except: pass
+    
     return jsonify(data), 200
 
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
@@ -754,21 +807,26 @@ def trigger_analyze(token):
     data = redis_client.hgetall(key)
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
+    
     cv_filename = data.get('cv_filename')
     lettre_filename = data.get('lettre_filename')
-    attestation_filename = data.get('attestation_filename')
+    attestation_filenames = data.get('attestation_filenames', '[]')
     poste = data.get('poste')
+    
     if not cv_filename:
         return jsonify({'error': 'CV manquant pour analyse'}), 400
+    
     redis_client.hset(key, mapping={
         "analyse_status": "pending",
         "analyse_manual_trigger": datetime.datetime.now().isoformat()
     })
+    
     threading.Thread(
         target=run_analysis_for_candidat,
-        args=(token, cv_filename, lettre_filename, attestation_filename, poste),
+        args=(token, cv_filename, lettre_filename, attestation_filenames, poste),
         daemon=True
     ).start()
+    
     return jsonify({'message': 'Analyse automatique re-déclenchée', 'token': token}), 202
 
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
@@ -832,7 +890,6 @@ RecrutBank"""
 # 🔐 Sécurité assurée par noms UUID uniques (impossibles à deviner)
 def serve_upload(filename):
     """Servir les fichiers uploadés — sécurisé par noms UUID uniques"""
-    # Validation stricte du filename
     safe = secure_filename(filename)
     if not safe or safe != filename:
         return jsonify({'error': 'Nom de fichier invalide'}), 400
@@ -841,16 +898,8 @@ def serve_upload(filename):
     if not os.path.exists(filepath):
         return jsonify({'error': 'Fichier introuvable'}), 404
     
-    # Détection du type MIME pour affichage correct dans le navigateur
     mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
-    
-    # as_attachment=False → affiche dans le navigateur au lieu de télécharger
-    return send_from_directory(
-        UPLOAD_FOLDER, 
-        safe, 
-        mimetype=mime_type,
-        as_attachment=False
-    )
+    return send_from_directory(UPLOAD_FOLDER, safe, mimetype=mime_type, as_attachment=False)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ENDPOINT TEST (à désactiver en production)
@@ -889,5 +938,6 @@ if __name__ == '__main__':
     print(f"🚀 Serveur RecrutBank démarré sur le port {port}")
     print(f"📋 Grille de présélection chargée: {len(GRILLE)} postes")
     print(f"🔍 Analyse auto: 3 blocs (éliminatoire / cohérence / signaux) — VÉRIFICATION EXACTE")
-    print(f"📁 Fichiers uploadés accessibles via /api/recruteur/uploads/<filename>")
+    print(f"📁 Upload multiple certificats supporté via attestation_filenames[]")
+    print(f"🔓 Fichiers accessibles via /api/recruteur/uploads/<filename>")
     app.run(host="0.0.0.0", port=port, debug=False)
