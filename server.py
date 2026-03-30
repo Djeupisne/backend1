@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-import os, hashlib, datetime, uuid, redis
+import os, hashlib, datetime, uuid, redis, docx, json
 from werkzeug.utils import secure_filename
+from pdfminer.high_level import extract_text
 
 app = Flask(__name__)
 
@@ -33,165 +34,82 @@ redis_client = redis.Redis(
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 Mo
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# ── LOGIQUE D'EXTRACTION DE TEXTE ─────────────────────────────────────────────
+def extract_text_from_file(filepath):
+    ext = filepath.rsplit('.', 1)[1].lower()
+    try:
+        if ext == 'pdf':
+            return extract_text(filepath).lower()
+        elif ext in ['docx', 'doc']:
+            doc = docx.Document(filepath)
+            return "\n".join([p.text for p in doc.paragraphs]).lower()
+    except Exception as e:
+        print(f"Erreur d'extraction : {e}")
+        return ""
+    return ""
 
-# ── POSTES ─────────────────────────────────────────────────────────────────────
-POSTES = [
-    "Responsable Administration de Crédit",
-    "Analyste Crédit CCB",
-    "Archiviste (Administration Crédit)",
-    "Senior Finance Officer",
-    "Market Risk Officer",
-    "IT Réseau & Infrastructure"
-]
-
-# ── GRILLE DE PRÉSÉLECTION (logique du Word) ───────────────────────────────────
-# Chaque poste a : eliminatoire[], a_verifier[], signaux_forts[], points_attention[]
+# ── GRILLE DE PRÉSÉLECTION & MOTS-CLÉS (Source: Grille de présélection.docx) ──
 GRILLE = {
     "Responsable Administration de Crédit": {
-        "eliminatoire": [
-            "Pas d'expérience bancaire",
-            "Moins de 3 ans en crédit / risque",
-            "Aucune exposition aux garanties ou conformité"
-        ],
-        "a_verifier": [
-            "A-t-il déjà validé des dossiers de crédit ?",
-            "A-t-il géré des garanties ?",
-            "A-t-il participé à des audits ?"
-        ],
-        "signaux_forts": [
-            "Mention IFRS 9",
-            "Mention COBAC / conformité",
-            "Suivi portefeuille / impayés"
-        ],
-        "points_attention": [
-            "Parcours trop « comptable pur »",
-            "Rôle uniquement administratif sans responsabilité",
-            "CV flou (missions génériques)"
-        ]
+        "keywords": ["ifrs 9", "cobac", "conformité", "impayés", "portefeuille", "garantie", "audit", "crédit", "risque"],
+        "labels": {
+            "eliminatoire": ["expérience bancaire", "crédit", "risque", "garantie", "conformité"],
+            "signaux_forts": ["ifrs 9", "cobac", "impayés", "portefeuille"],
+            "a_verifier": ["validation dossiers", "audit"]
+        }
     },
     "Analyste Crédit CCB": {
-        "eliminatoire": [
-            "Pas d'expérience en analyse crédit",
-            "Profil purement commercial sans analyse",
-            "Incapacité à lire des états financiers"
-        ],
-        "a_verifier": [
-            "Type de clients : PME ? Particuliers ?",
-            "A-t-il structuré un crédit ?",
-            "A-t-il donné un avis de crédit ?"
-        ],
-        "signaux_forts": [
-            "Mention cash-flow analysis",
-            "Mention montage de crédit",
-            "Mention comités de crédit"
-        ],
-        "points_attention": [
-            "CV trop « relation client »",
-            "Aucune notion de risque",
-            "Expériences très courtes sans progression"
-        ]
+        "keywords": ["cash-flow", "montage", "analyse financière", "états financiers", "comité", "pme"],
+        "labels": {
+            "eliminatoire": ["analyse crédit", "états financiers"],
+            "signaux_forts": ["cash-flow", "montage", "comité"],
+            "a_verifier": ["pme", "particulier"]
+        }
     },
     "Archiviste (Administration Crédit)": {
-        "eliminatoire": [
-            "Aucune expérience en gestion documentaire structurée",
-            "Absence de rigueur démontrée"
-        ],
-        "a_verifier": [
-            "Expérience avec archivage physique + électronique ?",
-            "Gestion de dossiers sensibles ?"
-        ],
-        "signaux_forts": [
-            "Expérience en banque / juridique",
-            "Manipulation de garanties ou contrats"
-        ],
-        "points_attention": [
-            "Profil trop généraliste (assistant admin sans spécialisation)",
-            "CV désorganisé (ironie révélatrice)"
-        ]
+        "keywords": ["archivage", "documentaire", "juridique", "numérisation", "classement"],
+        "labels": {
+            "eliminatoire": ["gestion documentaire", "archivage"],
+            "signaux_forts": ["banque", "juridique", "contrat"],
+            "a_verifier": ["physique", "électronique"]
+        }
     },
     "Senior Finance Officer": {
-        "eliminatoire": [
-            "Pas d'expérience en finance senior",
-            "Aucune maîtrise des outils de reporting financier"
-        ],
-        "a_verifier": [
-            "Maîtrise des normes IFRS ?",
-            "Expérience en pilotage budgétaire ?"
-        ],
-        "signaux_forts": [
-            "Expérience en consolidation financière",
-            "Maîtrise Excel avancé / Power BI"
-        ],
-        "points_attention": [
-            "Profil trop opérationnel sans vision stratégique",
-            "Manque d'expérience en environnement bancaire"
-        ]
+        "keywords": ["ifrs", "budget", "reporting", "power bi", "excel", "consolidation"],
+        "labels": {
+            "eliminatoire": ["finance", "reporting"],
+            "signaux_forts": ["consolidation", "power bi", "ifrs"],
+            "a_verifier": ["budget", "pilotage"]
+        }
     },
     "Market Risk Officer": {
-        "eliminatoire": [
-            "Pas d'expérience en gestion des risques de marché",
-            "Aucune connaissance des produits financiers"
-        ],
-        "a_verifier": [
-            "Maîtrise des modèles VaR / stress testing ?",
-            "Expérience en back-testing ?"
-        ],
-        "signaux_forts": [
-            "Mention Basel III / IV",
-            "Expérience en salle des marchés",
-            "Maîtrise Python / R pour modélisation"
-        ],
-        "points_attention": [
-            "Profil purement académique sans expérience terrain",
-            "Expérience uniquement en risque crédit"
-        ]
+        "keywords": ["basel", "var", "stress testing", "marché", "modélisation", "python"],
+        "labels": {
+            "eliminatoire": ["risque de marché", "produit financier"],
+            "signaux_forts": ["basel", "var", "python"],
+            "a_verifier": ["stress testing", "back-testing"]
+        }
     },
     "IT Réseau & Infrastructure": {
-        "eliminatoire": [
-            "Pas de certification réseau (Cisco, CompTIA…)",
-            "Aucune expérience en administration système"
-        ],
-        "a_verifier": [
-            "Expérience avec environnements bancaires sécurisés ?",
-            "Gestion d'incidents en production ?"
-        ],
-        "signaux_forts": [
-            "Certification CCNA / CCNP",
-            "Expérience en cybersécurité",
-            "Maîtrise virtualisation (VMware, Hyper-V)"
-        ],
-        "points_attention": [
-            "Profil trop orienté développement",
-            "Manque d'expérience en environnement haute disponibilité"
-        ]
+        "keywords": ["cisco", "ccna", "ccnp", "sécurité", "vmware", "réseau", "infrastructure"],
+        "labels": {
+            "eliminatoire": ["réseau", "système", "certification"],
+            "signaux_forts": ["cisco", "cybersécurité", "virtualisation"],
+            "a_verifier": ["haute disponibilité", "incident"]
+        }
     }
 }
+
+POSTES = list(GRILLE.keys())
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 
-def init_recruteur():
-    try:
-        redis_client.ping()
-        if not redis_client.exists("recruteur:1"):
-            redis_client.hset("recruteur:1", mapping={
-                "id": "1",
-                "email": "recruteur@banque.com",
-                "password": hash_pwd("admin123"),
-                "nom": "Responsable RH"
-            })
-            print("✅ Compte recruteur créé dans Redis.")
-        else:
-            print("✅ Connexion Redis OK.")
-    except Exception as e:
-        print(f"⚠️ Redis non disponible au démarrage : {e}")
-
-init_recruteur()
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ROUTES PUBLIQUES
@@ -201,256 +119,107 @@ init_recruteur()
 def get_postes():
     return jsonify(POSTES), 200
 
-@app.route('/api/grille/<poste>', methods=['GET'])
-def get_grille(poste):
-    """Retourne la grille de présélection pour un poste donné."""
-    g = GRILLE.get(poste)
-    if not g:
-        return jsonify({'error': 'Poste inconnu'}), 404
-    return jsonify(g), 200
-
-# ── AUTH ───────────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.json
-    if not data:
-        return jsonify({'error': 'JSON manquant'}), 400
+    if not data: return jsonify({'error': 'JSON manquant'}), 400
     email = data.get('email', '').strip().lower()
     pwd = hash_pwd(data.get('password', ''))
-
     for key in redis_client.keys("recruteur:*"):
         r = redis_client.hgetall(key)
         if r.get("email", "").lower() == email and r.get("password") == pwd:
             token = create_access_token(identity=r["id"])
             return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
-
     return jsonify({'error': 'Identifiants incorrects'}), 401
 
-# ── CANDIDATURE ────────────────────────────────────────────────────────────────
+# ── CANDIDATURE (AVEC SCORING ET CHECKLIST) ───────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
-        nom      = (request.form.get('nom') or '').strip()
-        prenom   = (request.form.get('prenom') or '').strip()
-        email    = (request.form.get('email') or '').strip().lower()
-        telephone= (request.form.get('telephone') or '').strip()
-        poste    = (request.form.get('poste') or '').strip()
+        nom = request.form.get('nom', '').strip()
+        prenom = request.form.get('prenom', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        poste = request.form.get('poste', '').strip()
 
-        if not nom or not prenom or not email or poste not in POSTES:
-            return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
+        if not nom or not email or poste not in POSTES:
+            return jsonify({'error': 'Données invalides'}), 400
 
-        # Vérifier email unique
-        for k in redis_client.keys("candidat:*"):
-            existing = redis_client.hgetall(k)
-            if existing.get('email', '').lower() == email:
-                return jsonify({'error': 'Un candidat avec cet email existe déjà'}), 409
-
-        # Sauvegarde des fichiers
+        # Sauvegarde et Analyse du CV
         cv_filename = ''
-        lettre_filename = ''
+        score = 0
+        checklist_auto = {"eliminatoire": [], "signaux_forts": [], "a_verifier": []}
 
         if 'cv' in request.files:
             cv = request.files['cv']
-            if cv and cv.filename and allowed_file(cv.filename):
-                ext = cv.filename.rsplit('.', 1)[1].lower()
-                cv_filename = f"{uuid.uuid4().hex}_cv.{ext}"
-                cv.save(os.path.join(UPLOAD_FOLDER, cv_filename))
-
-        if 'lettre' in request.files:
-            lettre = request.files['lettre']
-            if lettre and lettre.filename and allowed_file(lettre.filename):
-                ext = lettre.filename.rsplit('.', 1)[1].lower()
-                lettre_filename = f"{uuid.uuid4().hex}_lettre.{ext}"
-                lettre.save(os.path.join(UPLOAD_FOLDER, lettre_filename))
+            if cv and allowed_file(cv.filename):
+                cv_filename = f"{uuid.uuid4().hex}_{secure_filename(cv.filename)}"
+                path = os.path.join(UPLOAD_FOLDER, cv_filename)
+                cv.save(path)
+                
+                # Extraction et Analyse
+                text_content = extract_text_from_file(path)
+                critere_poste = GRILLE[poste]["labels"]
+                
+                # Analyse des catégories
+                for cat in ["eliminatoire", "signaux_forts", "a_verifier"]:
+                    for word in critere_poste[cat]:
+                        if word in text_content:
+                            checklist_auto[cat].append(word)
+                
+                # Calcul Score : 40% éliminatoires, 40% signaux forts, 20% vérifications
+                score_calc = 0
+                if checklist_auto["eliminatoire"]: score_calc += 40
+                score_calc += (len(checklist_auto["signaux_forts"]) / len(critere_poste["signaux_forts"])) * 40
+                score_calc += (len(checklist_auto["a_verifier"]) / len(critere_poste["a_verifier"])) * 20
+                score = round(min(100, score_calc))
 
         token = uuid.uuid4().hex
         redis_client.hset(f"candidat:{token}", mapping={
-            "nom":               nom,
-            "prenom":            prenom,
-            "email":             email,
-            "telephone":         telephone,
-            "poste":             poste,
-            "cv_filename":       cv_filename,
-            "lettre_filename":   lettre_filename,
-            "statut":            "en_attente",
-            "note":              "",
-            "score":             "0",
-            "checklist":         "",   # JSON stringifié des cases cochées
-            "date_candidature":  datetime.datetime.now().isoformat()
+            "nom": nom, "prenom": prenom, "email": email, "poste": poste,
+            "cv_filename": cv_filename, "statut": "en_attente",
+            "score": str(score),
+            "checklist": json.dumps(checklist_auto),
+            "date_candidature": datetime.datetime.now().isoformat()
         })
-
-        return jsonify({'message': 'Candidature soumise avec succès', 'token': token}), 201
-
+        return jsonify({'message': 'Candidature soumise', 'token': token, 'score': score}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/candidats/statut/<token>', methods=['GET'])
-def get_statut(token):
-    data = redis_client.hgetall(f"candidat:{token}")
-    if not data:
-        return jsonify({'error': 'Candidature introuvable'}), 404
-    # On ne renvoie pas les noms de fichiers au candidat
-    public = {k: v for k, v in data.items() if k not in ('cv_filename', 'lettre_filename', 'checklist')}
-    return jsonify(public), 200
-
 # ══════════════════════════════════════════════════════════════════════════════
-# ROUTES RECRUTEUR (protégées JWT)
+# ROUTES RECRUTEUR
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
     keys = redis_client.keys("candidat:*")
-    stats = {
-        "total": len(keys),
-        "en_attente": 0,
-        "retenu": 0,
-        "rejete": 0,
-        "entretien": 0,
-        "by_poste": []
-    }
-    counts = {}
+    stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0}
     for k in keys:
-        c = redis_client.hgetall(k)
-        s = c.get('statut', 'en_attente')
-        if s in stats:
-            stats[s] += 1
-        p = c.get('poste', 'Inconnu')
-        counts[p] = counts.get(p, 0) + 1
-    stats['by_poste'] = [{'poste': p, 'n': n} for p, n in counts.items()]
+        s = redis_client.hget(k, 'statut')
+        if s in stats: stats[s] += 1
     return jsonify(stats), 200
 
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
-    poste_filter  = request.args.get('poste', '')
-    statut_filter = request.args.get('statut', '')
-    search        = request.args.get('search', '').lower()
-
     keys = redis_client.keys("candidat:*")
     result = []
     for k in keys:
         c = redis_client.hgetall(k)
-        c['id'] = k.split(':', 1)[1]  # le token est l'identifiant
-
-        if poste_filter and c.get('poste') != poste_filter:
-            continue
-        if statut_filter and c.get('statut') != statut_filter:
-            continue
-        if search:
-            haystack = f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')}".lower()
-            if search not in haystack:
-                continue
-
+        c['id'] = k.split(':', 1)[1]
         result.append(c)
-
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
-
-@app.route('/api/recruteur/candidats/<token>', methods=['GET'])
-@jwt_required()
-def get_candidat_detail(token):
-    data = redis_client.hgetall(f"candidat:{token}")
-    if not data:
-        return jsonify({'error': 'Candidat introuvable'}), 404
-    data['id'] = token
-    return jsonify(data), 200
-
-@app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
-@jwt_required()
-def update_candidat(token):
-    key = f"candidat:{token}"
-    if not redis_client.exists(key):
-        return jsonify({'error': 'Candidat introuvable'}), 404
-
-    data = request.json or {}
-    statut    = data.get('statut', 'en_attente')
-    note      = data.get('note', '')
-    score     = str(data.get('score', '0'))
-    checklist = data.get('checklist', '')  # JSON string des cases cochées
-
-    if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
-        return jsonify({'error': 'Statut invalide'}), 400
-
-    redis_client.hset(key, mapping={
-        "statut":    statut,
-        "note":      note,
-        "score":     score,
-        "checklist": checklist
-    })
-    return jsonify({'message': 'Mis à jour avec succès'}), 200
-
-@app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
-@jwt_required()
-def email_preview(token):
-    data = redis_client.hgetall(f"candidat:{token}")
-    if not data:
-        return jsonify({'error': 'Candidat introuvable'}), 404
-
-    body = request.json or {}
-    msg_type = body.get('type', data.get('statut', 'en_attente'))
-
-    nom_complet = f"{data.get('prenom', '')} {data.get('nom', '')}"
-    poste       = data.get('poste', '')
-    to_email    = data.get('email', '')
-
-    if msg_type == 'retenu':
-        sujet = f"Félicitations – Votre candidature pour le poste {poste} a été retenue"
-        corps = f"""Madame, Monsieur {nom_complet},
-
-Nous avons le plaisir de vous informer que votre candidature pour le poste de {poste} a été retenue à l'issue de notre processus de présélection.
-
-Nous vous contacterons très prochainement pour vous communiquer les modalités de la prochaine étape du processus de recrutement.
-
-Dans l'attente, nous restons disponibles pour toute question.
-
-Cordialement,
-L'équipe Ressources Humaines
-RecrutBank"""
-
-    elif msg_type == 'entretien':
-        sujet = f"Invitation à un entretien – Poste {poste}"
-        corps = f"""Madame, Monsieur {nom_complet},
-
-Suite à l'examen attentif de votre candidature pour le poste de {poste}, nous avons le plaisir de vous inviter à un entretien avec notre équipe.
-
-Nous prendrons contact avec vous dans les meilleurs délais pour convenir d'une date et d'un horaire qui vous conviennent.
-
-Cordialement,
-L'équipe Ressources Humaines
-RecrutBank"""
-
-    else:  # rejete ou autre
-        sujet = f"Réponse à votre candidature – Poste {poste}"
-        corps = f"""Madame, Monsieur {nom_complet},
-
-Nous vous remercions sincèrement de l'intérêt que vous portez à notre institution et du temps consacré à votre candidature pour le poste de {poste}.
-
-Après examen attentif de votre dossier et compte tenu du nombre important de candidatures reçues, nous avons le regret de vous informer que votre candidature n'a pas été retenue pour la suite du processus de sélection.
-
-Nous vous encourageons vivement à postuler à nouveau pour toute opportunité future qui correspondrait à votre profil et vous souhaitons plein succès dans votre recherche d'emploi.
-
-Cordialement,
-L'équipe Ressources Humaines
-RecrutBank"""
-
-    return jsonify({
-        'to':    to_email,
-        'nom':   nom_complet,
-        'sujet': sujet,
-        'corps': corps
-    }), 200
 
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 @jwt_required()
 def serve_upload(filename):
-    """Servir les fichiers uploadés (CV, lettres) — accès réservé au recruteur."""
-    safe = secure_filename(filename)
-    return send_from_directory(UPLOAD_FOLDER, safe)
+    return send_from_directory(UPLOAD_FOLDER, secure_filename(filename))
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DÉMARRAGE
-# ══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
+    # Initialisation recruteur par défaut
+    if not redis_client.exists("recruteur:1"):
+        redis_client.hset("recruteur:1", mapping={"email": "recruteur@banque.com", "password": hash_pwd("admin123"), "nom": "RH Admin"})
+    
     port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port)
