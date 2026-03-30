@@ -40,7 +40,7 @@ redis_client = redis.Redis(
 
 # ── UPLOADS ────────────────────────────────────────────────────────────────────
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # ✅ Création automatique du dossier
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 Mo
 
@@ -333,6 +333,7 @@ def extract_text_from_docx(filepath):
 def extract_text_from_file(filepath, filename):
     """Extrait le texte selon l'extension du fichier"""
     if not filepath or not os.path.exists(filepath):
+        print(f"⚠️ Fichier non trouvé: {filepath}")
         return ""
     ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else ''
     if ext == 'pdf':
@@ -644,6 +645,7 @@ def postuler():
                 ext = cv.filename.rsplit('.', 1)[1].lower()
                 cv_filename = f"{uuid.uuid4().hex}_cv.{ext}"
                 cv.save(os.path.join(UPLOAD_FOLDER, cv_filename))
+                print(f"✅ CV sauvegardé: {cv_filename}")
 
         # Sauvegarde Lettre (optionnel)
         lettre_filename = ''
@@ -653,6 +655,7 @@ def postuler():
                 ext = lettre.filename.rsplit('.', 1)[1].lower()
                 lettre_filename = f"{uuid.uuid4().hex}_lettre.{ext}"
                 lettre.save(os.path.join(UPLOAD_FOLDER, lettre_filename))
+                print(f"✅ Lettre sauvegardée: {lettre_filename}")
         
         # 🎓 Sauvegarde MULTIPLES Certificats (optionnel)
         attestation_filenames = []
@@ -665,6 +668,7 @@ def postuler():
                     att_filename = f"{uuid.uuid4().hex}_attestation.{ext}"
                     att.save(os.path.join(UPLOAD_FOLDER, att_filename))
                     attestation_filenames.append(att_filename)
+                    print(f"✅ Certificat sauvegardé: {att_filename}")
         
         # Stockage liste certificats en JSON
         attestation_filenames_json = json.dumps(attestation_filenames, ensure_ascii=False) if attestation_filenames else ""
@@ -698,6 +702,8 @@ def postuler():
 
     except Exception as e:
         print(f"❌ Erreur postuler: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
@@ -890,15 +896,30 @@ RecrutBank"""
 # 🔐 Sécurité assurée par noms UUID uniques (impossibles à deviner)
 def serve_upload(filename):
     """Servir les fichiers uploadés — sécurisé par noms UUID uniques"""
+    print(f"📁 Tentative d'accès au fichier: {filename}")
+    print(f"📂 Dossier uploads: {UPLOAD_FOLDER}")
+    print(f"📂 Dossier existe: {os.path.exists(UPLOAD_FOLDER)}")
+    
+    # Validation stricte du filename
     safe = secure_filename(filename)
     if not safe or safe != filename:
+        print(f"❌ Nom de fichier invalide: {filename}")
         return jsonify({'error': 'Nom de fichier invalide'}), 400
     
     filepath = os.path.join(UPLOAD_FOLDER, safe)
+    print(f"🔍 Chemin complet: {filepath}")
+    print(f"🔍 Fichier existe: {os.path.exists(filepath)}")
+    
     if not os.path.exists(filepath):
-        return jsonify({'error': 'Fichier introuvable'}), 404
+        print(f"❌ Fichier introuvable: {filepath}")
+        # Lister les fichiers disponibles pour debug
+        if os.path.exists(UPLOAD_FOLDER):
+            files = os.listdir(UPLOAD_FOLDER)
+            print(f"📋 Fichiers disponibles: {files[:10]}")  # Premier 10 fichiers
+        return jsonify({'error': 'Fichier introuvable', 'filename': filename, 'path': filepath}), 404
     
     mime_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+    print(f"✅ Fichier trouvé, type MIME: {mime_type}")
     return send_from_directory(UPLOAD_FOLDER, safe, mimetype=mime_type, as_attachment=False)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -940,4 +961,5 @@ if __name__ == '__main__':
     print(f"🔍 Analyse auto: 3 blocs (éliminatoire / cohérence / signaux) — VÉRIFICATION EXACTE")
     print(f"📁 Upload multiple certificats supporté via attestation_filenames[]")
     print(f"🔓 Fichiers accessibles via /api/recruteur/uploads/<filename>")
+    print(f"📂 Dossier uploads: {UPLOAD_FOLDER}")
     app.run(host="0.0.0.0", port=port, debug=False)
