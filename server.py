@@ -1,6 +1,7 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique EXACTE des CV
 # Basé sur la grille Word : 3 blocs (Éliminatoire / Cohérence / Signaux)
-# Classement STRICT des candidats par poste + Export rapports avec Téléphone
+# Modèle Excel : Adéquation(0-3)+Cohérence(0-2)+Risque(0-3)+CV(0-1)+Lettre(0-1)=/10
+# Classement TRÈS STRICT avec ID (numérotation) et RANG (priorité recrutement)
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -393,6 +394,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
     🔴 Bloc 1: Éliminatoire (critères POSITIFS requis) → Score = 0 si manquant
     🟠 Bloc 2: Cohérence → +1 point par critère validé
     🟡 Bloc 3: Signaux → +2 points par signal détecté
+    
+    Modèle Excel: Adéquation(0-3)+Cohérence(0-2)+Risque(0-3)+CV(0-1)+Lettre(0-1)=/10
     """
     if not cv_text or len(cv_text.strip()) < 50:
         return {
@@ -572,16 +575,15 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🏆 SYSTÈME DE CLASSEMENT STRICT DES CANDIDATS
+# 🏆 SYSTÈME DE CLASSEMENT TRÈS STRICT DES CANDIDATS
 # ══════════════════════════════════════════════════════════════════════════════
 
 def calculate_ranking_score(candidat_data, poste):
     """
     Calcule un score de classement EXTRÊMEMENT STRICT pour comparer les candidats.
-    Hiérarchie stricte : Éliminatoire → Score → Signaux → Cohérence → Ancienneté → Date
+    Hiérarchie stricte : Éliminatoire → Score → Signaux → Cohérence → Date → Nom
     """
     sb = candidat_data.get('score_breakdown_parsed', {})
-    details = candidat_data.get('analyse_details_parsed', {})
     
     # 🔴 Facteur 1: Éliminatoire (poids maximal - bloquant)
     if sb.get('bloc1_eliminatoire'):
@@ -601,17 +603,7 @@ def calculate_ranking_score(candidat_data, poste):
     # 📄 Facteur 5: Lettre de motivation fournie (léger bonus)
     lettre_bonus = 0.1 if candidat_data.get('lettre_filename') else 0
     
-    # 📅 Facteur 6: Ancienneté de l'expérience (si détectable)
-    experience_bonus = 0
-    try:
-        # Recherche d'années d'expérience dans le CV
-        cv_text = details.get('cv_words', 0)
-        if cv_text > 200:  # CV substantiel
-            experience_bonus = 0.1
-    except:
-        pass
-    
-    # 📅 Facteur 7: Date de candidature (plus récent = léger avantage)
+    # 📅 Facteur 6: Date de candidature (plus récent = léger avantage)
     try:
         date_candidature = datetime.datetime.fromisoformat(candidat_data.get('date_candidature', ''))
         days_since = (datetime.datetime.now() - date_candidature).days
@@ -620,7 +612,7 @@ def calculate_ranking_score(candidat_data, poste):
         date_bonus = 0
     
     # Calcul du score de classement (sur ~13 points max)
-    ranking_score = score_principal + signaux_bonus + coherence_bonus + lettre_bonus + experience_bonus + date_bonus
+    ranking_score = score_principal + signaux_bonus + coherence_bonus + lettre_bonus + date_bonus
     
     return round(ranking_score, 3)  # 3 décimales pour plus de précision
 
@@ -629,6 +621,7 @@ def generate_ranking_for_poste(poste, candidats_data):
     """
     Génère un classement EXTRÊMEMENT STRICT des candidats pour un poste donné.
     Critères hiérarchisés de manière stricte et non négociable.
+    RANG indique l'ordre de priorité pour le recrutement : 1=premier à retenir, etc.
     """
     # Filtrer les candidats pour ce poste
     candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
@@ -644,34 +637,30 @@ def generate_ranking_for_poste(poste, candidats_data):
     # 3. Nombre de signaux forts décroissant (départage fort)
     # 4. Critères "à vérifier" validés décroissant (départage moyen)
     # 5. Date de candidature décroissante (départage faible)
+    # 6. Nom du candidat alphabétique (départage ultime - garantit unicité)
     candidats_poste.sort(key=lambda x: (
         -x['ranking_score'],  # Score principal décroissant (3 décimales)
         -len(x.get('signaux_detectes_parsed', [])),  # Signaux décroissant
         -x.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),  # Critères validés
-        x.get('date_candidature', '')  # Date croissante (plus récent en premier)
+        x.get('date_candidature', ''),  # Date croissante (plus récent en premier)
+        f"{x.get('nom', '')} {x.get('prenom', '')}".strip().lower()  # Nom alphabétique
     ))
     
-    # Assigner les rangs de manière stricte
-    current_rank = 0
-    previous_score = None
-    
+    # Assigner les rangs de manière stricte : 1=premier à recruter, 2=deuxième, etc.
     for idx, c in enumerate(candidats_poste, 1):
-        # Gestion des ex-aequo stricte
-        if c['ranking_score'] != previous_score:
-            current_rank = idx
-        c['ranking_position'] = current_rank
-        previous_score = c['ranking_score']
+        c['ranking_position'] = idx  # Rang unique basé sur la position
         
         # Déterminer la recommandation basée sur le rang ET le score
-        total_candidats = len(candidats_poste)
         score = int(c.get('score', 0))
         
-        if current_rank == 1 and score >= 9:
-            c['ranking_recommendation'] = "🥇 Top candidat - Entretien prioritaire absolu"
-        elif current_rank <= 3 and score >= 8:
-            c['ranking_recommendation'] = "🥈 Shortlist prioritaire - Entretien recommandé"
-        elif current_rank <= 5 and score >= 7:
-            c['ranking_recommendation'] = "🥉 Shortlist - À considérer sérieusement"
+        if idx == 1 and score >= 9:
+            c['ranking_recommendation'] = "🥇 TOP 1 - Entretien prioritaire absolu"
+        elif idx == 2 and score >= 8:
+            c['ranking_recommendation'] = "🥈 TOP 2 - Entretien prioritaire"
+        elif idx == 3 and score >= 8:
+            c['ranking_recommendation'] = "🥉 TOP 3 - Entretien recommandé"
+        elif idx <= 5 and score >= 7:
+            c['ranking_recommendation'] = "✅ Shortlist - Entretien conseillé"
         elif score >= 6:
             c['ranking_recommendation'] = "⚠️ Potentiel - Entretien si besoin"
         elif score >= 4:
@@ -682,54 +671,16 @@ def generate_ranking_for_poste(poste, candidats_data):
     return candidats_poste
 
 
-def generate_ranking_for_poste(poste, candidats_data):
-    """
-    Génère un classement STRICT des candidats pour un poste donné.
-    Retourne une liste triée avec détails de comparaison.
-    """
-    # Filtrer les candidats pour ce poste
-    candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
-    
-    # Calculer le score de classement pour chaque candidat
-    for c in candidats_poste:
-        c['ranking_score'] = calculate_ranking_score(c, poste)
-        c['ranking_position'] = 0  # Sera calculé après tri
-    
-    # 🔍 Tri STRICT selon critères hiérarchisés :
-    # 1. Éliminatoire d'abord (score -999 = dernier)
-    # 2. Score de classement décroissant
-    # 3. Nombre de signaux forts décroissant (départage)
-    # 4. Date de candidature décroissante (départage final)
-    candidats_poste.sort(key=lambda x: (
-        -x['ranking_score'],  # Score principal décroissant
-        -len(x.get('signaux_detectes_parsed', [])),  # Signaux décroissant
-        x.get('date_candidature', '')  # Date croissante (plus récent en premier)
-    ), reverse=False)
-    
-    # Assigner les positions
-    for idx, c in enumerate(candidats_poste, 1):
-        c['ranking_position'] = idx
-        
-        # Déterminer la recommandation basée sur le rang
-        total_candidats = len(candidats_poste)
-        if idx == 1 and c['ranking_score'] >= 8:
-            c['ranking_recommendation'] = "🥇 Top candidat - Entretien prioritaire"
-        elif idx <= 3 and c['ranking_score'] >= 6:
-            c['ranking_recommendation'] = "🥈 Shortlist - Entretien recommandé"
-        elif c['ranking_score'] >= 4:
-            c['ranking_recommendation'] = "🥉 Potentiel - À considérer"
-        else:
-            c['ranking_recommendation'] = "❌ Non prioritaire"
-    
-    return candidats_poste
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# 📄 FONCTIONS D'EXPORT DE RAPPORTS (Modèle Excel avec Téléphone)
+# 📄 FONCTIONS D'EXPORT DE RAPPORTS (Modèle Excel avec ID + RANG + Téléphone)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel avec RANG et Téléphone"""
+    """
+    Génère un rapport Excel selon le modèle uploadé :
+    Candidat | Adéquation(0-3) | Cohérence(0-2) | Risque(0-3) | CV(0-1) | Lettre(0-1) | Score | Recommandation
+    Avec colonnes ID (numérotation) et RANG (classement) en tête
+    """
     if not OPENPYXL_AVAILABLE:
         return None
     
@@ -743,20 +694,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
         candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
         
         # 🔍 CLASSEMENT STRICT avant génération
-        for c in candidats_poste:
-            c['ranking_score'] = calculate_ranking_score(c, poste)
-        
-        # Tri STRICT
-        candidats_poste.sort(key=lambda x: (
-            -x['ranking_score'],
-            -len(x.get('signaux_detectes_parsed', [])),
-            -x.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),
-            x.get('date_candidature', '')
-        ))
-        
-        # Assigner les rangs
-        for idx, c in enumerate(candidats_poste, 1):
-            c['ranking_position'] = idx
+        candidats_poste = generate_ranking_for_poste(poste, candidats_poste)
         
         ws = wb.create_sheet(title=poste[:25])
         
@@ -772,17 +710,18 @@ def generate_excel_report(candidats_data, poste_filter=None):
         )
         
         # Titre
-        ws.merge_cells('A1:J1')
+        ws.merge_cells('A1:L1')
         title_cell = ws['A1']
-        title_cell.value = f"CLASSEMENT - {poste}"
+        title_cell.value = f"CLASSEMENT STRICT - {poste}"
         title_cell.font = title_font
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
         title_cell.fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
         ws.row_dimensions[1].height = 30
         
-        # ✅ En-têtes avec RANG en première colonne
+        # ✅ En-têtes selon modèle Excel + ID + RANG + Téléphone
         headers = [
-            'Rang',  # ✅ NOUVEAU
+            'ID',  # ✅ Numérotation séquentielle
+            'Rang',  # ✅ Classement (1=premier à recruter)
             'Candidat',
             'Téléphone',
             'Adéquation expérience (0-3)',
@@ -801,10 +740,11 @@ def generate_excel_report(candidats_data, poste_filter=None):
             cell.border = border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         
-        # Données avec RANG
+        # Données avec ID et RANG
         for row_idx, c in enumerate(candidats_poste, 4):
             sb = c.get('score_breakdown_parsed', {})
             
+            # Calcul des scores selon modèle Excel
             adequation = min(3, sb.get('bloc2_criteres_valides', 0))
             coherence = min(2, sb.get('bloc2_points', 0))
             risque_metier = min(3, sb.get('bloc3_signaux_detectes', 0))
@@ -812,22 +752,15 @@ def generate_excel_report(candidats_data, poste_filter=None):
             lettre_motiv = 1 if c.get('lettre_filename') else 0
             score_total = adequation + coherence + risque_metier + qualite_cv + lettre_motiv
             
-            if int(c.get('score', 0)) >= 8:
-                recommandation = "🥇 Entretien prioritaire"
-            elif int(c.get('score', 0)) >= 6:
-                recommandation = "🥈 Entretien si besoin"
-            elif int(c.get('score', 0)) >= 4:
-                recommandation = "🥉 À considérer"
-            else:
-                recommandation = "❌ Rejet"
-            
             nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip()
             telephone = c.get('telephone', '') or '–'
             rang = c.get('ranking_position', row_idx - 3)
+            candidat_id = row_idx - 3  # ID = numéro séquentiel
             
-            # ✅ Row data avec RANG en premier
+            # ✅ Row data avec ID et RANG en tête
             row_data = [
-                rang,  # ✅ RANG
+                candidat_id,  # ✅ ID (numérotation)
+                rang,  # ✅ RANG (classement : 1=premier à recruter)
                 nom_complet,
                 telephone,
                 adequation,
@@ -836,7 +769,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 qualite_cv,
                 lettre_motiv,
                 score_total,
-                recommandation
+                c.get('ranking_recommendation', 'Non classé')
             ]
             
             for col, value in enumerate(row_data, 1):
@@ -844,8 +777,12 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
                 
-                # Colorer RANG (médailles)
+                # Colorer ID
                 if col == 1:
+                    cell.font = Font(bold=True)
+                
+                # Colorer RANG (médailles pour TOP 3)
+                if col == 2:
                     if rang == 1:
                         cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")  # Or
                         cell.font = Font(bold=True, size=12)
@@ -856,8 +793,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         cell.fill = PatternFill(start_color="CD7F32", end_color="CD7F32", fill_type="solid")  # Bronze
                         cell.font = Font(bold=True, size=12)
                 
-                # Colorer Score Total
-                if col == 9:
+                # Colorer Score Total selon seuils
+                if col == 10:
                     if score_total >= 8:
                         cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
                     elif score_total >= 6:
@@ -869,16 +806,17 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     cell.font = Font(bold=True)
                 
                 # Colorer Recommandation
-                if col == 10:
-                    if "prioritaire" in str(recommandation).lower():
+                if col == 11:
+                    if "TOP" in str(c.get('ranking_recommendation', '')):
                         cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
-                    elif "besoin" in str(recommandation).lower():
+                        cell.font = Font(bold=True)
+                    elif "Shortlist" in str(c.get('ranking_recommendation', '')):
                         cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-                    elif "Rejet" in str(recommandation):
+                    elif "Rejet" in str(c.get('ranking_recommendation', '')):
                         cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
         
-        # Largeurs colonnes (10 colonnes avec RANG)
-        column_widths = [8, 25, 18, 25, 25, 30, 20, 22, 15, 25]
+        # Largeurs colonnes (11 colonnes)
+        column_widths = [6, 8, 25, 18, 25, 25, 30, 20, 22, 15, 30]
         for col, width in enumerate(column_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = width
         
@@ -890,22 +828,24 @@ def generate_excel_report(candidats_data, poste_filter=None):
     output.seek(0)
     return output
 
+
 def generate_csv_report(candidats_data):
-    """Génère un rapport CSV avec RANG et Téléphone"""
+    """Génère un rapport CSV avec ID, RANG et Téléphone"""
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_ALL)
     
-    # ✅ En-têtes avec RANG
+    # ✅ En-têtes avec ID et RANG
     writer.writerow([
-        'Rang', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Date candidature',
+        'ID', 'Rang', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Date candidature',
         'Score (/10)', 'Statut', 'Éliminatoire', 'Cohérence (pts)', 'Signaux (pts)', 'Note'
     ])
     
-    # Données avec RANG
+    # Données avec ID et RANG
     for idx, c in enumerate(candidats_data, 1):
         sb = c.get('score_breakdown_parsed', {})
         writer.writerow([
-            idx,  # ✅ RANG
+            idx,  # ✅ ID (numérotation)
+            idx,  # ✅ RANG (par défaut, sera trié ailleurs)
             c.get('nom', ''),
             c.get('prenom', ''),
             c.get('email', ''),
@@ -925,7 +865,7 @@ def generate_csv_report(candidats_data):
 
 
 def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF avec RANG et Téléphone"""
+    """Génère un rapport PDF avec ID, RANG et Téléphone"""
     if not REPORTLAB_AVAILABLE:
         return None
     
@@ -942,8 +882,8 @@ def generate_pdf_report(candidats_data):
     elements.append(Paragraph(f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}", date_style))
     elements.append(Spacer(1, 0.8*cm))
     
-    # ✅ Tableau avec RANG
-    data = [['Rang', 'Candidat', 'Téléphone', 'Poste', 'Score (/10)', 'Statut', 'Recommandation']]
+    # ✅ Tableau avec ID et RANG
+    data = [['ID', 'Rang', 'Candidat', 'Téléphone', 'Poste', 'Score (/10)', 'Statut', 'Recommandation']]
     
     for idx, c in enumerate(candidats_data, 1):
         score = int(c.get('score', 0))
@@ -957,6 +897,7 @@ def generate_pdf_report(candidats_data):
             recommandation = "❌ Rejet"
         
         data.append([
+            str(idx),  # ✅ ID
             str(idx),  # ✅ RANG
             f"{c.get('prenom', '')} {c.get('nom', '')}",
             c.get('telephone', '') or '–',
@@ -966,7 +907,7 @@ def generate_pdf_report(candidats_data):
             recommandation
         ])
     
-    table = Table(data, colWidths=[1.5*cm, 4*cm, 3*cm, 4*cm, 2*cm, 2.5*cm, 3.5*cm])
+    table = Table(data, colWidths=[1*cm, 1.5*cm, 4*cm, 3*cm, 4*cm, 2*cm, 2.5*cm, 3.5*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -983,6 +924,7 @@ def generate_pdf_report(candidats_data):
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ROUTES PUBLIQUES
@@ -1221,218 +1163,7 @@ def trigger_analyze(token):
     return jsonify({'message': 'Analyse automatique re-déclenchée', 'token': token}), 202
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🏆 ROUTES DE CLASSEMENT STRICT DES CANDIDATS
-# ══════════════════════════════════════════════════════════════════════════════
-
-@app.route('/api/recruteur/classement/<poste>', methods=['GET'])
-@jwt_required()
-def get_classement(poste):
-    """
-    Retourne un classement STRICT des candidats pour un poste donné.
-    Comparaison basée sur : Score → Signaux forts → Cohérence → Date
-    """
-    if poste not in POSTES:
-        return jsonify({'error': 'Poste inconnu', 'postes_disponibles': POSTES}), 404
-    
-    # Récupérer tous les candidats
-    keys = redis_client.keys("candidat:*")
-    result = []
-    for k in keys:
-        c = redis_client.hgetall(k)
-        c['id'] = k.split(':', 1)[1]
-        # Parser les champs JSON
-        for field in ['score_breakdown', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details']:
-            if c.get(field):
-                try: c[f'{field}_parsed'] = json.loads(c[field])
-                except: pass
-        result.append(c)
-    
-    # Générer le classement STRICT
-    classement = generate_ranking_for_poste(poste, result)
-    
-    # Préparer la réponse
-    response = {
-        'poste': poste,
-        'total_candidats': len(classement),
-        'classement': [
-            {
-                'rang': c['ranking_position'],
-                'nom': f"{c.get('prenom', '')} {c.get('nom', '')}".strip(),
-                'email': c.get('email', ''),
-                'telephone': c.get('telephone', ''),
-                'score': int(c.get('score', 0)),
-                'ranking_score': c['ranking_score'],
-                'recommandation': c['ranking_recommendation'],
-                'signaux_forts': len(c.get('signaux_detectes_parsed', [])),
-                'criteres_valides': c.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),
-                'eliminatoires_manquants': c.get('score_breakdown_parsed', {}).get('flags_eliminatoires_count', 0),
-                'date_candidature': c.get('date_candidature', '')
-            }
-            for c in classement
-        ],
-        'criteres_classement': {
-            '1_priorite': 'Score global (0-10) - critères éliminatoires bloquent à 0',
-            '2_departage': 'Nombre de signaux forts détectés (pondération x0.5)',
-            '3_departage': 'Nombre de critères "à vérifier" validés (pondération x0.2)',
-            '4_departage': 'Date de candidature (plus récent avantagé)'
-        }
-    }
-    
-    return jsonify(response), 200
-
-
-@app.route('/api/recruteur/classement/<poste>/export/<format>', methods=['GET'])
-@jwt_required()
-def export_classement(poste, format):
-    """
-    Export du classement en CSV, Excel ou PDF
-    """
-    if poste not in POSTES:
-        return jsonify({'error': 'Poste inconnu'}), 404
-    
-    # Récupérer et classer les candidats
-    keys = redis_client.keys("candidat:*")
-    result = []
-    for k in keys:
-        c = redis_client.hgetall(k)
-        c['id'] = k.split(':', 1)[1]
-        for field in ['score_breakdown', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details']:
-            if c.get(field):
-                try: c[f'{field}_parsed'] = json.loads(c[field])
-                except: pass
-        result.append(c)
-    
-    classement = generate_ranking_for_poste(poste, result)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    if format.lower() == 'csv':
-        output = io.StringIO()
-        writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_ALL)
-        writer.writerow(['Rang', 'Candidat', 'Téléphone', 'Score', 'Signaux forts', 'Critères validés', 'Recommandation'])
-        for c in classement:
-            writer.writerow([
-                c['ranking_position'],
-                f"{c.get('prenom', '')} {c.get('nom', '')}".strip(),
-                c.get('telephone', '') or '–',
-                c.get('score', '0'),
-                len(c.get('signaux_detectes_parsed', [])),
-                c.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),
-                c['ranking_recommendation']
-            ])
-        output.seek(0)
-        return send_file(
-            io.BytesIO(output.getvalue().encode('utf-8-sig')),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=f'classement_{poste}_{timestamp}.csv'
-        )
-    
-    elif format.lower() in ['excel', 'xlsx']:
-        if not OPENPYXL_AVAILABLE:
-            return jsonify({'error': 'Export Excel non disponible'}), 503
-        
-        wb = Workbook()
-        if 'Sheet' in wb.sheetnames:
-            del wb['Sheet']
-        ws = wb.active
-        ws.title = f"Classement {poste[:20]}"
-        
-        header_fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
-        header_font = Font(color="FFFFFF", bold=True)
-        border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-        
-        headers = ['Rang', 'Candidat', 'Téléphone', 'Score', 'Signaux forts', 'Critères validés', 'Recommandation']
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.border = border
-            cell.alignment = Alignment(horizontal='center')
-        
-        for row_idx, c in enumerate(classement, 2):
-            row = [
-                c['ranking_position'],
-                f"{c.get('prenom', '')} {c.get('nom', '')}".strip(),
-                c.get('telephone', '') or '–',
-                int(c.get('score', 0)),
-                len(c.get('signaux_detectes_parsed', [])),
-                c.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),
-                c['ranking_recommendation']
-            ]
-            for col, value in enumerate(row, 1):
-                cell = ws.cell(row=row_idx, column=col, value=value)
-                cell.border = border
-                cell.alignment = Alignment(horizontal='center')
-                if col == 1:  # Rang
-                    cell.font = Font(bold=True)
-                    if c['ranking_position'] == 1:
-                        cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
-                    elif c['ranking_position'] <= 3:
-                        cell.fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
-        
-        for col in range(1, 8):
-            ws.column_dimensions[get_column_letter(col)].width = 20
-        
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
-        return send_file(
-            output,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=f'classement_{poste}_{timestamp}.xlsx'
-        )
-    
-    elif format.lower() == 'pdf':
-        if not REPORTLAB_AVAILABLE:
-            return jsonify({'error': 'Export PDF non disponible'}), 503
-        
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
-        elements = []
-        styles = getSampleStyleSheet()
-        
-        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#1a3a5c'), spaceAfter=15, alignment=TA_CENTER)
-        elements.append(Paragraph(f"CLASSEMENT - {poste}", title_style))
-        elements.append(Spacer(1, 0.2*cm))
-        
-        date_style = ParagraphStyle('DateStyle', parent=styles['Normal'], fontSize=9, textColor=colors.grey)
-        elements.append(Paragraph(f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y')}", date_style))
-        elements.append(Spacer(1, 0.5*cm))
-        
-        data = [['Rang', 'Candidat', 'Score', 'Signaux', 'Recommandation']]
-        for c in classement[:20]:  # Top 20 pour PDF
-            data.append([
-                str(c['ranking_position']),
-                f"{c.get('prenom', '')} {c.get('nom', '')}".strip()[:25],
-                str(c.get('score', 0)),
-                str(len(c.get('signaux_detectes_parsed', []))),
-                c['ranking_recommendation'][:30]
-            ])
-        
-        table = Table(data, colWidths=[1.5*cm, 6*cm, 2*cm, 2*cm, 5*cm])
-        table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black)
-        ]))
-        
-        elements.append(table)
-        doc.build(elements)
-        buffer.seek(0)
-        return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=f'classement_{poste}_{timestamp}.pdf')
-    
-    else:
-        return jsonify({'error': 'Format non supporté'}), 400
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 📄 ROUTES D'EXPORT DE RAPPORTS GÉNÉRAUX
+# 📄 ROUTES D'EXPORT DE RAPPORTS
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/recruteur/export/<format>', methods=['GET'])
@@ -1546,10 +1277,10 @@ if __name__ == '__main__':
     print(f"🚀 Serveur RecrutBank démarré sur le port {port}")
     print(f"📋 Grille Word chargée: {len(GRILLE)} postes")
     print(f"🔍 Analyse auto: VÉRIFICATION STRICTE ET EXACTE")
-    print(f"🏆 Classement STRICT des candidats par poste disponible")
+    print(f"🏆 Classement TRÈS STRICT avec ID (numérotation) et RANG (priorité)")
     print(f"📊 Scoring Excel: Adéquation(0-3)+Cohérence(0-2)+Risque(0-3)+CV(0-1)+Lettre(0-1)=/10")
     print(f"📞 Téléphone inclus dans tous les exports")
-    print(f"📁 Upload multiple certificats supporté")
+    print(f"🔢 Colonne ID et RANG ajoutées dans Excel/CSV/PDF")
     if REPORTLAB_AVAILABLE:
         print(f"   ✅ reportlab installé (PDF)")
     if OPENPYXL_AVAILABLE:
