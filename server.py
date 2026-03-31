@@ -1,7 +1,9 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique STRICTE
 # Élimination AUTOMATIQUE si UN critère éliminatoire manque (logique AND stricte)
 # Analyse TOUS les documents (CV + Lettre + Certificats) avec matching EXACT
-# ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
+# ⚠️ STAGES EXCLUS du calcul d'expérience
+# ✅ CALCUL depuis date de début jusqu'à AUJOURD'HUI si "à aujourd'hui"/"présent"
+# ✅ VALIDE si AU MOINS UNE expérience pro atteint le minimum requis
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -89,6 +91,8 @@ POSTES = [
 # ══════════════════════════════════════════════════════════════════════════════
 # ⚠️ LOGIQUE STRICTE : Si UN SEUL critère éliminatoire n'est PAS trouvé → ÉLIMINATION AUTOMATIQUE
 # ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
+# ✅ CALCUL depuis date de début jusqu'à AUJOURD'HUI si "à aujourd'hui"/"présent"
+# ✅ VALIDE si AU MOINS UNE expérience pro atteint le minimum requis
 
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -326,6 +330,12 @@ PROFESSIONAL_KEYWORDS = [
     "en poste", "recruté", "embauché", "collaborateur", "cadre", "agent"
 ]
 
+# ── MOTS-CLÉS POUR "AUJOURD'HUI" / "PRÉSENT" / "NOW" ────────────────────────────
+CURRENT_DATE_KEYWORDS = [
+    "aujourd'hui", "présent", "maintenant", "now", "current", "en cours",
+    "à ce jour", "toujours en poste", "toujours", "actuellement"
+]
+
 # ── HELPERS AUTH ───────────────────────────────────────────────────────────────
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
@@ -399,24 +409,77 @@ def normalize_text(text):
     return text
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🧮 CALCUL EXPÉRIENCE PROFESSIONNELLE (STAGES EXCLUS)
+# 🧮 CALCUL EXPÉRIENCE PROFESSIONNELLE (STAGES EXCLUS + CALCUL JUSQU'À AUJOURD'HUI)
 # ══════════════════════════════════════════════════════════════════════════════
+
+def parse_date(date_str):
+    """
+    Parse une date depuis différents formats.
+    Retourne un objet datetime ou None si impossible.
+    """
+    if not date_str:
+        return None
+    
+    date_str = date_str.strip().lower()
+    
+    # Formats à essayer
+    date_formats = [
+        '%m/%Y',      # 01/2020
+        '%m/%y',      # 01/20
+        '%Y-%m',      # 2020-01
+        '%Y-%m-%d',   # 2020-01-15
+        '%d/%m/%Y',   # 15/01/2020
+        '%d/%m/%y',   # 15/01/20
+        '%B %Y',      # Janvier 2020
+        '%b %Y',      # Jan 2020
+        '%Y',         # 2020
+    ]
+    
+    for fmt in date_formats:
+        try:
+            return datetime.datetime.strptime(date_str, fmt)
+        except:
+            continue
+    
+    # Essaye d'extraire juste l'année
+    year_match = re.search(r'\b(20\d{2}|19\d{2})\b', date_str)
+    if year_match:
+        try:
+            return datetime.datetime(int(year_match.group(1)), 1, 1)
+        except:
+            pass
+    
+    return None
+
+
+def is_current_position(text):
+    """
+    Vérifie si une position est actuelle (jusqu'à aujourd'hui).
+    """
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in CURRENT_DATE_KEYWORDS)
+
 
 def calculate_professional_experience_years(cv_text, lettre_text, attestation_texts_list):
     """
     Calcule les années d'expérience professionnelle ACTIVE uniquement.
     ⚠️ EXCLUT les stages, alternances, PFE, etc.
-    Retourne le nombre d'années (float).
+    ✅ CALCULE depuis la date de début jusqu'à AUJOURD'HUI si "à aujourd'hui"/"présent"
+    ✅ VALIDE si AU MOINS UNE expérience professionnelle atteint le minimum requis
+    Retourne le nombre d'années (float) et la liste des expériences avec leurs durées.
     """
     full_text = normalize_text(cv_text + " " + (lettre_text or "") + " " + " ".join(attestation_texts_list or []))
     
-    # Patterns pour extraire les périodes d'emploi (format simplifié)
-    # Format: "2020-2022", "Janvier 2020 - Décembre 2022", "Depuis 2020"
+    # Patterns pour extraire les périodes d'emploi
+    # Format: "2020-2022", "Janvier 2020 - Décembre 2022", "Depuis 2020", "2020 - aujourd'hui"
     date_patterns = [
-        r'(\d{4})\s*[-–/]\s*(\d{4})',  # 2020-2022
-        r'(\d{1,2}/\d{4})\s*[-–/]\s*(\d{1,2}/\d{4})',  # 01/2020-12/2022
+        r'(\d{1,2}/\d{4})\s*[-–/]\s*(\d{1,2}/\d{4}|aujourd\'hui|présent|maintenant|now|current)',  # 01/2020-01/2022 ou aujourd'hui
+        r'(\d{4})\s*[-–/]\s*(\d{4}|aujourd\'hui|présent|maintenant|now|current)',  # 2020-2022 ou aujourd'hui
+        r'(\d{1,2}/\d{4})\s*[-–/]\s*(à ce jour|en cours|actuellement)',  # 01/2020 - à ce jour
+        r'(depuis|since)\s+(\d{1,2}/\d{4}|\d{4})',  # depuis 01/2020
     ]
     
+    experiences = []
     total_months = 0
     
     # Parser le texte ligne par ligne pour distinguer stages vs expérience pro
@@ -433,33 +496,77 @@ def calculate_professional_experience_years(cv_text, lettre_text, attestation_te
         if any(pro_kw in line_lower for pro_kw in PROFESSIONAL_KEYWORDS):
             # Chercher des patterns de dates dans la ligne
             for pattern in date_patterns:
-                matches = re.findall(pattern, line)
+                matches = re.findall(pattern, line, re.IGNORECASE)
                 for match in matches:
                     try:
-                        # Extraire les années
-                        if '/' in match[0]:
-                            start_year = int(match[0].split('/')[1])
-                            end_year = int(match[1].split('/')[1])
+                        # Extraire les dates
+                        start_str = match[0].strip()
+                        end_str = match[1].strip() if len(match) > 1 else None
+                        
+                        # Parser la date de début
+                        start_date = parse_date(start_str)
+                        if not start_date:
+                            continue
+                        
+                        # Déterminer la date de fin
+                        if end_str and is_current_position(end_str):
+                            # ✅ Calculer jusqu'à AUJOURD'HUI
+                            end_date = datetime.datetime.now()
+                        elif end_str:
+                            end_date = parse_date(end_str)
+                            if not end_date:
+                                continue
                         else:
-                            start_year = int(match[0])
-                            end_year = int(match[1])
+                            # Pas de date de fin → ignorer
+                            continue
                         
                         # Calculer la durée en mois
-                        duration_months = (end_year - start_year) * 12
-                        total_months += max(0, duration_months)
-                    except:
+                        duration_months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
+                        duration_months = max(0, duration_months)
+                        
+                        experiences.append({
+                            'start': start_date,
+                            'end': end_date,
+                            'months': duration_months,
+                            'is_current': is_current_position(end_str) if end_str else False
+                        })
+                        
+                        total_months += duration_months
+                    except Exception as e:
+                        print(f"⚠️ Erreur parsing date: {e}")
                         continue
     
     # Convertir en années
     professional_years = total_months / 12.0
     
-    return round(professional_years, 1)
+    return round(professional_years, 1), experiences
+
+
+def check_minimum_experience_required(cv_text, lettre_text, attestation_texts_list, required_years):
+    """
+    Vérifie si AU MOINS UNE expérience professionnelle atteint le minimum requis.
+    ✅ Retourne True si une seule expérience pro >= required_years
+    ✅ Calcule depuis date de début jusqu'à AUJOURD'HUI si "à aujourd'hui"
+    """
+    _, experiences = calculate_professional_experience_years(cv_text, lettre_text, attestation_texts_list)
+    
+    # Vérifier si AU MOINS UNE expérience atteint le minimum
+    for exp in experiences:
+        exp_years = exp['months'] / 12.0
+        if exp_years >= required_years:
+            return True, exp_years
+    
+    # Sinon, retourner le total cumulé
+    total_years, _ = calculate_professional_experience_years(cv_text, lettre_text, attestation_texts_list)
+    return total_years >= required_years, total_years
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 🧠 MOTEUR D'ANALYSE CV - ÉLIMINATION STRICTE (TOUS critères requis)
 # Analyse TOUS les documents : CV + Lettre + TOUS les certificats
 # ⚠️ STAGES EXCLUS du calcul d'expérience
+# ✅ CALCUL depuis date de début jusqu'à AUJOURD'HUI si "à aujourd'hui"
+# ✅ VALIDE si AU MOINS UNE expérience pro atteint le minimum requis
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_criterion_match(criterion, full_text):
@@ -486,6 +593,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     Même si les autres critères éliminatoires sont validés, le candidat est éliminé.
     
     ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
+    ✅ CALCUL depuis date de début jusqu'à AUJOURD'HUI si "à aujourd'hui"
+    ✅ VALIDE si AU MOINS UNE expérience pro atteint le minimum requis
     
     Analyse TOUS les documents soumis : CV + Lettre + TOUS les certificats.
     
@@ -548,31 +657,31 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         
         # 🔍 CAS SPÉCIAL : Critères d'expérience minimale (2 ans IT, 3 ans Finance)
         # → Calculer l'expérience professionnelle UNIQUEMENT (hors stages)
+        # → VALIDE si AU MOINS UNE expérience pro atteint le minimum
         if ("expérience professionnelle" in crit.lower() or "ans d'expérience professionnelle" in crit.lower()) and ("ans" in crit.lower() or "année" in crit.lower()):
-            
-            # Calculer l'expérience professionnelle uniquement (stages exclus)
-            prof_experience_years = calculate_professional_experience_years(cv_text, lettre_text, attestation_texts_list)
             
             # Extraire le nombre d'années requis du critère
             required_years = 2 if "2 ans" in crit.lower() else 3
             
-            is_present = prof_experience_years >= required_years
+            # Vérifier si AU MOINS UNE expérience pro atteint le minimum
+            is_present, exp_years = check_minimum_experience_required(cv_text, lettre_text, attestation_texts_list, required_years)
+            
             checklist[key] = is_present
             
             if not is_present:
-                flags_elim.append(f"❌ {crit} (seulement {prof_experience_years:.1f} ans d'expérience professionnelle, {required_years} requis - stages exclus)")
+                flags_elim.append(f"❌ {crit} (seulement {exp_years:.1f} ans d'expérience professionnelle, {required_years} requis - stages exclus)")
                 details['alertes_attention'].append(f"🔴 Éliminatoire: {crit} manquant")
                 details['matching_details'][crit] = {
                     'found': False,
-                    'status': f'ÉLIMINATOIRE - Seulement {prof_experience_years:.1f} ans pro (stages exclus), {required_years} ans requis',
-                    'professional_experience_years': prof_experience_years,
+                    'status': f'ÉLIMINATOIRE - Seulement {exp_years:.1f} ans pro (stages exclus), {required_years} ans requis',
+                    'professional_experience_years': exp_years,
                     'required_years': required_years
                 }
             else:
                 details['matching_details'][crit] = {
                     'found': True,
-                    'status': f'VALIDÉ ({prof_experience_years:.1f} ans pro >= {required_years} ans requis - stages exclus)',
-                    'professional_experience_years': prof_experience_years,
+                    'status': f'VALIDÉ ({exp_years:.1f} ans pro >= {required_years} ans requis - stages exclus)',
+                    'professional_experience_years': exp_years,
                     'required_years': required_years
                 }
         else:
@@ -705,6 +814,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
     """
     Analyse TOUS les documents soumis par le candidat.
     ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
+    ✅ CALCUL depuis date de début jusqu'à AUJOURD'HUI si "à aujourd'hui"
+    ✅ VALIDE si AU MOINS UNE expérience pro atteint le minimum requis
     """
     try:
         key = f"candidat:{token}"
@@ -1457,6 +1568,8 @@ if __name__ == '__main__':
     print(f"🔍 Analyse auto: MATCHING EXACT (soit ça passe, soit ça casse)")
     print(f"📄 Analyse TOUS documents: CV + Lettre + Certificats")
     print(f"🎓 STAGES EXCLUS du calcul d'expérience professionnelle")
+    print(f"📅 CALCUL expérience: depuis date début jusqu'à AUJOURD'HUI si 'à aujourd'hui'")
+    print(f"✅ VALIDE si AU MOINS UNE expérience pro atteint le minimum requis")
     print(f"🏆 Classement STRICT avec RANG automatique + EMAIL")
     print(f"📊 Scoring Excel: Adéquation(0-3)+Cohérence(0-2)+Risque(0-3)+CV(0-1)+Lettre(0-1)=/10")
     print(f"📧 Email extrait dans TOUS les formats")
