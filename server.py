@@ -603,7 +603,7 @@ def extract_text_from_file(filepath, filename):
 
 _ACCENT_MAP = str.maketrans(
     'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆ',
-    'aaaeeeeiioouuucoaAAAEEEEIIOOUUUCOA'
+    'aaaeeeeiiouuucoaAAAEEEEIIOUUUCOA'
 )
 
 def normalize_text(text):
