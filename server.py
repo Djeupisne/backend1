@@ -124,7 +124,7 @@ STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 
 # ── NORMALISATION TEXTE (CORRIGÉ: 32→32 caractères) ─────────────────────────
-_ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆ', 'aaaeeeeiioouuucoaAAAEEEEIIOOUUUCOA')
+_ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆ', 'aaaeeeeiioouuuc o aAAAEEEEIIOOUUUCOA')
 
 def normalize_text(text):
     if not text: return ""
