@@ -594,10 +594,7 @@ def extract_text_from_file(filepath, filename):
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ✅ CORRECTION : 32 caractères des deux côtés (mapping 1:1)
-_ACCENT_MAP = str.maketrans(
-    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆ',
-    'aaaeeeeiioouuucoaAAAEEEEIIOUUUCOA'
-)
+_ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆ', 'aaaeeeeiioouuucoaAAAEEEEIIOUUUCOA')
 
 def normalize_text(text):
     """Minuscules + suppression accents + nettoyage ponctuation."""
