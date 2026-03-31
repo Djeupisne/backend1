@@ -1,6 +1,7 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique EXACTE des CV
-# Basé sur la grille Word mise à jour : 3 blocs + Exigence 3 ans Finance
-# Email extrait dans tous les exports + RANG automatique strict
+# Basé sur la grille Word : Matching EXACT (soit ça passe, soit ça casse)
+# Analyse TOUS les documents (CV + Lettre + Certificats)
+# Rapports larges pour texte non coupé
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -15,12 +16,12 @@ from docx import Document
 
 # ── EXPORT PDF & EXCEL ─────────────────────────────────────────────────────
 try:
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
@@ -83,16 +84,8 @@ POSTES = [
     "IT Réseau & Infrastructure"
 ]
 
-# ── POSTES FINANCE (exigence 3 ans minimum) ───────────────────────────────────
-POSTES_FINANCE = [
-    "Responsable Administration de Crédit",
-    "Analyste Crédit CCB",
-    "Senior Finance Officer",
-    "Market Risk Officer"
-]
-
 # ══════════════════════════════════════════════════════════════════════════════
-# 📋 GRILLE DE PRÉSÉLECTION - NOUVEAUX CRITÈRES WORD MIS À JOUR
+# 📋 GRILLE DE PRÉSÉLECTION - MATCHING EXACT (SOIT ÇA PASSE, SOIT ÇA CASSE)
 # ══════════════════════════════════════════════════════════════════════════════
 
 GRILLE = {
@@ -239,83 +232,83 @@ GRILLE = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔍 MAPPING MOTS-CLÉS EXACTS - NOUVEAUX CRITÈRES WORD MIS À JOUR
+# 🔍 MAPPING MOTS-CLÉS EXACTS - MATCHING STRICT (SOIT ÇA PASSE, SOIT ÇA CASSE)
 # ══════════════════════════════════════════════════════════════════════════════
 
 KEYWORD_MAPPING = {
     # === Responsable Administration de Crédit ===
-    "Expérience bancaire": ["expérience bancaire", "secteur bancaire", "établissement bancaire", "banque commerciale", "métier bancaire", "institution financière", "banque"],
-    "3 ans ou plus en crédit / risque": ["3 ans crédit", "trois ans crédit", "3 années crédit", "expérience crédit", "gestion risque crédit", "3 ans risque", "4 ans", "5 ans", "6 ans", "7 ans", "8 ans", "9 ans", "10 ans", "plusieurs années"],
-    "Exposition aux garanties ou conformité": ["garanties", "nantissement", "hypothèque", "sûreté", "conformité", "COBAC", "réglementation bancaire", "BCAC", "garantie", "audit"],
-    "Validation de dossiers": ["validation dossier", "instruction crédit", "approbation crédit", "dossier crédit", "validation des dossiers", "valider des dossiers"],
-    "Gestion des garanties": ["gestion garanties", "suivi garanties", "garanties réelles", "sûretés", "portefeuille garanties", "gérer les garanties"],
-    "Participation à des audits": ["audit", "contrôle interne", "inspection", "review", "compliance audit", "audit interne", "participer aux audits"],
-    "IFRS 9": ["IFRS 9", "IAS 39", "normes IFRS", "comptabilité IFRS", "IFRS"],
+    "Expérience bancaire": ["expérience bancaire", "secteur bancaire", "établissement bancaire", "banque commerciale", "institution financière", "banque"],
+    "3 ans ou plus en crédit / risque": ["3 ans", "trois ans", "3 années", "4 ans", "5 ans", "6 ans", "7 ans", "8 ans", "9 ans", "10 ans", "plusieurs années", "expérience crédit", "gestion risque crédit"],
+    "Exposition aux garanties ou conformité": ["garanties", "nantissement", "hypothèque", "sûreté", "conformité", "COBAC", "réglementation bancaire", "BCAC", "audit"],
+    "Validation de dossiers": ["validation dossier", "instruction crédit", "approbation crédit", "dossier crédit", "validation des dossiers"],
+    "Gestion des garanties": ["gestion garanties", "suivi garanties", "garanties réelles", "sûretés", "portefeuille garanties"],
+    "Participation à des audits": ["audit", "contrôle interne", "inspection", "compliance audit", "audit interne"],
+    "IFRS 9": ["IFRS 9", "IAS 39", "normes IFRS", "comptabilité IFRS"],
     "COBAC / conformité": ["COBAC", "conformité bancaire", "régulation bancaire", "BCEAO", "BCAC", "commission bancaire"],
     "Suivi portefeuille / impayés": ["portefeuille crédit", "impayés", "recouvrement", "contentieux", "encours", "suivi portefeuille"],
     
     # === Analyste Crédit CCB ===
-    "Expérience en analyse crédit": ["analyse crédit", "credit analysis", "évaluation crédit", "scoring crédit", "analyse financière crédit", "analyste crédit"],
+    "Expérience en analyse crédit": ["analyse crédit", "credit analysis", "évaluation crédit", "scoring crédit", "analyse financière crédit"],
     "Profil purement commercial sans analyse": ["commercial", "vente", "business development", "chargé d'affaires commercial"],
-    "Capacité à lire des états financiers": ["états financiers", "bilan", "compte de résultat", "ratios financiers", "analyse financière", "lire les états financiers"],
+    "Capacité à lire des états financiers": ["états financiers", "bilan", "compte de résultat", "ratios financiers", "analyse financière"],
     "3 ans expérience institution financière": ["3 ans", "trois ans", "3 années", "institution financière", "banque", "secteur bancaire", "4 ans", "5 ans", "6 ans"],
-    "Type de clients PME": ["PME", "petites entreprises", "moyennes entreprises", "TPE", "entreprises"],
+    "Type de clients PME": ["PME", "petites entreprises", "moyennes entreprises", "TPE"],
     "Type de clients particuliers": ["particuliers", "clients particuliers", "retail", "clientèle particulière"],
-    "Structuration de crédit": ["structuration crédit", "montage crédit", "dossier de crédit", "structurer un crédit", "montage de crédits"],
-    "Avis de crédit": ["avis crédit", "recommandation crédit", "opinion crédit", "credit opinion", "avis de crédit", "donner un avis"],
-    "Cash-flow analysis": ["cash-flow", "cash flow", "flux de trésorerie", "FCF", "free cash flow", "cash-flow analysis"],
-    "Montage de crédit": ["montage crédit", "structuration", "dossier de crédit", "montage de dossiers", "montage des crédits"],
-    "Comités de crédit": ["comité crédit", "commission crédit", "credit committee", "validation comité", "comité des engagements"],
+    "Structuration de crédit": ["structuration crédit", "montage crédit", "dossier de crédit", "structurer un crédit"],
+    "Avis de crédit": ["avis crédit", "recommandation crédit", "opinion crédit", "credit opinion"],
+    "Cash-flow analysis": ["cash-flow", "cash flow", "flux de trésorerie", "FCF", "free cash flow"],
+    "Montage de crédit": ["montage crédit", "structuration", "dossier de crédit", "montage de dossiers"],
+    "Comités de crédit": ["comité crédit", "commission crédit", "credit committee", "validation comité"],
     
     # === Archiviste ===
-    "Expérience en gestion documentaire structurée": ["gestion documentaire", "archivage", "GED", "records management", "classement", "documentation", "gestion des documents"],
-    "Rigueur démontrée": ["rigueur", "méthode", "organisation", "procédures", "processus", "traçabilité", "précision", "rigoureux"],
-    "Archivage physique et électronique": ["archivage physique", "archivage électronique", "dématérialisation", "numérisation", "archives", "archivage physique et électronique"],
-    "Gestion des dossiers sensibles": ["dossiers sensibles", "confidentiel", "sécurisé", "accès restreint", "données sensibles", "dossiers confidentiels"],
+    "Expérience en gestion documentaire structurée": ["gestion documentaire", "archivage", "GED", "records management", "classement", "documentation"],
+    "Rigueur démontrée": ["rigueur", "méthode", "organisation", "procédures", "processus", "traçabilité", "précision"],
+    "Archivage physique et électronique": ["archivage physique", "archivage électronique", "dématérialisation", "numérisation", "archives"],
+    "Gestion des dossiers sensibles": ["dossiers sensibles", "confidentiel", "sécurisé", "accès restreint", "données sensibles"],
     "Expérience en banque / juridique": ["banque", "établissement financier", "juridique", "droit bancaire", "secteur bancaire"],
-    "Manipulation de garanties ou contrats": ["garanties", "contrats", "conventions", "actes juridiques", "documentation juridique", "manipulation des garanties"],
+    "Manipulation de garanties ou contrats": ["garanties", "contrats", "conventions", "actes juridiques", "documentation juridique"],
     
     # === Senior Finance Officer ===
-    "Expérience en reporting financier structuré": ["reporting financier", "reporting", "tableaux de bord", "KPI", "indicateurs", "reporting structuré", "états financiers"],
-    "Exposition aux états financiers": ["états financiers", "bilan", "compte de résultat", "consolidation", "reporting financier", "états financiers consolidés"],
-    "Interaction avec auditeurs": ["auditeurs", "audit", "CAC", "commissaires aux comptes", "interaction avec auditeurs", "audit externe"],
+    "Expérience en reporting financier structuré": ["reporting financier", "reporting", "tableaux de bord", "KPI", "indicateurs", "états financiers"],
+    "Exposition aux états financiers": ["états financiers", "bilan", "compte de résultat", "consolidation", "reporting financier"],
+    "Interaction avec auditeurs": ["auditeurs", "audit", "CAC", "commissaires aux comptes", "audit externe"],
     "3 ans expérience département finance": ["3 ans", "trois ans", "3 années", "département finance", "finance", "4 ans", "5 ans", "6 ans"],
-    "Production états financiers": ["production états financiers", "établissement des états financiers", "élaboration des états financiers", "production des comptes"],
-    "Reporting groupe": ["reporting groupe", "reporting consolidé", "reporting groupe", "consolidation groupe"],
-    "Connaissance IFRS": ["IFRS", "normes internationales", "comptabilité internationale", "IAS", "IFRS consolidation", "normes IFRS"],
-    "Contraintes réglementaires": ["réglementation", "contraintes réglementaires", "conformité", "réglementaire", "normes réglementaires"],
-    "IFRS / consolidation": ["IFRS", "consolidation", "comptes consolidés", "IFRS consolidation", "normes IFRS"],
-    "Interaction avec CAC": ["CAC", "commissaires aux comptes", "audit légal", "interaction avec CAC", "audit externe"],
-    "Outils type SPECTRA / CERBER / ERP": ["SPECTRA", "CERBER", "ERP", "SAP", "Oracle", "outil de reporting", "logiciel de consolidation"],
+    "Production états financiers": ["production états financiers", "établissement des états financiers", "élaboration des états financiers"],
+    "Reporting groupe": ["reporting groupe", "reporting consolidé", "consolidation groupe"],
+    "Connaissance IFRS": ["IFRS", "normes internationales", "comptabilité internationale", "IAS"],
+    "Contraintes réglementaires": ["réglementation", "contraintes réglementaires", "conformité", "réglementaire"],
+    "IFRS / consolidation": ["IFRS", "consolidation", "comptes consolidés", "IFRS consolidation"],
+    "Interaction avec CAC": ["CAC", "commissaires aux comptes", "audit légal", "audit externe"],
+    "Outils type SPECTRA / CERBER / ERP": ["SPECTRA", "CERBER", "ERP", "SAP", "Oracle", "outil de reporting"],
     
     # === Market Risk Officer ===
-    "Base en risques de marché": ["risque marché", "market risk", "risques de marché", "gestion des risques de marché", "risque de marché"],
-    "Compétences quantitatives": ["quantitatif", "quantitative", "mathématiques", "statistiques", "modélisation", "compétences quantitatives"],
-    "Exposition à FX / taux / liquidité": ["FX", "change", "taux", "liquidité", "forex", "taux d'intérêt", "risque de liquidité", "FX taux"],
+    "Base en risques de marché": ["risque marché", "market risk", "risques de marché", "gestion des risques de marché"],
+    "Compétences quantitatives": ["quantitatif", "quantitative", "mathématiques", "statistiques", "modélisation"],
+    "Exposition à FX / taux / liquidité": ["FX", "change", "taux", "liquidité", "forex", "taux d'intérêt", "risque de liquidité"],
     "3 ans expérience institution financière": ["3 ans", "trois ans", "3 années", "institution financière", "banque", "secteur bancaire", "4 ans", "5 ans", "6 ans"],
-    "Maîtrise VaR / stress testing": ["VaR", "Value at Risk", "stress testing", "back-testing", "scénarios", "value at risk", "VaR stress"],
-    "Analyse des positions": ["analyse des positions", "positions", "analyse de portefeuille", "suivi des positions", "positions de marché"],
+    "Maîtrise VaR / stress testing": ["VaR", "Value at Risk", "stress testing", "back-testing", "scénarios"],
+    "Analyse des positions": ["analyse des positions", "positions", "analyse de portefeuille", "suivi des positions"],
     "Excel avancé": ["Excel avancé", "Excel", "tableaux croisés", "macros", "pivot", "VBA"],
-    "VBA / Python": ["VBA", "Python", "programmation", "scripting", "VBA Python", "développement VBA"],
+    "VBA / Python": ["VBA", "Python", "programmation", "scripting"],
     "Bâle II / III": ["Bâle II", "Bâle III", "Basel II", "Basel III", "accords de Bâle", "réglementation Bâle"],
-    "Gestion ALM / liquidité": ["ALM", "Asset Liability Management", "liquidité", "gestion ALM", "actif-passif", "gestion de la liquidité"],
-    "Produits FICC FX taux commodities": ["FICC", "produits dérivés", "commodities", "matières premières", "produits de taux", "FX taux commodities"],
-    "Reporting risque": ["reporting risque", "reporting des risques", "rapport de risque", "reporting risque marché"],
+    "Gestion ALM / liquidité": ["ALM", "Asset Liability Management", "liquidité", "gestion ALM", "actif-passif"],
+    "Produits FICC FX taux commodities": ["FICC", "produits dérivés", "commodities", "matières premières", "produits de taux", "FX"],
+    "Reporting risque": ["reporting risque", "reporting des risques", "rapport de risque"],
     
     # === IT Réseau & Infrastructure ===
     "Expérience en réseau / infrastructure": ["réseau", "infrastructure", "LAN", "WAN", "VPN", "réseaux", "infrastructure IT", "network"],
-    "Exposition à environnement critique banque telco datacenter": ["banque", "telco", "télécom", "datacenter", "centre de données", "environnement critique", "secteur bancaire", "opérateur télécom"],
-    "Notion de sécurité IT": ["sécurité IT", "cybersécurité", "sécurité informatique", "firewall", "sécurité réseau", "IT security"],
+    "Exposition à environnement critique banque telco datacenter": ["banque", "telco", "télécom", "datacenter", "centre de données", "environnement critique", "secteur bancaire"],
+    "Notion de sécurité IT": ["sécurité IT", "cybersécurité", "sécurité informatique", "firewall", "sécurité réseau"],
     "2 ans expérience minimum": ["2 ans", "deux ans", "2 années", "expérience", "3 ans", "4 ans", "5 ans"],
-    "Gestion réseaux LAN/WAN VPN": ["LAN", "WAN", "VPN", "réseaux locaux", "réseaux étendus", "virtual private network", "gestion des réseaux"],
-    "Gestion serveurs Windows/Linux": ["Windows Server", "Linux", "serveurs", "administration serveurs", "Windows", "Unix", "gestion des serveurs"],
-    "Cloud même basique": ["cloud", "AWS", "Azure", "Google Cloud", "cloud computing", "infrastructure cloud", "cloud basique"],
-    "Gestion des incidents": ["incident", "gestion des incidents", "support", "résolution", "ITIL", "résolution", "incident management"],
-    "Assurance de la disponibilité": ["disponibilité", "haute disponibilité", "SLA", "uptime", "disponibilité du service", "assurer la disponibilité"],
-    "Cybersécurité / firewall": ["cybersécurité", "firewall", "sécurité", "IDS", "IPS", "SIEM", "pentest", "sécurité informatique"],
-    "Haute disponibilité / PRA/PCA": ["haute disponibilité", "PRA", "PCA", "plan de reprise", "continuité d'activité", "disaster recovery", "high availability"],
+    "Gestion réseaux LAN/WAN VPN": ["LAN", "WAN", "VPN", "réseaux locaux", "réseaux étendus", "virtual private network"],
+    "Gestion serveurs Windows/Linux": ["Windows Server", "Linux", "serveurs", "administration serveurs", "Windows", "Unix"],
+    "Cloud même basique": ["cloud", "AWS", "Azure", "Google Cloud", "cloud computing", "infrastructure cloud"],
+    "Gestion des incidents": ["incident", "gestion des incidents", "support", "résolution", "ITIL", "incident management"],
+    "Assurance de la disponibilité": ["disponibilité", "haute disponibilité", "SLA", "uptime", "disponibilité du service"],
+    "Cybersécurité / firewall": ["cybersécurité", "firewall", "sécurité", "IDS", "IPS", "SIEM", "pentest"],
+    "Haute disponibilité / PRA/PCA": ["haute disponibilité", "PRA", "PCA", "plan de reprise", "continuité d'activité", "disaster recovery"],
     "Gestion ATM ou systèmes bancaires": ["ATM", "systèmes bancaires", "GAB", "distributeur automatique", "système bancaire", "bancaire"],
-    "Certifications Cisco Microsoft": ["CCNA", "CCNP", "CCIE", "Cisco", "Microsoft", "certification", "Network+", "MCSE", "certification IT"]
+    "Certifications Cisco Microsoft": ["CCNA", "CCNP", "CCIE", "Cisco", "Microsoft", "certification", "Network+", "MCSE"]
 }
 
 # ── HELPERS AUTH ───────────────────────────────────────────────────────────────
@@ -341,10 +334,11 @@ def init_recruteur():
 init_recruteur()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔧 PARSING DOCUMENTS
+# 🔧 PARSING DOCUMENTS - ANALYSE TOUS LES DOCUMENTS SOUMIS
 # ══════════════════════════════════════════════════════════════════════════════
 
 def extract_text_from_pdf(filepath):
+    """Extrait le texte d'un fichier PDF de manière ROBUSTE"""
     try:
         text = ""
         with open(filepath, 'rb') as f:
@@ -353,20 +347,23 @@ def extract_text_from_pdf(filepath):
                 content = page.extract_text()
                 if content:
                     text += content + "\n"
-        return text
+        return text.strip()
     except Exception as e:
         print(f"⚠️ Erreur lecture PDF: {e}")
         return ""
 
 def extract_text_from_docx(filepath):
+    """Extrait le texte d'un fichier DOCX de manière ROBUSTE"""
     try:
         doc = Document(filepath)
-        return "\n".join([para.text for para in doc.paragraphs])
+        paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+        return "\n".join(paragraphs).strip()
     except Exception as e:
         print(f"⚠️ Erreur lecture DOCX: {e}")
         return ""
 
 def extract_text_from_file(filepath, filename):
+    """Extrait le texte selon l'extension du fichier - ROBUSTE"""
     if not filepath or not os.path.exists(filepath):
         print(f"⚠️ Fichier non trouvé: {filepath}")
         return ""
@@ -378,6 +375,7 @@ def extract_text_from_file(filepath, filename):
     return ""
 
 def normalize_text(text):
+    """Normalise le texte pour la comparaison - MATCHING EXACT"""
     if not text:
         return ""
     text = text.lower()
@@ -386,27 +384,32 @@ def normalize_text(text):
     return text
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE CV — NOUVEAUX CRITÈRES WORD + EXIGENCE 3 ANS FINANCE
+# 🧠 MOTEUR D'ANALYSE CV - MATCHING EXACT (SOIT ÇA PASSE, SOIT ÇA CASSE)
+# Analyse TOUS les documents : CV + Lettre + TOUS les certificats
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_criterion_match(criterion, full_text):
     """
     Vérifie STRICTEMENT et EXACTEMENT si un critère est validé.
+    MATCHING EXACT : soit le mot-clé est trouvé, soit il ne l'est pas.
     """
     mots_cles = KEYWORD_MAPPING.get(criterion, [])
     if not mots_cles:
         return False, []
     
+    # Recherche EXACTE : au moins UNE variante doit être trouvée
     found_keywords = [kw for kw in mots_cles if kw.lower() in full_text]
     is_present = len(found_keywords) > 0
     
     return is_present, found_keywords
 
 
-def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
+def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     """
-    Analyse STRICTE selon la grille Word mise à jour.
-    🔴 Bloc 1: Éliminatoire (critères POSITIFS requis) → Score = 0 si manquant
+    Analyse STRICTE selon la grille Word - MATCHING EXACT.
+    Analyse TOUS les documents soumis : CV + Lettre + TOUS les certificats.
+    
+    🔴 Bloc 1: Éliminatoire (filtre dur) → Score = 0 si manquant
     🟠 Bloc 2: Cohérence → +1 point par critère validé
     🟡 Bloc 3: Signaux → +2 points par signal détecté
     
@@ -433,7 +436,10 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
             'score_breakdown': {}
         }
     
-    full_text = normalize_text(cv_text + " " + (lettre_text or "") + " " + (attestation_text or ""))
+    # 🔍 ANALYSE TOUS LES DOCUMENTS SOUMIS
+    # Concaténation de TOUS les textes : CV + Lettre + TOUS les certificats
+    all_attestation_text = " ".join(attestation_texts_list) if attestation_texts_list else ""
+    full_text = normalize_text(cv_text + " " + (lettre_text or "") + " " + all_attestation_text)
     
     checklist = {}
     flags_elim = []
@@ -443,14 +449,19 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
     details = {
         'cv_words': len(cv_text.split()) if cv_text else 0,
         'lettre_words': len(lettre_text.split()) if lettre_text else 0,
-        'attestation_words': len(attestation_text.split()) if attestation_text else 0,
+        'attestation_words': len(all_attestation_text.split()) if all_attestation_text else 0,
         'criteres_valides_bloc2': [],
         'signaux_valides_bloc3': [],
         'alertes_attention': [],
-        'matching_details': {}
+        'matching_details': {},
+        'documents_analyses': {
+            'cv': len(cv_text) > 0,
+            'lettre': len(lettre_text or "") > 0,
+            'certificats': len(attestation_texts_list) if attestation_texts_list else 0
+        }
     }
     
-    # 🔴 BLOC 1 : ÉLIMINATOIRE (critères POSITIFS requis)
+    # 🔴 BLOC 1 : ÉLIMINATOIRE (critères POSITIFS requis) - MATCHING EXACT
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
         is_present, found_keywords = check_criterion_match(crit, full_text)
@@ -458,21 +469,23 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         checklist[key] = is_present
         
         if not is_present:
+            # MATCHING EXACT ÉCHOUÉ → ÉLIMINATOIRE
             flags_elim.append(f"❌ {crit} (non trouvé)")
             details['alertes_attention'].append(f"🔴 Éliminatoire: {crit} manquant")
             details['matching_details'][crit] = {
                 'found': False, 
-                'status': 'ÉLIMINATOIRE - Critère requis non trouvé',
+                'status': 'ÉLIMINATOIRE - Critère requis non trouvé dans les documents',
                 'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
             }
         else:
+            # MATCHING EXACT RÉUSSI → VALIDÉ
             details['matching_details'][crit] = {
                 'found': True, 
                 'status': 'VALIDÉ',
                 'matched': found_keywords
             }
     
-    # 🟠 BLOC 2 : COHÉRENCE (+1 point par critère validé)
+    # 🟠 BLOC 2 : COHÉRENCE (+1 point par critère validé) - MATCHING EXACT
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
         is_present, found_keywords = check_criterion_match(crit, full_text)
@@ -482,7 +495,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
             points_bloc2 += 1
             details['criteres_valides_bloc2'].append(f"🟠 {crit}")
     
-    # 🟡 BLOC 3 : SIGNAUX (+2 points par signal détecté)
+    # 🟡 BLOC 3 : SIGNAUX (+2 points par signal détecté) - MATCHING EXACT
     for i, crit in enumerate(grille['signaux_forts']):
         key = f"signal_{i}"
         is_present, found_keywords = check_criterion_match(crit, full_text)
@@ -493,7 +506,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
             signaux.append(crit)
             details['signaux_valides_bloc3'].append(f"🟡 {crit}")
     
-    # ⚠️ POINTS D'ATTENTION
+    # ⚠️ POINTS D'ATTENTION - MATCHING EXACT
     for i, crit in enumerate(grille['points_attention']):
         key = f"attn_{i}"
         is_present, found_keywords = check_criterion_match(crit, full_text)
@@ -502,7 +515,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         if is_present:
             details['alertes_attention'].append(f"⚠️ {crit}")
     
-    # 🧮 CALCUL DU SCORE FINAL selon modèle Excel (sur 10)
+    # 🧮 CALCUL DU SCORE FINAL selon modèle Excel (sur 10) - STRICT
     if flags_elim:
         score_final = 0
         details['alertes_attention'].insert(0, f"🚫 Score bloqué à 0 : {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)")
@@ -510,14 +523,14 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         # Mapping selon modèle Excel :
         # Adéquation expérience (0-3) = critères éliminatoires validés (max 3)
         adequation = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
-        # Cohérence parcours (0-2) = critères à vérifier validés (max 2 pour correspondre au modèle)
+        # Cohérence parcours (0-2) = critères à vérifier validés (max 2)
         coherence = min(2, points_bloc2)
         # Exposition au risque de métier (0-3) = signaux forts détectés (max 3)
         risque_metier = min(3, len(signaux))
         # Qualité du CV (0-1) = 1 si score partiel >= 5
         qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
         # Lettre motivation (0-1) = 1 si lettre fournie
-        lettre_motiv = 1 if attestation_text and len(attestation_text.strip()) > 0 else 0
+        lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 0 else 0
         
         score_total_excel = adequation + coherence + risque_metier + qualite_cv + lettre_motiv
         score_final = min(10, score_total_excel)
@@ -536,7 +549,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
         'bloc3_points': points_bloc3,
         'total_raw_points': points_bloc2 + points_bloc3,
         'score_final': score_final,
-        'note': f"Score 0 = {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)" if flags_elim else f"Score Excel: {score_final}/10"
+        'note': f"Score 0 = {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)" if flags_elim else f"Score Excel: {score_final}/10",
+        'documents_analyses': details['documents_analyses']
     }
     
     return {
@@ -550,21 +564,28 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste):
 
 
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
+    """
+    Analyse TOUS les documents soumis par le candidat.
+    """
     try:
         key = f"candidat:{token}"
         
+        # Gestion attestation_filenames (liste ou string)
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
         
+        # Extraction CV
         cv_path = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
         cv_text = extract_text_from_file(cv_path, cv_filename) if cv_path else ""
         
+        # Extraction Lettre
         lettre_path = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
         lettre_text = extract_text_from_file(lettre_path, lettre_filename) if lettre_path else ""
         
+        # 🔍 Extraction TOUS les certificats/attestations
         attestation_texts = []
         if attestation_filenames:
             for att_filename in attestation_filenames:
@@ -573,10 +594,11 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     att_text = extract_text_from_file(att_path, att_filename)
                     if att_text:
                         attestation_texts.append(att_text)
-        attestation_text = " ".join(attestation_texts)
         
-        result = analyze_cv_against_grille(cv_text, lettre_text, attestation_text, poste)
+        # 🧠 Analyse avec TOUS les documents
+        result = analyze_cv_against_grille(cv_text, lettre_text, attestation_texts, poste)
         
+        # 💾 Sauvegarde dans Redis
         redis_client.hset(key, mapping={
             "score": str(result['score']),
             "checklist": json.dumps(result['checklist'], ensure_ascii=False),
@@ -589,6 +611,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         })
         
         print(f"✅ Analyse auto terminée pour {token}: score={result['score']}/10")
+        print(f"   Documents analysés: CV={len(cv_text)} chars, Lettre={len(lettre_text)} chars, Certificats={len(attestation_texts)} fichiers")
         
     except Exception as e:
         print(f"⚠️ Erreur analyse auto pour candidat {token}: {e}")
@@ -605,41 +628,40 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 
 def calculate_ranking_score(candidat_data, poste):
     """
-    Calcule un score de classement EXTRÊMEMENT STRICT pour comparer les candidats.
+    Calcule un score de classement EXTRÊMEMENT STRICT.
     Hiérarchie stricte : Éliminatoire → Score → Signaux → Cohérence → Date
     """
     sb = candidat_data.get('score_breakdown_parsed', {})
     
     # 🔴 Facteur 1: Éliminatoire (poids maximal - bloquant)
     if sb.get('bloc1_eliminatoire'):
-        return -999  # Dernier automatiquement, non négociable
+        return -999  # Dernier automatiquement
     
-    # 🟡 Facteur 2: Score principal (0-10) - base du classement
+    # 🟡 Facteur 2: Score principal (0-10)
     score_principal = int(candidat_data.get('score', 0))
     
-    # 🟡 Facteur 3: Signaux forts détectés (départage important, poids élevé)
+    # 🟡 Facteur 3: Signaux forts détectés
     signaux_count = len(candidat_data.get('signaux_detectes_parsed', []))
-    signaux_bonus = signaux_count * 0.5  # +0.5 par signal fort (max +1.5)
+    signaux_bonus = signaux_count * 0.5
     
-    # 🟠 Facteur 4: Critères "à vérifier" validés (départage moyen)
+    # 🟠 Facteur 4: Critères "à vérifier" validés
     criteres_valides = sb.get('bloc2_criteres_valides', 0)
-    coherence_bonus = criteres_valides * 0.2  # +0.2 par critère (max +1.0)
+    coherence_bonus = criteres_valides * 0.2
     
-    # 📄 Facteur 5: Lettre de motivation fournie (léger bonus)
+    # 📄 Facteur 5: Lettre de motivation
     lettre_bonus = 0.1 if candidat_data.get('lettre_filename') else 0
     
-    # 📅 Facteur 6: Date de candidature (plus récent = léger avantage)
+    # 📅 Facteur 6: Date de candidature
     try:
         date_candidature = datetime.datetime.fromisoformat(candidat_data.get('date_candidature', ''))
         days_since = (datetime.datetime.now() - date_candidature).days
-        date_bonus = max(0, (30 - min(days_since, 30)) * 0.01)  # Max +0.3 pour candidature très récente
+        date_bonus = max(0, (30 - min(days_since, 30)) * 0.01)
     except:
         date_bonus = 0
     
-    # Calcul du score de classement (sur ~13 points max)
     ranking_score = score_principal + signaux_bonus + coherence_bonus + lettre_bonus + date_bonus
     
-    return round(ranking_score, 3)  # 3 décimales pour plus de précision
+    return round(ranking_score, 3)
 
 
 def get_recommandation_from_score(score):
@@ -659,38 +681,26 @@ def get_recommandation_from_score(score):
 
 def generate_ranking_for_poste(poste, candidats_data):
     """
-    Génère un classement EXTRÊMEMENT STRICT des candidats pour un poste donné.
+    Génère un classement EXTRÊMEMENT STRICT.
     RANG classé automatiquement selon score + expérience
-    Critères hiérarchisés de manière stricte et non négociable.
     """
-    # Filtrer les candidats pour ce poste
     candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
     
-    # Calculer le score de classement pour chaque candidat
     for c in candidats_poste:
         c['ranking_score'] = calculate_ranking_score(c, poste)
         c['ranking_position'] = 0
     
-    # 🔍 Tri EXTRÊMEMENT STRICT selon critères hiérarchisés :
-    # 1. Éliminatoire d'abord (score -999 = dernier)
-    # 2. Score de classement décroissant (3 décimales)
-    # 3. Nombre de signaux forts décroissant (départage fort)
-    # 4. Critères "à vérifier" validés décroissant (départage moyen)
-    # 5. Date de candidature décroissante (départage faible)
-    # 6. Nom du candidat alphabétique (départage ultime - garantit unicité)
+    # 🔍 Tri STRICT
     candidats_poste.sort(key=lambda x: (
-        -x['ranking_score'],  # Score principal décroissant (3 décimales)
-        -len(x.get('signaux_detectes_parsed', [])),  # Signaux décroissant
-        -x.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),  # Critères validés
-        x.get('date_candidature', ''),  # Date croissante (plus récent en premier)
-        f"{x.get('nom', '')} {x.get('prenom', '')}".strip().lower()  # Nom alphabétique
+        -x['ranking_score'],
+        -len(x.get('signaux_detectes_parsed', [])),
+        -x.get('score_breakdown_parsed', {}).get('bloc2_criteres_valides', 0),
+        x.get('date_candidature', ''),
+        f"{x.get('nom', '')} {x.get('prenom', '')}".strip().lower()
     ))
     
-    # Assigner les rangs de manière stricte : 1=premier à recruter, 2=deuxième, etc.
     for idx, c in enumerate(candidats_poste, 1):
-        c['ranking_position'] = idx  # Rang unique basé sur la position
-        
-        # Déterminer la recommandation basée sur le score (STRICT selon modèle Excel)
+        c['ranking_position'] = idx
         score = int(c.get('score', 0))
         c['ranking_recommendation'] = get_recommandation_from_score(score)
     
@@ -698,14 +708,13 @@ def generate_ranking_for_poste(poste, candidats_data):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 📄 FONCTIONS D'EXPORT DE RAPPORTS (Avec EMAIL + RANG Automatique Strict)
+# 📄 FONCTIONS D'EXPORT DE RAPPORTS - LARGES POUR TEXTE NON COUPÉ
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
     """
-    Génère un rapport Excel selon le modèle uploadé :
+    Génère un rapport Excel avec colonnes LARGES pour texte non coupé.
     RANG | Email | Candidat | Téléphone | Adéquation(0-3) | Cohérence(0-2) | Risque(0-3) | CV(0-1) | Lettre(0-1) | Score | Recommandation
-    Avec RANG classé automatiquement et strictement selon score + expérience
     """
     if not OPENPYXL_AVAILABLE:
         return None
@@ -719,10 +728,10 @@ def generate_excel_report(candidats_data, poste_filter=None):
     for poste in postes_to_export:
         candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
         
-        # 🔍 CLASSEMENT STRICT avant génération (RANG automatique)
+        # 🔍 CLASSEMENT STRICT
         candidats_poste = generate_ranking_for_poste(poste, candidats_poste)
         
-        ws = wb.create_sheet(title=poste[:25])
+        ws = wb.create_sheet(title=poste[:20])
         
         # Styles
         header_fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
@@ -744,10 +753,10 @@ def generate_excel_report(candidats_data, poste_filter=None):
         title_cell.fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
         ws.row_dimensions[1].height = 30
         
-        # ✅ En-têtes avec RANG + EMAIL + tous les critères du modèle Excel
+        # ✅ En-têtes
         headers = [
-            'Rang',  # ✅ Classement automatique strict
-            'Email',  # ✅ Email extrait
+            'Rang',
+            'Email',
             'Candidat',
             'Téléphone',
             'Adéquation expérience (0-3)',
@@ -766,11 +775,10 @@ def generate_excel_report(candidats_data, poste_filter=None):
             cell.border = border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         
-        # Données avec RANG automatique + EMAIL
+        # Données
         for row_idx, c in enumerate(candidats_poste, 4):
             sb = c.get('score_breakdown_parsed', {})
             
-            # Calcul des scores selon modèle Excel
             adequation = sb.get('adequation_experience', 0) if not sb.get('bloc1_eliminatoire') else 0
             coherence = sb.get('coherence_parcours', 0) if not sb.get('bloc1_eliminatoire') else 0
             risque_metier = sb.get('exposition_risque_metier', 0) if not sb.get('bloc1_eliminatoire') else 0
@@ -779,15 +787,14 @@ def generate_excel_report(candidats_data, poste_filter=None):
             score_total = adequation + coherence + risque_metier + qualite_cv + lettre_motiv
             
             nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip()
-            email = c.get('email', '') or '–'  # ✅ EMAIL extrait
+            email = c.get('email', '') or '–'
             telephone = c.get('telephone', '') or '–'
-            rang = c.get('ranking_position', row_idx - 3)  # ✅ RANG automatique
+            rang = c.get('ranking_position', row_idx - 3)
             recommandation = c.get('ranking_recommendation', get_recommandation_from_score(score_total))
             
-            # ✅ Row data avec RANG + EMAIL
             row_data = [
-                rang,  # ✅ RANG (classement automatique strict)
-                email,  # ✅ EMAIL
+                rang,
+                email,
                 nom_complet,
                 telephone,
                 adequation,
@@ -804,23 +811,23 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center')
                 
-                # Colorer RANG (médailles pour TOP 3)
+                # Colorer RANG
                 if col == 1:
                     if rang == 1:
-                        cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")  # Or
+                        cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")
                         cell.font = Font(bold=True, size=12)
                     elif rang == 2:
-                        cell.fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")  # Argent
+                        cell.fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
                         cell.font = Font(bold=True, size=12)
                     elif rang == 3:
-                        cell.fill = PatternFill(start_color="CD7F32", end_color="CD7F32", fill_type="solid")  # Bronze
+                        cell.fill = PatternFill(start_color="CD7F32", end_color="CD7F32", fill_type="solid")
                         cell.font = Font(bold=True, size=12)
                 
                 # Colorer Email
                 if col == 2:
                     cell.font = Font(italic=True)
                 
-                # Colorer Score Total selon seuils STRICTS
+                # Colorer Score Total
                 if col == 10:
                     if score_total >= 8:
                         cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
@@ -840,13 +847,18 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     else:
                         cell.fill = PatternFill(start_color="FF6B6B", end_color="FF6B6B", fill_type="solid")
         
-        # Largeurs colonnes (11 colonnes)
-        column_widths = [8, 28, 25, 18, 25, 25, 30, 20, 22, 15, 30]
+        # 📏 Largeurs colonnes LARGES pour texte non coupé
+        column_widths = [8, 35, 35, 20, 28, 28, 35, 20, 25, 15, 35]
         for col, width in enumerate(column_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = width
         
+        # Activation du wrap text pour toutes les cellules
+        for row in ws.iter_rows(min_row=3, max_row=ws.max_row, min_col=1, max_col=11):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical='center', horizontal='center')
+        
         for row in range(3, ws.max_row + 1):
-            ws.row_dimensions[row].height = 20
+            ws.row_dimensions[row].height = 40  # Hauteur suffisante pour texte
     
     output = io.BytesIO()
     wb.save(output)
@@ -855,22 +867,20 @@ def generate_excel_report(candidats_data, poste_filter=None):
 
 
 def generate_csv_report(candidats_data):
-    """Génère un rapport CSV avec RANG automatique + EMAIL"""
+    """Génère un rapport CSV avec RANG + EMAIL"""
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_ALL)
     
-    # ✅ En-têtes avec RANG + EMAIL
     writer.writerow([
         'Rang', 'Email', 'Nom', 'Prénom', 'Téléphone', 'Poste', 'Date candidature',
         'Score (/10)', 'Statut', 'Éliminatoire', 'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque (0-3)', 'Note'
     ])
     
-    # Données avec RANG automatique + EMAIL
     for idx, c in enumerate(candidats_data, 1):
         sb = c.get('score_breakdown_parsed', {})
         writer.writerow([
-            idx,  # ✅ RANG
-            c.get('email', '') or '–',  # ✅ EMAIL
+            idx,
+            c.get('email', '') or '–',
             c.get('nom', ''),
             c.get('prenom', ''),
             c.get('telephone', '') or '–',
@@ -890,12 +900,13 @@ def generate_csv_report(candidats_data):
 
 
 def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF avec RANG automatique + EMAIL"""
+    """Génère un rapport PDF avec colonnes LARGES pour texte non coupé"""
     if not REPORTLAB_AVAILABLE:
         return None
     
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1*cm, leftMargin=1*cm, topMargin=2*cm, bottomMargin=2*cm)
+    # Format paysage pour plus de largeur
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=2*cm, bottomMargin=2*cm)
     elements = []
     styles = getSampleStyleSheet()
     
@@ -907,7 +918,7 @@ def generate_pdf_report(candidats_data):
     elements.append(Paragraph(f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}", date_style))
     elements.append(Spacer(1, 0.8*cm))
     
-    # ✅ Tableau avec RANG + EMAIL
+    # ✅ Tableau avec colonnes LARGES
     data = [['Rang', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score (/10)', 'Recommandation']]
     
     for idx, c in enumerate(candidats_data, 1):
@@ -915,8 +926,8 @@ def generate_pdf_report(candidats_data):
         recommandation = get_recommandation_from_score(score)
         
         data.append([
-            str(idx),  # ✅ RANG
-            c.get('email', '') or '–',  # ✅ EMAIL
+            str(idx),
+            c.get('email', '') or '–',
             f"{c.get('prenom', '')} {c.get('nom', '')}",
             c.get('telephone', '') or '–',
             c.get('poste', ''),
@@ -924,17 +935,20 @@ def generate_pdf_report(candidats_data):
             recommandation
         ])
     
-    table = Table(data, colWidths=[1.2*cm, 4*cm, 4*cm, 3*cm, 4*cm, 2*cm, 3.8*cm])
+    # Colonnes LARGES pour texte non coupé
+    table = Table(data, colWidths=[1.5*cm, 5*cm, 4.5*cm, 3.5*cm, 5*cm, 2.5*cm, 4.5*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, 0), 9),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('WORDWRAP', (0, 0), (-1, -1), 'ON')
     ]))
     
     elements.append(table)
@@ -1292,13 +1306,13 @@ def serve_upload(filename):
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     print(f"🚀 Serveur RecrutBank démarré sur le port {port}")
-    print(f"📋 Grille Word mise à jour chargée: {len(GRILLE)} postes")
-    print(f"🎯 Exigence 3 ans Finance appliquée pour: {POSTES_FINANCE}")
-    print(f"🔍 Analyse auto: VÉRIFICATION STRICTE ET EXACTE")
-    print(f"🏆 Classement TRÈS STRICT avec RANG automatique + EMAIL")
+    print(f"📋 Grille Word chargée: {len(GRILLE)} postes")
+    print(f"🔍 Analyse auto: MATCHING EXACT (soit ça passe, soit ça casse)")
+    print(f"📄 Analyse TOUS documents: CV + Lettre + Certificats")
+    print(f"🏆 Classement STRICT avec RANG automatique + EMAIL")
     print(f"📊 Scoring Excel: Adéquation(0-3)+Cohérence(0-2)+Risque(0-3)+CV(0-1)+Lettre(0-1)=/10")
-    print(f"📧 Email extrait dans TOUS les formats (Excel, CSV, PDF)")
-    print(f"📞 Téléphone inclus dans tous les exports")
+    print(f"📧 Email extrait dans TOUS les formats")
+    print(f"📏 Rapports LARGES pour texte non coupé")
     if REPORTLAB_AVAILABLE:
         print(f"   ✅ reportlab installé (PDF)")
     if OPENPYXL_AVAILABLE:
