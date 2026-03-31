@@ -1,7 +1,7 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique STRICTE
 # ✅ Analyse TOUS les fichiers soumis (CV + Lettre + Certificats) SANS EXCEPTION
-# ✅ Calcul d'expérience basé sur dates extraites de TOUS les fichiers
-# ✅ S'applique à TOUS les postes selon leurs critères requis
+# ✅ Calcul d'expérience SPÉCIFIQUE à chaque poste selon ses critères
+# ✅ Chaque poste a ses propres critères d'expérience (2 ans IT, 3 ans Finance, etc.)
 # ⚠️ STAGES EXCLUS du calcul d'expérience
 # ✅ CALCUL jusqu'à AUJOURD'HUI si "à aujourd'hui"/"présent"/"actuellement"
 # ============================================================================
@@ -87,7 +87,8 @@ POSTES = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 📋 GRILLE DE PRÉSÉLECTION - TOUS POSTES AVEC CRITÈRES D'EXPÉRIENCE
+# 📋 GRILLE DE PRÉSÉLECTION - CRITÈRES SPÉCIFIQUES PAR POSTE
+# ✅ Chaque poste a ses propres critères d'expérience
 # ══════════════════════════════════════════════════════════════════════════════
 
 GRILLE = {
@@ -111,7 +112,8 @@ GRILLE = {
             "Parcours trop comptable pur",
             "Rôle uniquement administratif sans responsabilité",
             "CV flou missions génériques"
-        ]
+        ],
+        "experience_requise": 3  # ✅ 3 ans pour ce poste
     },
     "Analyste Crédit CCB": {
         "eliminatoire": [
@@ -134,7 +136,8 @@ GRILLE = {
             "CV trop relation client",
             "Aucune notion de risque",
             "Expériences très courtes sans progression"
-        ]
+        ],
+        "experience_requise": 3  # ✅ 3 ans pour ce poste
     },
     "Archiviste (Administration Crédit)": {
         "eliminatoire": [
@@ -152,7 +155,8 @@ GRILLE = {
         "points_attention": [
             "Profils trop généralistes",
             "CV désorganisé"
-        ]
+        ],
+        "experience_requise": 0  # ✅ Pas d'exigence d'années spécifique
     },
     "Senior Finance Officer": {
         "eliminatoire": [
@@ -177,7 +181,8 @@ GRILLE = {
             "Profil comptable junior amélioré",
             "Pas de responsabilité réelle",
             "CV flou sur les livrables"
-        ]
+        ],
+        "experience_requise": 3  # ✅ 3 ans pour ce poste
     },
     "Market Risk Officer": {
         "eliminatoire": [
@@ -202,7 +207,8 @@ GRILLE = {
             "CV trop théorique académique",
             "Aucune mention d'outils",
             "Incapacité implicite à modéliser"
-        ]
+        ],
+        "experience_requise": 3  # ✅ 3 ans pour ce poste
     },
     "IT Réseau & Infrastructure": {
         "eliminatoire": [
@@ -228,7 +234,8 @@ GRILLE = {
             "Profil trop helpdesk",
             "CV sans détail technique",
             "Aucune mention de sécurité"
-        ]
+        ],
+        "experience_requise": 2  # ✅ 2 ans pour ce poste (SPÉCIFIQUE IT)
     }
 }
 
@@ -420,14 +427,11 @@ def normalize_text(text):
     return text
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🧮 CALCUL EXPÉRIENCE PROFESSIONNELLE - TOUS FICHIERS + TOUS POSTES
+# 🧮 CALCUL EXPÉRIENCE PROFESSIONNELLE - SPÉCIFIQUE PAR POSTE
 # ══════════════════════════════════════════════════════════════════════════════
 
 def parse_date_french(date_str):
-    """
-    Parse une date depuis différents formats (FR/EN).
-    ✅ Gère: "Aout 2023", "Novembre 2020", "08/2023", "2023-08", etc.
-    """
+    """Parse une date depuis différents formats (FR/EN)"""
     if not date_str:
         return None
     
@@ -485,18 +489,12 @@ def is_current_position(text):
 
 
 def extract_experience_periods(text):
-    """
-    Extrait les périodes d'expérience professionnelle du texte.
-    ✅ Gère: "Aout 2023 à aujourd'hui", "Novembre 2020 - Août 2023"
-    """
+    """Extrait les périodes d'expérience professionnelle du texte"""
     experiences = []
     
     patterns = [
-        # "Aout 2023 à aujourd'hui", "Novembre 2020 - Août 2023"
         r'([a-zA-Zéû]+\s+\d{4})\s*[-–/à]\s*([a-zA-Zéû]+\s+\d{4}|aujourd\'hui|présent|maintenant|now|current|en cours|actuellement)',
-        # "08/2023 - aujourd'hui", "11/2020 - 08/2023"
         r'(\d{1,2}/\d{4})\s*[-–/à]\s*(\d{1,2}/\d{4}|aujourd\'hui|présent|maintenant|now|current|en cours|actuellement)',
-        # "2023-08 à aujourd'hui", "2020-11 - 2023-08"
         r'(\d{4}-\d{1,2})\s*[-–/à]\s*(\d{4}-\d{1,2}|aujourd\'hui|présent|maintenant|now|current|en cours|actuellement)',
     ]
     
@@ -537,7 +535,6 @@ def calculate_professional_experience_years(cv_text, lettre_text, attestation_te
     ⚠️ EXCLUT les stages
     ✅ CALCULE jusqu'à AUJOURD'HUI si "à aujourd'hui"
     """
-    # ✅ CONCATÉNER TOUS LES TEXTES DES FICHIERS SOUMIS
     full_text = normalize_text(cv_text + " " + (lettre_text or "") + " " + " ".join(attestation_texts_list or []))
     
     experiences = []
@@ -572,18 +569,28 @@ def calculate_professional_experience_years(cv_text, lettre_text, attestation_te
     return round(professional_years, 1), experiences
 
 
-def check_minimum_experience_required(cv_text, lettre_text, attestation_texts_list, required_years):
+def check_minimum_experience_for_poste(cv_text, lettre_text, attestation_texts_list, poste):
     """
-    Vérifie si l'expérience professionnelle atteint le minimum requis.
-    ✅ S'applique à TOUS les postes avec critères d'expérience
-    ✅ Analyse TOUS les fichiers soumis
+    ✅ Vérifie l'expérience selon le poste SPÉCIFIQUE
+    ✅ Chaque poste a ses propres exigences (2 ans IT, 3 ans Finance, etc.)
     """
+    grille = GRILLE.get(poste)
+    if not grille:
+        return False, 0
+    
+    required_years = grille.get('experience_requise', 0)
+    
+    # Si pas d'exigence d'années pour ce poste → validé automatiquement
+    if required_years == 0:
+        return True, 0
+    
     total_years, experiences = calculate_professional_experience_years(cv_text, lettre_text, attestation_texts_list)
+    
     return total_years >= required_years, total_years
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE CV - TOUS FICHIERS + TOUS POSTES
+# 🧠 MOTEUR D'ANALYSE CV - TOUS FICHIERS + CRITÈRES PAR POSTE
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_criterion_match(criterion, full_text):
@@ -602,8 +609,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     """
     Analyse STRICTE selon la grille Word.
     ✅ Analyse TOUS les fichiers: CV + Lettre + Certificats
+    ✅ Critères d'expérience SPÉCIFIQUES au poste
     ⚠️ Si UN SEUL critère éliminatoire manque → Score = 0
-    ✅ Calcul d'expérience pour TOUS les postes selon leurs critères
     """
     if not cv_text or len(cv_text.strip()) < 50:
         return {
@@ -650,15 +657,16 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         }
     }
     
-    # 🔴 BLOC 1 : ÉLIMINATOIRE
+    # 🔴 BLOC 1 : ÉLIMINATOIRE - CRITÈRES SPÉCIFIQUES AU POSTE
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
         
-        # Cas spécial: Critères d'expérience minimale (TOUS POSTES)
+        # ✅ Cas spécial: Critères d'expérience minimale (SPÉCIFIQUE AU POSTE)
         if ("expérience professionnelle" in crit.lower() or "ans d'expérience" in crit.lower()) and ("ans" in crit.lower() or "année" in crit.lower()):
-            required_years = 2 if "2 ans" in crit.lower() else 3
-            is_present, exp_years = check_minimum_experience_required(cv_text, lettre_text, attestation_texts_list, required_years)
+            # ✅ Utiliser l'exigence du poste SPÉCIFIQUE
+            is_present, exp_years = check_minimum_experience_for_poste(cv_text, lettre_text, attestation_texts_list, poste)
             
+            required_years = grille.get('experience_requise', 0)
             checklist[key] = is_present
             
             if not is_present:
@@ -676,7 +684,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                     'required_years': required_years
                 }
         else:
-            # Critères normaux
+            # Critères normaux (non expérience)
             is_present, found_keywords = check_criterion_match(crit, full_text)
             checklist[key] = is_present
             
@@ -815,7 +823,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     if att_text:
                         attestation_texts.append(att_text)
         
-        # ✅ Analyse avec TOUS les documents
+        # ✅ Analyse avec TOUS les documents + critères du POSTE SPÉCIFIQUE
         result = analyze_cv_against_grille(cv_text, lettre_text, attestation_texts, poste)
         
         redis_client.hset(key, mapping={
@@ -831,6 +839,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         
         print(f"✅ Analyse auto terminée pour {token}: score={result['score']}/10")
         print(f"   📄 Fichiers analysés: CV={len(cv_text)} chars, Lettre={len(lettre_text)} chars, Certificats={len(attestation_texts)} fichiers")
+        print(f"   📊 Poste: {poste}")
         if result['score_breakdown'].get('professional_experience_years') is not None:
             print(f"   📊 Expérience pro: {result['score_breakdown']['professional_experience_years']} ans")
         if result['score_breakdown']['bloc1_eliminatoire']:
@@ -1222,7 +1231,8 @@ if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     print(f"🚀 Serveur démarré sur le port {port}")
     print(f"✅ TOUS les fichiers analysés (CV + Lettre + Certificats)")
-    print(f"✅ Calcul expérience pour TOUS les postes")
+    print(f"✅ Expérience calculée SPÉCIFIQUEMENT par poste")
+    print(f"✅ IT: 2 ans, Finance: 3 ans, Archiviste: 0 ans")
     print(f"✅ Parsing dates FR/EN corrigé")
     print(f"✅ Calcul jusqu'à AUJOURD'HUI")
     print(f"✅ Stages exclus du calcul")
