@@ -1,11 +1,14 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique STRICTE
 # ============================================================================
-# CORRECTIONS MAJEURES :
-#   1. Extraction texte robuste (pdfplumber + python-docx complet)
-#   2. Les années de STAGE ne comptent PAS comme années d'expérience
-#   3. Logique AND stricte : 1 critère éliminatoire manquant = score 0
-#   4. Matching normalisé avec gestion des accents
-#   5. Tous les bugs de syntaxe corrigés
+# ✅ AMÉLIORATIONS MAJEURES :
+#   1. Extraction texte robuste multilingue (pdfplumber + python-docx + fallbacks)
+#   2. Normalisation Unicode complète (accents, caractères spéciaux, encodages)
+#   3. Matching intelligent : exact + fuzzy + tokens (rapidfuzz)
+#   4. Détection automatique de langue et adaptation des mots-clés
+#   5. Les années de STAGE ne comptent PAS comme années d'expérience
+#   6. Logique AND stricte : 1 critère éliminatoire manquant = score 0
+#   7. Gestion des confiances de matching pour réduire les faux positifs
+#   8. Tous les bugs de syntaxe corrigés + logs améliorés
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -13,7 +16,7 @@ from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
-import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv
+import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata
 from werkzeug.utils import secure_filename
 
 # ── PARSING DOCUMENTS ──────────────────────────────────────────────────────
@@ -30,9 +33,35 @@ try:
 except ImportError:
     PYPDF2_AVAILABLE = False
 
-from docx import Document
+try:
+    from docx import Document
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
+    print("⚠️ python-docx non installé. Extraction DOCX désactivée.")
 
-# ── EXPORT PDF & EXCEL ─────────────────────────────────────────────────────
+# ── DÉTECTION ENCODAGE & LANGUE ───────────────────────────────────────────
+try:
+    import chardet
+    CHARDET_AVAILABLE = True
+except ImportError:
+    CHARDET_AVAILABLE = False
+
+try:
+    from langdetect import detect, DetectorFactory
+    DetectorFactory.seed = 0
+    LANGDETECT_AVAILABLE = True
+except ImportError:
+    LANGDETECT_AVAILABLE = False
+
+# ── MATCHING FUZZY ────────────────────────────────────────────────────────
+try:
+    from rapidfuzz import fuzz
+    RAPIDFUZZ_AVAILABLE = True
+except ImportError:
+    RAPIDFUZZ_AVAILABLE = False
+
+# ── EXPORT PDF & EXCEL ────────────────────────────────────────────────────
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -43,7 +72,6 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
-    print("⚠️ reportlab non installé. L'export PDF sera désactivé.")
 
 try:
     import openpyxl
@@ -53,23 +81,22 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
-    print("⚠️ openpyxl non installé. L'export Excel sera désactivé.")
 
 app = Flask(__name__)
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+# ── CORS ──────────────────────────────────────────────────────────────────
 CORS(app, resources={r"/api/*": {
     "origins": "*",
     "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
     "allow_headers": ["Content-Type", "Authorization"]
 }})
 
-# ── JWT ────────────────────────────────────────────────────────────────────────
+# ── JWT ───────────────────────────────────────────────────────────────────
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
 
-# ── REDIS ──────────────────────────────────────────────────────────────────────
+# ── REDIS ─────────────────────────────────────────────────────────────────
 redis_client = redis.Redis(
     host=os.getenv("REDIS_HOST", "redis-11133.c8.us-east-1-4.ec2.cloud.redislabs.com"),
     port=int(os.getenv("REDIS_PORT", 11133)),
@@ -80,19 +107,19 @@ redis_client = redis.Redis(
     socket_timeout=5
 )
 
-# ── UPLOADS ────────────────────────────────────────────────────────────────────
+# ── UPLOADS ───────────────────────────────────────────────────────────────
 UPLOAD_FOLDER  = os.path.join(os.path.dirname(__file__), 'uploads')
 REPORTS_FOLDER = os.path.join(os.path.dirname(__file__), 'reports')
 os.makedirs(UPLOAD_FOLDER,  exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx'}
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# ── POSTES ─────────────────────────────────────────────────────────────────────
+# ── POSTES ────────────────────────────────────────────────────────────────
 POSTES = [
     "Responsable Administration de Crédit",
     "Analyste Crédit CCB",
@@ -102,9 +129,9 @@ POSTES = [
     "IT Réseau & Infrastructure"
 ]
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 📋 GRILLE DE PRÉSÉLECTION — fidèle au document Word
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 GRILLE = {
     "Responsable Administration de Crédit": {
         "eliminatoire": [
@@ -247,294 +274,384 @@ GRILLE = {
     }
 }
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 🔍 MAPPING MOTS-CLÉS — matching large mais pertinent
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 KEYWORD_MAPPING = {
     # ── Responsable Administration de Crédit ──────────────────────────────
     "Expérience bancaire": [
         "banque", "bancaire", "etablissement bancaire", "institution bancaire",
         "banque commerciale", "microfinance", "etablissement financier",
         "institution financiere", "secteur bancaire", "groupe bancaire",
-        "filiale bancaire"
+        "filiale bancaire", "bank", "banking", "financial institution"
     ],
     "Minimum 3 ans en crédit / risque (hors stage)": [
-        "EXP_CREDIT_3ANS"   # marqueur synthétique résolu par extract_experience_years()
+        "EXP_CREDIT_3ANS"
     ],
     "Exposition aux garanties ou conformité": [
         "garantie", "garanties", "nantissement", "hypotheque", "surete",
         "suretes", "conformite", "compliance", "cobac", "bceao", "bcac",
-        "commission bancaire", "reglementation bancaire", "audit", "controle interne"
+        "commission bancaire", "reglementation bancaire", "audit", "controle interne",
+        "collateral", "regulatory", "audit"
     ],
     "Validation de dossiers de crédit": [
         "validation dossier", "instruction credit", "approbation credit",
-        "dossier credit", "traitement dossier", "montage dossier"
+        "dossier credit", "traitement dossier", "montage dossier",
+        "credit approval", "loan processing"
     ],
     "Gestion des garanties": [
         "gestion garanties", "suivi garanties", "garanties reelles",
-        "portefeuille garanties", "hypotheque", "nantissement"
+        "portefeuille garanties", "hypotheque", "nantissement",
+        "collateral management"
     ],
     "Participation à des audits": [
         "audit", "controle interne", "inspection", "commissariat aux comptes",
-        "conformite", "compliance audit", "mission audit"
+        "conformite", "compliance audit", "mission audit", "internal audit"
     ],
     "IFRS 9": [
         "ifrs 9", "ias 39", "normes ifrs", "comptabilite ifrs",
-        "ifrs9", "provisionnement ifrs"
+        "ifrs9", "provisionnement ifrs", "international financial reporting"
     ],
     "COBAC / conformité": [
         "cobac", "conformite bancaire", "bceao", "bcac",
-        "commission bancaire", "regulation bancaire", "compliance"
+        "commission bancaire", "regulation bancaire", "compliance",
+        "banking regulation"
     ],
     "Suivi portefeuille / impayés": [
         "portefeuille credit", "impayes", "recouvrement", "contentieux",
-        "encours", "suivi portefeuille", "creances douteuses", "npls"
+        "encours", "suivi portefeuille", "creances douteuses", "npls",
+        "portfolio monitoring", "non-performing loans"
     ],
 
     # ── Analyste Crédit CCB ───────────────────────────────────────────────
     "Expérience en analyse crédit": [
         "analyse credit", "credit analysis", "evaluation credit",
         "scoring credit", "analyse financiere credit", "instruction credit",
-        "analyste credit", "octroi credit"
+        "analyste credit", "octroi credit", "loan analysis"
     ],
     "Capacité à lire des états financiers": [
         "etats financiers", "bilan", "compte de resultat", "ratios financiers",
         "analyse financiere", "liasse fiscale", "situation financiere",
-        "diagnostic financier", "solvabilite"
+        "diagnostic financier", "solvabilite", "financial statements"
     ],
     "Minimum 3 ans institution financière (hors stage)": [
         "EXP_FIN_3ANS"
     ],
     "Clients PME": [
-        "pme", "petite entreprise", "moyenne entreprise", "tpe", "entreprise cliente"
+        "pme", "petite entreprise", "moyenne entreprise", "tpe", "entreprise cliente",
+        "sme", "small business", "mid-market"
     ],
     "Clients particuliers": [
-        "particulier", "clientele particuliere", "retail banking", "client particulier"
+        "particulier", "clientele particuliere", "retail banking", "client particulier",
+        "retail", "personal banking"
     ],
     "Structuration de crédit": [
         "structuration credit", "montage credit", "structurer credit",
-        "dossier de credit", "credit structurel"
+        "dossier de credit", "credit structurel", "loan structuring"
     ],
     "Avis de crédit": [
         "avis credit", "recommandation credit", "opinion credit",
-        "note de credit", "avis d'octroi"
+        "note de credit", "avis d'octroi", "credit opinion"
     ],
     "Cash-flow analysis": [
         "cash flow", "cashflow", "flux tresorerie", "flux de tresorerie",
-        "fcf", "free cash flow", "capacite d autofinancement", "caf"
+        "fcf", "free cash flow", "capacite d autofinancement", "caf",
+        "cash flow analysis"
     ],
     "Montage de crédit": [
         "montage credit", "structuration credit", "montage dossier",
-        "montage financier"
+        "montage financier", "loan structuring"
     ],
     "Comités de crédit": [
         "comite credit", "commission credit", "credit committee",
-        "comite d octroi", "validation comite"
+        "comite d octroi", "validation comite", "credit approval committee"
     ],
 
     # ── Archiviste ───────────────────────────────────────────────────────
     "Expérience en gestion documentaire structurée": [
         "gestion documentaire", "archivage", "ged", "records management",
-        "classement", "documentation", "gestion archives", "archiviste"
+        "classement", "documentation", "gestion archives", "archiviste",
+        "document management"
     ],
     "Rigueur démontrée": [
-        "rigueur", "methode", "organisation", "procédures", "traçabilite",
-        "precision", "fiabilite", "serieux"
+        "rigueur", "methode", "organisation", "procedures", "tracabilite",
+        "precision", "fiabilite", "serieux", "attention to detail"
     ],
     "Archivage physique et électronique": [
         "archivage physique", "archivage electronique", "dematerialisation",
-        "numerisation", "archivage numerique", "scan", "ged"
+        "numerisation", "archivage numerique", "scan", "ged",
+        "physical archiving", "digital archiving"
     ],
     "Gestion des dossiers sensibles": [
         "dossier sensible", "confidentiel", "securise", "acces restreint",
-        "donnees sensibles", "confidentialite"
+        "donnees sensibles", "confidentialite", "confidential documents"
     ],
     "Expérience en banque ou juridique": [
         "banque", "etablissement financier", "juridique", "droit bancaire",
-        "secteur bancaire", "cabinet juridique", "etude notariale"
+        "secteur bancaire", "cabinet juridique", "etude notariale",
+        "banking", "legal", "law firm"
     ],
     "Manipulation de garanties ou contrats": [
         "garantie", "contrat", "convention", "acte juridique",
-        "documentation juridique", "acte notarie"
+        "documentation juridique", "acte notarie", "contracts", "legal documents"
     ],
 
     # ── Senior Finance Officer ────────────────────────────────────────────
     "Expérience en reporting financier structuré": [
         "reporting financier", "reporting", "tableau de bord", "kpi",
-        "indicateurs financiers", "etats financiers", "production reporting"
+        "indicateurs financiers", "etats financiers", "production reporting",
+        "financial reporting", "management reporting"
     ],
     "Exposition aux états financiers": [
         "etats financiers", "bilan", "compte de resultat",
-        "consolidation", "reporting financier", "liasse"
+        "consolidation", "reporting financier", "liasse",
+        "financial statements", "balance sheet", "income statement"
     ],
     "Interaction avec auditeurs": [
         "auditeur", "audit", "commissaire aux comptes", "cac",
-        "audit externe", "commissariat aux comptes", "revue externe"
+        "audit externe", "commissariat aux comptes", "revue externe",
+        "external auditor", "statutory audit"
     ],
     "Minimum 3 ans département finance (hors stage)": [
         "EXP_FINANCE_3ANS"
     ],
     "Production états financiers": [
         "production etats financiers", "elaboration etats financiers",
-        "etablissement etats financiers", "clôture comptable", "cloture"
+        "etablissement etats financiers", "cloture comptable", "cloture",
+        "financial statements preparation"
     ],
     "Reporting groupe": [
         "reporting groupe", "reporting consolide", "consolidation groupe",
-        "reporting mensuel", "pack de gestion"
+        "reporting mensuel", "pack de gestion", "group reporting"
     ],
     "Connaissance IFRS": [
-        "ifrs", "normes internationales", "ias", "comptabilite internationale"
+        "ifrs", "normes internationales", "ias", "comptabilite internationale",
+        "international accounting standards"
     ],
     "Contraintes réglementaires": [
         "reglementation", "contraintes reglementaires", "conformite",
-        "reglementaire", "prudentiel"
+        "reglementaire", "prudentiel", "regulatory requirements"
     ],
     "IFRS / consolidation": [
-        "ifrs", "consolidation", "comptes consolides", "normes ifrs"
+        "ifrs", "consolidation", "comptes consolides", "normes ifrs",
+        "consolidated accounts"
     ],
     "Interaction avec CAC": [
-        "cac", "commissaire aux comptes", "audit legal", "audit externe"
+        "cac", "commissaire aux comptes", "audit legal", "audit externe",
+        "statutory auditor"
     ],
     "Outils SPECTRA / CERBER / ERP": [
         "spectra", "cerber", "erp", "sap", "oracle", "sage",
-        "outil de gestion", "logiciel comptable"
+        "outil de gestion", "logiciel comptable", "enterprise software"
     ],
 
     # ── Market Risk Officer ───────────────────────────────────────────────
     "Base en risques de marché": [
         "risque marche", "market risk", "risques de marche",
-        "gestion risques de marche", "risque financier"
+        "gestion risques de marche", "risque financier", "trading risk"
     ],
     "Compétences quantitatives": [
         "quantitatif", "quantitative", "mathematiques", "statistiques",
-        "modelisation", "mathematiques financieres"
+        "modelisation", "mathematiques financieres", "quantitative analysis"
     ],
     "Exposition à FX / taux / liquidité": [
         "fx", "change", "taux", "liquidite", "forex",
-        "taux d interet", "risque de liquidite", "risque de change"
+        "taux d interet", "risque de liquidite", "risque de change",
+        "foreign exchange", "interest rate", "liquidity risk"
     ],
     "Minimum 3 ans institution financière (hors stage)": [
         "EXP_FIN_3ANS"
     ],
     "Maîtrise VaR / stress testing": [
         "var", "value at risk", "stress testing", "back testing",
-        "backtesting", "scenario de stress"
+        "backtesting", "scenario de stress", "value-at-risk"
     ],
     "Analyse des positions": [
         "analyse des positions", "suivi des positions",
-        "analyse portefeuille", "exposition"
+        "analyse portefeuille", "exposition", "position monitoring"
     ],
     "Excel avancé": [
         "excel avance", "excel", "vba", "macros excel", "pivot",
-        "tableaux croises", "power query"
+        "tableaux croises", "power query", "advanced excel"
     ],
     "VBA ou Python": [
-        "vba", "python", "programmation", "scripting", "r statistical"
+        "vba", "python", "programmation", "scripting", "r statistical",
+        "visual basic", "data analysis"
     ],
     "Bâle II / III": [
         "bale ii", "bale iii", "bale 2", "bale 3", "basel ii", "basel iii",
-        "accords de bale", "reglementation bale"
+        "accords de bale", "reglementation bale", "basel framework"
     ],
     "Gestion ALM / liquidité": [
         "alm", "asset liability management", "liquidite",
-        "gestion alm", "actif passif", "gap de liquidite"
+        "gestion alm", "actif passif", "gap de liquidite",
+        "asset-liability management"
     ],
     "Produits FICC": [
         "ficc", "produits derives", "commodities", "matieres premieres",
-        "produits de taux", "taux"
+        "produits de taux", "taux", "fixed income", "derivatives"
     ],
     "Reporting risque": [
         "reporting risque", "rapport de risque", "tableau de bord risque",
-        "reporting des risques"
+        "reporting des risques", "risk reporting"
     ],
 
     # ── IT Réseau & Infrastructure ────────────────────────────────────────
     "Expérience en réseau / infrastructure": [
         "reseau", "infrastructure", "lan", "wan", "vpn",
-        "infrastructure it", "network", "reseaux"
+        "infrastructure it", "network", "reseaux", "networking"
     ],
     "Exposition à environnement critique": [
         "banque", "telco", "telecom", "datacenter", "centre de donnees",
-        "environnement critique", "secteur bancaire", "haute disponibilite"
+        "environnement critique", "secteur bancaire", "haute disponibilite",
+        "critical infrastructure", "mission critical"
     ],
     "Notion de sécurité IT": [
         "securite it", "cybersecurite", "securite informatique",
-        "firewall", "securite reseau", "ids", "ips"
+        "firewall", "securite reseau", "ids", "ips",
+        "it security", "cybersecurity", "network security"
     ],
     "Minimum 2 ans expérience (hors stage)": [
         "EXP_IT_2ANS"
     ],
     "Gestion réseaux LAN/WAN/VPN": [
         "lan", "wan", "vpn", "reseaux locaux", "reseau local",
-        "virtual private network", "switch", "routeur"
+        "virtual private network", "switch", "routeur",
+        "local area network", "wide area network"
     ],
     "Gestion serveurs Windows/Linux": [
         "windows server", "linux", "serveurs", "administration serveurs",
-        "unix", "active directory", "debian", "ubuntu server"
+        "unix", "active directory", "debian", "ubuntu server",
+        "server administration"
     ],
     "Cloud même basique": [
         "cloud", "aws", "azure", "google cloud", "cloud computing",
-        "iaas", "saas"
+        "iaas", "saas", "cloud services"
     ],
     "Gestion des incidents": [
         "incident", "gestion incidents", "support technique",
-        "resolution incident", "itil", "ticketing"
+        "resolution incident", "itil", "ticketing",
+        "incident management", "technical support"
     ],
     "Assurance de la disponibilité": [
         "disponibilite", "haute disponibilite", "sla",
-        "uptime", "continuite service"
+        "uptime", "continuite service", "availability",
+        "high availability", "service level agreement"
     ],
     "Cybersécurité / firewall": [
         "cybersecurite", "firewall", "securite", "ids",
-        "ips", "siem", "pentest", "vulnerability"
+        "ips", "siem", "pentest", "vulnerability",
+        "cybersecurity", "intrusion detection"
     ],
     "Haute disponibilité / PRA/PCA": [
         "haute disponibilite", "pra", "pca", "plan de reprise",
-        "continuite activite", "disaster recovery", "basculement"
+        "continuite activite", "disaster recovery", "basculement",
+        "business continuity", "disaster recovery plan"
     ],
     "Gestion ATM ou systèmes bancaires": [
         "atm", "systemes bancaires", "gab", "distributeur automatique",
-        "systeme bancaire core", "temenos", "flexcube"
+        "systeme bancaire core", "temenos", "flexcube",
+        "banking systems", "core banking"
     ],
     "Certifications Cisco ou Microsoft": [
         "ccna", "ccnp", "ccie", "cisco", "microsoft certified",
-        "mcse", "network+", "certification reseau"
+        "mcse", "network+", "certification reseau",
+        "cisco certification", "microsoft certification"
     ]
 }
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 🚫 MOTS DÉSIGNANT UN STAGE — les durées adjacentes sont EXCLUES
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 STAGE_MARKERS = [
     r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b',
     r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b',
     r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b',
     r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b',
-    r'\bpfe\b',  # projet de fin d'études souvent stage
+    r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b',
+    # Versions anglaises
+    r'\bintern\b', r'\btrainee\b', r'\bapprenticeship\b',
 ]
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 🔧 EXTRACTION TEXTE — robuste sur PDF et DOCX
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
+# 🔤 NORMALISATION TEXTE — Unicode complet
+# ══════════════════════════════════════════════════════════════════════════
 
-def extract_text_from_pdf(filepath):
-    """Extrait le texte d'un PDF. Priorité pdfplumber, fallback PyPDF2."""
+# Map complète pour accents (latin + cyrillique + autres)
+_ACCENT_MAP = str.maketrans(
+    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ',
+    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'
+)
+
+def normalize_unicode(text):
+    """
+    Normalisation Unicode complète :
+    - NFC pour uniformiser les caractères composés
+    - Suppression des caractères de contrôle invisibles
+    - Conservation des lettres pour le matching
+    """
+    if not text:
+        return ""
+    # Normalisation NFC (décomposition puis recomposition)
+    text = unicodedata.normalize('NFC', text)
+    # Suppression des caractères de contrôle (sauf sauts utiles)
+    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+    # Remplacement des espaces spéciaux par espace normal
+    text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
+    return text.strip()
+
+
+def normalize_for_matching(text):
+    """
+    Normalisation OPTIMISÉE pour le matching :
+    - Minuscules + suppression accents (pour matching large)
+    - Nettoyage ponctuation
+    - Tokenisation pour recherche partielle
+    """
+    if not text:
+        return "", []
+    
+    # Version sans accents pour matching large
+    no_accents = text.lower().translate(_ACCENT_MAP)
+    # Nettoyage : garder lettres, chiffres, espaces, tirets, slash, points
+    cleaned = re.sub(r'[^\w\s\-/\.]', ' ', no_accents)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    # Tokens pour recherche partielle (mots de 2+ caractères)
+    tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
+    
+    return cleaned, tokens
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 🔧 EXTRACTION TEXTE — robuste multilingue + fallbacks
+# ══════════════════════════════════════════════════════════════════════════
+
+def extract_text_from_pdf_robust(filepath):
+    """Extraction PDF avec 3 niveaux de fallback + gestion OCR si disponible."""
     text = ""
-    # 1. Essai pdfplumber (meilleure extraction de mise en page)
+    
+    # Niveau 1 : pdfplumber (meilleur pour les tableaux/mise en page)
     if PDFPLUMBER_AVAILABLE:
         try:
             with pdfplumber.open(filepath) as pdf:
                 for page in pdf.pages:
-                    content = page.extract_text()
+                    # Extraction avec paramètres optimisés pour CV
+                    content = page.extract_text(
+                        x_tolerance=3,
+                        y_tolerance=3,
+                        keep_blank_chars=True,
+                        use_text_flow=True  # Respecte l'ordre de lecture
+                    )
                     if content:
                         text += content + "\n"
             if text.strip():
-                return text.strip()
+                return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ pdfplumber erreur: {e}")
-
-    # 2. Fallback PyPDF2
+    
+    # Niveau 2 : PyPDF2
     if PYPDF2_AVAILABLE:
         try:
             with open(filepath, 'rb') as f:
@@ -543,96 +660,218 @@ def extract_text_from_pdf(filepath):
                     content = page.extract_text()
                     if content:
                         text += content + "\n"
-            return text.strip()
+            if text.strip():
+                return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ PyPDF2 erreur: {e}")
-
+    
+    # Niveau 3 : Fallback pdftotext (si disponible sur le système)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['pdftotext', '-layout', filepath, '-'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return normalize_unicode(result.stdout.strip())
+    except Exception:
+        pass
+    
     return ""
 
 
-def extract_text_from_docx(filepath):
-    """Extrait le texte d'un DOCX : paragraphes + tableaux + en-têtes."""
+def extract_text_from_docx_robust(filepath, raw_bytes=None):
+    """Extraction DOCX avec récupération complète : paragraphes, tableaux, en-têtes, commentaires."""
+    if not DOCX_AVAILABLE:
+        return ""
+    
     try:
         doc = Document(filepath)
         parts = []
-
-        # Paragraphes principaux (inclut titres de sections)
+        
+        # 1. Paragraphes principaux (inclut titres de sections)
         for para in doc.paragraphs:
             t = para.text.strip()
             if t:
                 parts.append(t)
-
-        # Tableaux (certains CV mettent l'expérience en tableau)
+        
+        # 2. Tableaux (critique pour les CV structurés en tableau)
         for table in doc.tables:
             for row in table.rows:
-                row_text = ' | '.join(
-                    cell.text.strip() for cell in row.cells if cell.text.strip()
-                )
-                if row_text:
-                    parts.append(row_text)
-
-        # En-têtes et pieds de page
+                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if cells:
+                    parts.append(" | ".join(cells))
+        
+        # 3. En-têtes / pieds de page
         for section in doc.sections:
-            for header_para in (section.header.paragraphs if section.header else []):
-                t = header_para.text.strip()
+            for element in (section.header.paragraphs + section.footer.paragraphs):
+                t = element.text.strip()
                 if t:
                     parts.append(t)
-
-        return "\n".join(parts).strip()
+        
+        # 4. Commentaires (parfois utiles pour les notes du recruteur)
+        try:
+            for comment in doc.comments:
+                t = comment.text.strip()
+                if t:
+                    parts.append(f"[Commentaire] {t}")
+        except Exception:
+            pass  # Optionnel, certains DOCX n'ont pas cette propriété
+        
+        result = "\n".join(parts).strip()
+        return normalize_unicode(result)
+        
     except Exception as e:
         print(f"⚠️ Erreur lecture DOCX: {e}")
+        # Fallback : lecture brute si python-docx échoue
+        if raw_bytes:
+            try:
+                # Extraction basique des chaînes imprimables
+                text = re.sub(r'[^\x20-\x7E\u00C0-\u017F\u0400-\u04FF\u0600-\u06FF]+', ' ', 
+                             raw_bytes.decode('utf-8', errors='ignore'))
+                return normalize_unicode(text.strip())
+            except Exception:
+                pass
         return ""
 
 
-def extract_text_from_file(filepath, filename):
-    """Dispatch selon extension."""
-    if not filepath or not os.path.exists(filepath):
-        print(f"⚠️ Fichier introuvable: {filepath}")
-        return ""
-    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    if ext == 'pdf':
-        return extract_text_from_pdf(filepath)
-    elif ext in ('doc', 'docx'):
-        return extract_text_from_docx(filepath)
+def extract_text_from_txt(filepath, raw_bytes=None):
+    """Lecture de fichier texte avec gestion multi-encodage."""
+    if raw_bytes and CHARDET_AVAILABLE:
+        # Utiliser l'encodage détecté par chardet
+        try:
+            detected = chardet.detect(raw_bytes[:10000])
+            encoding = detected['encoding'] or 'utf-8'
+            return normalize_unicode(raw_bytes.decode(encoding, errors='ignore'))
+        except Exception:
+            pass
+    
+    # Lecture classique avec fallback d'encodages
+    for enc in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']:
+        try:
+            with open(filepath, 'r', encoding=enc) as f:
+                return normalize_unicode(f.read().strip())
+        except (UnicodeDecodeError, UnicodeError):
+            continue
     return ""
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 🔤 NORMALISATION TEXTE
-# ══════════════════════════════════════════════════════════════════════════════
-
-_ACCENT_MAP = str.maketrans(
-    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆ',
-    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAA'
-)
-
-
-def normalize_text(text):
-    """Minuscules + suppression accents + nettoyage ponctuation."""
-    if not text:
+def extract_text_robust(filepath, filename):
+    """
+    Extraction texte robuste : gère PDF, DOCX, TXT, encodages variés, 
+    et fallbacks multiples pour maximiser le contenu récupéré.
+    """
+    if not filepath or not os.path.exists(filepath):
+        print(f"⚠️ Fichier introuvable: {filepath}")
         return ""
-    text = text.lower()
-    text = text.translate(_ACCENT_MAP)
-    # Conserver lettres, chiffres, espaces et quelques séparateurs utiles
-    text = re.sub(r'[^\w\s\-/\.]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    raw_bytes = None
+    
+    # Lecture binaire pour détection d'encodage (DOC/TXT)
+    if CHARDET_AVAILABLE and ext in ('doc', 'docx', 'txt'):
+        try:
+            with open(filepath, 'rb') as f:
+                raw_bytes = f.read()
+        except Exception as e:
+            print(f"⚠️ Erreur lecture binaire: {e}")
+    
+    # Dispatch par type de fichier
+    if ext == 'pdf':
+        return extract_text_from_pdf_robust(filepath)
+    elif ext in ('doc', 'docx'):
+        return extract_text_from_docx_robust(filepath, raw_bytes)
+    elif ext == 'txt':
+        return extract_text_from_txt(filepath, raw_bytes)
+    
+    # Fallback : essayer de lire comme texte
+    if raw_bytes:
+        try:
+            return normalize_unicode(raw_bytes.decode('utf-8', errors='ignore').strip())
+        except Exception:
+            pass
+    
+    return ""
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
+# 🌐 DÉTECTION DE LANGUE ET ADAPTATION MOTS-CLÉS
+# ══════════════════════════════════════════════════════════════════════════
+
+def detect_language(text_sample):
+    """Détection de langue du CV pour adapter le matching."""
+    if not LANGDETECT_AVAILABLE or not text_sample:
+        return None
+    try:
+        # Échantillon de 1000 caractères pour fiabilité
+        sample = text_sample[:1000].strip()
+        if len(sample) < 50:
+            return None
+        return detect(sample)
+    except Exception:
+        return None
+
+
+# Dictionnaire de traduction/enrichissement des mots-clés par langue
+KEYWORD_TRANSLATIONS = {
+    'en': {
+        'credit': ['credit', 'loan', 'lending', 'credit analysis', 'loan portfolio'],
+        'banque': ['bank', 'banking', 'financial institution', 'banker'],
+        'garantie': ['collateral', 'guarantee', 'security', 'pledge'],
+        'audit': ['audit', 'internal audit', 'external audit', 'compliance audit'],
+        'reporting': ['reporting', 'financial reporting', 'management reporting'],
+        'risque': ['risk', 'risk management', 'market risk', 'credit risk'],
+        'reseau': ['network', 'networking', 'infrastructure', 'lan', 'wan'],
+        'serveur': ['server', 'server administration', 'windows server', 'linux'],
+    },
+    'es': {
+        'credit': ['crédito', 'préstamo', 'análisis de crédito'],
+        'banque': ['banco', 'banca', 'institución financiera'],
+        'garantie': ['garantía', 'aval', 'colateral'],
+        'audit': ['auditoría', 'auditoría interna', 'cumplimiento'],
+    },
+    'pt': {
+        'credit': ['crédito', 'empréstimo', 'análise de crédito'],
+        'banque': ['banco', 'bancário', 'instituição financeira'],
+        'garantie': ['garantia', 'caução', 'colateral'],
+    }
+}
+
+
+def get_keywords_for_language(criterion, lang='fr'):
+    """Récupère les mots-clés adaptés à la langue détectée."""
+    base_keywords = KEYWORD_MAPPING.get(criterion, [])
+    
+    if lang not in KEYWORD_TRANSLATIONS or lang == 'fr':
+        return base_keywords
+    
+    # Enrichir avec les traductions
+    enriched = list(base_keywords)
+    translations = KEYWORD_TRANSLATIONS.get(lang, {})
+    
+    for base_term in translations:
+        # Si le critère contient ce terme de base, ajouter les traductions
+        if any(base_term in kw.lower() for kw in base_keywords):
+            enriched.extend(translations[base_term])
+    
+    return list(set(enriched))  # Supprime les doublons
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 📅 EXTRACTION DES ANNÉES D'EXPÉRIENCE (hors stage)
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 def split_into_jobs(raw_text):
     """
     Découpe le texte brut en blocs correspondant à des postes.
     Un nouveau bloc commence quand on détecte un pattern de date.
     """
-    # Séparateurs typiques de blocs CV
+    # Séparateurs typiques de blocs CV (multi-langue)
     separators = re.compile(
         r'(?:^|\n)(?=\s*(?:\d{4}|jan|fev|mar|avr|mai|juin|juil|août|sep|oct|nov|dec'
         r'|january|february|march|april|june|july|august|september|october|november|december'
-        r'|depuis|de |from ))',
+        r'|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic'  # Espagnol/Portugais
+        r'|depuis|de |from |since |desde |a partir de ))',
         re.IGNORECASE | re.MULTILINE
     )
     blocks = separators.split(raw_text)
@@ -653,8 +892,8 @@ def extract_duration_years_from_block(block_text):
     years = 0.0
     text = block_text.lower()
 
-    # ── Forme "X an(s)" ou "X année(s)" ──────────────────────────────────
-    m = re.search(r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?)', text)
+    # ── Forme "X an(s)" ou "X année(s)" (multi-langue) ───────────────────
+    m = re.search(r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)', text)
     if m:
         try:
             years = float(m.group(1).replace(',', '.'))
@@ -663,11 +902,11 @@ def extract_duration_years_from_block(block_text):
             pass
 
     # ── Intervalle d'années "AAAA – AAAA" ou "AAAA - AAAA" ──────────────
-    m = re.search(r'(20\d{2}|19\d{2})\s*[-–—]\s*(20\d{2}|19\d{2}|aujourd\'hui|present|actuel|en cours)', text)
+    m = re.search(r'(20\d{2}|19\d{2})\s*[-–—]\s*(20\d{2}|19\d{2}|aujourd\'hui|present|actuel|en cours|now|current|actual|hoje)', text)
     if m:
         start_year = int(m.group(1))
         end_raw = m.group(2)
-        if re.match(r'\d{4}', end_raw):
+        if re.match(r'\d{4}', str(end_raw)):
             end_year = int(end_raw)
         else:
             end_year = datetime.datetime.now().year
@@ -677,7 +916,7 @@ def extract_duration_years_from_block(block_text):
 
     # ── Intervalle avec mois "mm/AAAA – mm/AAAA" ─────────────────────────
     m = re.search(
-        r'(\d{1,2})[/\-](20\d{2}|19\d{2})\s*[-–—]\s*(?:(\d{1,2})[/\-])?(20\d{2}|19\d{2}|present|actuel|en cours|aujourd\'hui)',
+        r'(\d{1,2})[/\-\.](20\d{2}|19\d{2})\s*[-–—\.]\s*(?:(\d{1,2})[/\-\.])?(20\d{2}|19\d{2}|present|actuel|en cours|aujourd\'hui|now|current|actual|hoje)',
         text
     )
     if m:
@@ -701,31 +940,23 @@ def extract_duration_years_from_block(block_text):
 def compute_real_experience_years(full_raw_text, domain_keywords=None):
     """
     Calcule le nombre total d'années d'expérience RÉELLE (hors stage) dans un domaine.
-
     domain_keywords : liste de mots-clés pour filtrer les blocs pertinents.
-    Si None, tous les blocs non-stage sont comptés.
     """
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
-    seen_years  = set()  # évite de compter deux fois le même intervalle
 
     for block in blocks:
         if is_stage_block(block):
-            # Ce bloc est un stage → on l'ignore totalement
-            print(f"    [STAGE ignoré] {block[:80]}...")
-            continue
+            continue  # Ignorer les stages
 
         # Filtrage optionnel sur domaine
         if domain_keywords:
-            norm_block = normalize_text(block)
+            norm_block, _ = normalize_for_matching(block)
             if not any(kw in norm_block for kw in domain_keywords):
                 continue
 
         duration = extract_duration_years_from_block(block)
         if duration > 0:
-            # Clé de déduplication approx (arrondie au semestre)
-            key = round(duration * 2) / 2
-            # On accepte plusieurs postes distincts
             total_years += duration
 
     return round(total_years, 1)
@@ -737,31 +968,32 @@ def has_experience_years(full_raw_text, min_years, domain_keywords=None):
     Les stages sont exclus du calcul.
     """
     total = compute_real_experience_years(full_raw_text, domain_keywords)
-    print(f"    [EXP] Années réelles calculées: {total} (min requis: {min_years})")
+    print(f"    [EXP] Années réelles: {total} (min requis: {min_years})")
     return total >= min_years
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 🧠 VÉRIFICATION D'UN CRITÈRE
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
+# 🧠 VÉRIFICATION D'UN CRITÈRE — matching intelligent multi-niveaux
+# ══════════════════════════════════════════════════════════════════════════
 
 # Mots-clés domaine pour chaque marqueur d'expérience
 DOMAIN_KEYWORDS_MAP = {
     "EXP_CREDIT_3ANS": [
         "credit", "risque", "banque", "bancaire", "institution financiere",
-        "analyste", "charge", "gestionnaire"
+        "analyste", "charge", "gestionnaire", "loan", "credit analysis"
     ],
     "EXP_FIN_3ANS": [
         "finance", "comptable", "comptabilite", "reporting", "tresorerie",
-        "banque", "institution financiere", "auditeur", "controleur"
+        "banque", "institution financiere", "auditeur", "controleur",
+        "financial", "accounting"
     ],
     "EXP_FINANCE_3ANS": [
         "finance", "comptable", "comptabilite", "reporting", "tresorerie",
-        "banque", "institution financiere"
+        "banque", "institution financiere", "financial"
     ],
     "EXP_IT_2ANS": [
         "reseau", "infrastructure", "systeme", "informatique", "it",
-        "network", "serveur", "technicien", "ingenieur"
+        "network", "serveur", "technicien", "ingenieur", "networking"
     ],
 }
 
@@ -774,17 +1006,18 @@ EXP_MIN_YEARS_MAP = {
 }
 
 
-def check_criterion_match(criterion, normalized_text, raw_full_text=""):
+def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None):
     """
-    Vérifie si un critère est satisfait.
-    Pour les critères d'expérience (marqueur EXP_*), utilise l'analyse
-    des années hors stage. Pour les autres, matching par mots-clés normalisés.
-
-    Retourne (bool, [mots trouvés])
+    Vérifie si un critère est satisfait avec matching intelligent :
+    1. Exact (mot-clé dans texte normalisé)
+    2. Fuzzy (similarité > 85% avec rapidfuzz)
+    3. Tokens (70% des tokens du mot-clé présents)
+    
+    Retourne : (bool, confidence_score, [mots trouvés])
     """
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
-        return False, []
+        return False, 0.0, []
 
     # ── Critère d'années d'expérience (hors stage) ───────────────────────
     exp_markers = [kw for kw in keywords if kw.startswith("EXP_")]
@@ -792,28 +1025,57 @@ def check_criterion_match(criterion, normalized_text, raw_full_text=""):
         marker = exp_markers[0]
         min_years     = EXP_MIN_YEARS_MAP.get(marker, 3.0)
         domain_kws    = DOMAIN_KEYWORDS_MAP.get(marker, [])
-        domain_kws_n  = [normalize_text(k) for k in domain_kws]
+        domain_kws_n  = [normalize_for_matching(k)[0] for k in domain_kws]
         found = has_experience_years(raw_full_text, min_years, domain_kws_n)
-        return found, ([marker] if found else [])
+        return found, 1.0 if found else 0.0, ([marker] if found else [])
 
-    # ── Critère classique : matching mots-clés ────────────────────────────
-    found_kws = [kw for kw in keywords if normalize_text(kw) in normalized_text]
-    return len(found_kws) > 0, found_kws
+    # ── Matching multi-niveaux pour mots-clés classiques ─────────────────
+    best_score = 0.0
+    found_kws = []
+    
+    text_clean, text_tokens = normalize_for_matching(normalized_text)
+    
+    for kw in keywords:
+        kw_clean, kw_tokens = normalize_for_matching(kw)
+        
+        # Niveau 1 : recherche exacte (cas insensible, sans accents)
+        if kw_clean in text_clean:
+            found_kws.append(kw)
+            best_score = max(best_score, 1.0)
+            continue
+        
+        # Niveau 2 : fuzzy matching (si rapidfuzz disponible)
+        if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
+            ratio = fuzz.partial_ratio(kw_clean, text_clean)
+            if ratio >= 85:  # Seuil élevé pour éviter faux positifs
+                found_kws.append(f"{kw}~{ratio/100:.2f}")
+                best_score = max(best_score, ratio / 100)
+                continue
+        
+        # Niveau 3 : matching par tokens (au moins 70% des tokens du mot-clé)
+        if kw_tokens and text_tokens:
+            common = set(kw_tokens) & set(text_tokens)
+            if len(common) >= max(2, len(kw_tokens) * 0.7):
+                found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
+                best_score = max(best_score, len(common) / len(kw_tokens))
+    
+    # Seuil de décision : 60% de confiance minimum
+    return best_score >= 0.6, round(best_score, 2), found_kws
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE PRINCIPAL
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
+# 🧠 MOTEUR D'ANALYSE PRINCIPAL — STRICT avec scoring Excel
+# ══════════════════════════════════════════════════════════════════════════
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     """
     Analyse STRICTE selon la grille Word.
-
+    
     Règles :
       🔴 Bloc 1 Éliminatoire (AND strict) : 1 critère manquant → score 0
       🟠 Bloc 2 Cohérence : +1 pt / critère validé
       🟡 Bloc 3 Signaux   : +2 pts / signal détecté
-
+    
     Scoring Excel :
       Adéquation(0-3) + Cohérence(0-2) + Risque métier(0-3) + CV(0-1) + Lettre(0-1) = /10
     """
@@ -847,7 +1109,11 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     raw_full     = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
 
     # ── Version normalisée (pour matching mots-clés) ──────────────────────
-    normalized   = normalize_text(raw_full)
+    normalized   = normalize_text_for_matching(raw_full)
+
+    # ── Détection langue (optionnel mais utile pour adaptation keywords) ─
+    detected_lang = detect_language(cv_text[:500]) if cv_text else None
+    print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
 
     checklist       = {}
     flags_elim      = []
@@ -858,6 +1124,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         'cv_words': len(cv_text.split()),
         'lettre_words': len((lettre_text or "").split()),
         'attestation_words': len(all_att_raw.split()),
+        'detected_language': detected_lang,
         'criteres_valides_bloc2':  [],
         'signaux_valides_bloc3':   [],
         'alertes_attention':       [],
@@ -869,28 +1136,46 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         }
     }
 
-    # ── 🔴 BLOC 1 : Éliminatoires ─────────────────────────────────────────
+    # ── 🔴 BLOC 1 : Éliminatoires (AND strict) ───────────────────────────
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
-        is_present, found_kws = check_criterion_match(crit, normalized, raw_full)
+        
+        # Adapter les mots-clés à la langue détectée si possible
+        original_keywords = None
+        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
+            original_keywords = KEYWORD_MAPPING.get(crit, [])
+            KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
+        
+        is_present, confidence, found_kws = check_criterion_match_advanced(
+            crit, normalized, raw_full
+        )
+        
+        # Restaurer les keywords originaux si modifiés
+        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
+            KEYWORD_MAPPING[crit] = original_keywords
+        
         checklist[key] = is_present
 
         if not is_present:
-            flags_elim.append(f"❌ {crit} (non trouvé)")
+            flags_elim.append(f"❌ {crit} (confiance: {confidence:.0%})")
             details['alertes_attention'].append(f"🔴 Éliminatoire manquant: {crit}")
             details['matching_details'][crit] = {
                 'found': False,
+                'confidence': confidence,
+                'language': detected_lang,
                 'status': 'ÉLIMINATOIRE — critère requis absent',
-                'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
+                'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5] if original_keywords else KEYWORD_MAPPING.get(crit, [])[:5]
             }
         else:
             details['matching_details'][crit] = {
                 'found': True,
+                'confidence': confidence,
+                'language': detected_lang,
                 'status': 'VALIDÉ',
                 'matched': found_kws
             }
 
-    # ── Décision stricte ──────────────────────────────────────────────────
+    # ── Décision stricte : 1 critère éliminatoire manquant = score 0 ─────
     if flags_elim:
         return {
             'score': 0,
@@ -917,26 +1202,53 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             }
         }
 
-    # ── 🟠 BLOC 2 : Cohérence (+1 pt/critère) ────────────────────────────
+    # ── 🟠 BLOC 2 : Cohérence (+1 pt/critère validé) ─────────────────────
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
-        is_present, found_kws = check_criterion_match(crit, normalized, raw_full)
+        
+        # Adaptation langue si nécessaire
+        original_keywords = None
+        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
+            original_keywords = KEYWORD_MAPPING.get(crit, [])
+            KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
+        
+        is_present, confidence, found_kws = check_criterion_match_advanced(
+            crit, normalized, raw_full
+        )
+        
+        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
+            KEYWORD_MAPPING[crit] = original_keywords
+        
         checklist[key] = is_present
         details['matching_details'][crit] = {
             'found': is_present,
+            'confidence': confidence,
             'matched': found_kws if is_present else []
         }
         if is_present:
             points_bloc2 += 1
             details['criteres_valides_bloc2'].append(f"🟠 {crit}")
 
-    # ── 🟡 BLOC 3 : Signaux (+2 pts/signal) ──────────────────────────────
+    # ── 🟡 BLOC 3 : Signaux forts (+2 pts/signal détecté) ────────────────
     for i, crit in enumerate(grille['signaux_forts']):
         key = f"signal_{i}"
-        is_present, found_kws = check_criterion_match(crit, normalized, raw_full)
+        
+        original_keywords = None
+        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
+            original_keywords = KEYWORD_MAPPING.get(crit, [])
+            KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
+        
+        is_present, confidence, found_kws = check_criterion_match_advanced(
+            crit, normalized, raw_full
+        )
+        
+        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
+            KEYWORD_MAPPING[crit] = original_keywords
+        
         checklist[key] = is_present
         details['matching_details'][crit] = {
             'found': is_present,
+            'confidence': confidence,
             'matched': found_kws if is_present else []
         }
         if is_present:
@@ -944,15 +1256,15 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             signaux.append(crit)
             details['signaux_valides_bloc3'].append(f"🟡 {crit}")
 
-    # ── Points d'attention (informatif) ──────────────────────────────────
+    # ── Points d'attention (informatif, n'impacte pas le score) ──────────
     for i, crit in enumerate(grille['points_attention']):
         key = f"attn_{i}"
-        is_present, found_kws = check_criterion_match(crit, normalized, raw_full)
+        is_present, _, _ = check_criterion_match_advanced(crit, normalized, raw_full)
         checklist[key] = is_present
         if is_present:
             details['alertes_attention'].append(f"⚠️ Attention: {crit}")
 
-    # ── Scoring Excel (sur 10) ─────────────────────────────────────────────
+    # ── Scoring Excel (sur 10) — conforme à la grille ────────────────────
     adequation   = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
     coherence    = min(2, points_bloc2)
     risque_metier= min(3, len(signaux))
@@ -987,9 +1299,14 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+def normalize_text_for_matching(text):
+    """Wrapper pour compatibilité avec l'ancien code."""
+    return normalize_for_matching(text)[0]
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 🔄 ANALYSE ASYNCHRONE
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
     """Lance l'analyse complète pour un candidat et sauvegarde le résultat."""
@@ -1003,25 +1320,24 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
 
-        # Extraction CV
+        # Extraction CV avec méthode robuste
         cv_path  = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
-        cv_text  = extract_text_from_file(cv_path, cv_filename) if cv_path else ""
+        cv_text  = extract_text_robust(cv_path, cv_filename) if cv_path else ""
 
         # Extraction Lettre
         lm_path  = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
-        lm_text  = extract_text_from_file(lm_path, lettre_filename) if lm_path else ""
+        lm_text  = extract_text_robust(lm_path, lettre_filename) if lm_path else ""
 
         # Extraction certificats/attestations
         att_texts = []
         for fn in (attestation_filenames or []):
             ap = os.path.join(UPLOAD_FOLDER, fn)
             if os.path.exists(ap):
-                t = extract_text_from_file(ap, fn)
+                t = extract_text_robust(ap, fn)
                 if t:
                     att_texts.append(t)
 
-        print(f"📄 Analyse {token}: CV={len(cv_text)} c, LM={len(lm_text)} c, "
-              f"Certs={len(att_texts)} fichiers")
+        print(f"📄 Analyse {token}: CV={len(cv_text)}c, LM={len(lm_text)}c, Certs={len(att_texts)}f")
 
         result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
 
@@ -1049,9 +1365,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         })
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 🏆 CLASSEMENT
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 def get_recommandation_from_score(score):
     s = int(score)
@@ -1094,9 +1410,9 @@ def generate_ranking_for_poste(poste, candidats_data):
     return pool
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 📊 EXPORT EXCEL
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
     if not OPENPYXL_AVAILABLE:
@@ -1165,18 +1481,15 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell        = ws.cell(row=row_i, column=col, value=val)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                # Couleurs rang
                 if col == 1:
                     color = {1: "FFD700", 2: "C0C0C0", 3: "CD7F32"}.get(rang)
                     if color:
                         cell.fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
                         cell.font = Font(bold=True, size=12)
-                # Score
                 if col == 10:
                     sc = "90EE90" if total >= 8 else ("FFD700" if total >= 6 else "FF6B6B")
                     cell.fill = PatternFill(start_color=sc, end_color=sc, fill_type="solid")
                     cell.font = Font(bold=True)
-                # Reco
                 if col == 11:
                     rc = "90EE90" if "prioritaire" in str(reco).lower() \
                          else ("FFD700" if "besoin" in str(reco).lower() else "FF6B6B")
@@ -1196,9 +1509,9 @@ def generate_excel_report(candidats_data, poste_filter=None):
     return buf
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 📄 EXPORT CSV
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 def generate_csv_report(candidats_data):
     out = io.StringIO()
@@ -1226,9 +1539,9 @@ def generate_csv_report(candidats_data):
     return out.getvalue()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 📕 EXPORT PDF
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data):
     if not REPORTLAB_AVAILABLE:
@@ -1280,9 +1593,9 @@ def generate_pdf_report(candidats_data):
     return buf
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 🔑 AUTH HELPERS
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
@@ -1306,9 +1619,9 @@ def init_recruteur():
 init_recruteur()
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 🌐 ROUTES PUBLIQUES
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
@@ -1323,7 +1636,7 @@ def get_grille(poste):
     return jsonify(g), 200
 
 
-# ── AUTH ───────────────────────────────────────────────────────────────────────
+# ── AUTH ─────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json(silent=True)
@@ -1339,7 +1652,7 @@ def login():
     return jsonify({'error': 'Identifiants incorrects'}), 401
 
 
-# ── CANDIDATURE ────────────────────────────────────────────────────────────────
+# ── CANDIDATURE ──────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -1418,9 +1731,9 @@ def get_statut(token):
     return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 🔒 ROUTES RECRUTEUR
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
@@ -1536,7 +1849,7 @@ def trigger_analyze(token):
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
 
-# ── EXPORT ─────────────────────────────────────────────────────────────────────
+# ── EXPORT ───────────────────────────────────────────────────────────────
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -1590,7 +1903,7 @@ def export_candidates(fmt):
         return jsonify({'error': str(e)}), 500
 
 
-# ── EMAIL PREVIEW ───────────────────────────────────────────────────────────────
+# ── EMAIL PREVIEW ────────────────────────────────────────────────────────
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -1631,7 +1944,7 @@ def email_preview(token):
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
 
 
-# ── SERVIR LES FICHIERS ─────────────────────────────────────────────────────────
+# ── SERVIR LES FICHIERS ──────────────────────────────────────────────────
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename)
@@ -1644,16 +1957,16 @@ def serve_upload(filename):
     return send_from_directory(UPLOAD_FOLDER, safe, mimetype=mime, as_attachment=False)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 # 🚀 DÉMARRAGE
-# ══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     print(f"🚀 RecrutBank démarré sur le port {port}")
     print(f"📋 Grille: {len(GRILLE)} postes")
     print(f"⚠️  Élimination STRICTE: 1 critère manquant → score 0")
     print(f"🚫 Stages EXCLUS du calcul des années d'expérience")
-    print(f"🔍 Extraction PDF: {'pdfplumber' if PDFPLUMBER_AVAILABLE else 'PyPDF2 (fallback)'}")
-    print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | "
-          f"PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
+    print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
+    print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
+    print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | 📕 PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
     app.run(host="0.0.0.0", port=port, debug=False)
