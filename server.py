@@ -5,10 +5,12 @@
 #   2. Normalisation Unicode complète (accents, caractères spéciaux, encodages)
 #   3. Matching intelligent : exact + fuzzy + tokens (rapidfuzz)
 #   4. Détection automatique de langue et adaptation des mots-clés
-#   5. Les années de STAGE ne comptent PAS comme années d'expérience
-#   6. Logique AND stricte : 1 critère éliminatoire manquant = score 0
-#   7. Gestion des confiances de matching pour réduire les faux positifs
-#   8. Tous les bugs de syntaxe corrigés + logs améliorés
+#   5. Parsing des dates françaises : "Aout 2023 à aujourd'hui", "Novembre 2020 - Août 2023"
+#   6. Les années de STAGE ne comptent PAS comme années d'expérience
+#   7. Logique AND stricte : 1 critère éliminatoire manquant = score 0
+#   8. Gestion des confiances de matching pour réduire les faux positifs
+#   9. Logs de débogage pour extraction texte et matching
+#  10. Tous les bugs de syntaxe corrigés + logs améliorés
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -117,6 +119,7 @@ ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
 
 def allowed_file(filename):
+    """Vérifie si l'extension du fichier est autorisée."""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # ── POSTES ────────────────────────────────────────────────────────────────
@@ -498,65 +501,69 @@ KEYWORD_MAPPING = {
 
     # ── IT Réseau & Infrastructure ────────────────────────────────────────
     "Expérience en réseau / infrastructure": [
-        "reseau", "infrastructure", "lan", "wan", "vpn",
-        "infrastructure it", "network", "reseaux", "networking"
+        "reseau", "infrastructure", "lan", "wan", "vpn", "wlan", "sd-wan",
+        "infrastructure it", "network", "reseaux", "networking",
+        "routeur", "switch", "ospf", "eigrp", "bgp", "glbp",
+        "cisco", "mikrotik", "ubiquiti", "fortinet", "palo alto"
     ],
     "Exposition à environnement critique": [
         "banque", "telco", "telecom", "datacenter", "centre de donnees",
         "environnement critique", "secteur bancaire", "haute disponibilite",
-        "critical infrastructure", "mission critical"
+        "critical infrastructure", "mission critical", "bad", "orabank",
+        "ecobank", "uba", "unicef", "assurances"
     ],
     "Notion de sécurité IT": [
         "securite it", "cybersecurite", "securite informatique",
-        "firewall", "securite reseau", "ids", "ips",
-        "it security", "cybersecurity", "network security"
+        "firewall", "securite reseau", "ids", "ips", "siem", "soar",
+        "it security", "cybersecurity", "network security", "antimalware",
+        "antivirus", "anti-spam", "cisco security", "cyberops"
     ],
     "Minimum 2 ans expérience (hors stage)": [
         "EXP_IT_2ANS"
     ],
     "Gestion réseaux LAN/WAN/VPN": [
         "lan", "wan", "vpn", "reseaux locaux", "reseau local",
-        "virtual private network", "switch", "routeur",
-        "local area network", "wide area network"
+        "virtual private network", "switch", "routeur", "ospf", "eigrp",
+        "bgp", "glbp", "sd-wan", "wlan", "interconnexion"
     ],
     "Gestion serveurs Windows/Linux": [
         "windows server", "linux", "serveurs", "administration serveurs",
-        "unix", "active directory", "debian", "ubuntu server",
-        "server administration"
+        "unix", "active directory", "debian", "ubuntu server", "vmware",
+        "esxi", "hyper-v", "virtualbox", "virtualisation"
     ],
     "Cloud même basique": [
         "cloud", "aws", "azure", "google cloud", "cloud computing",
-        "iaas", "saas", "cloud services"
+        "iaas", "saas", "ovh", "hosting", "amen", "lws", "starlink"
     ],
     "Gestion des incidents": [
         "incident", "gestion incidents", "support technique",
-        "resolution incident", "itil", "ticketing",
-        "incident management", "technical support"
+        "resolution incident", "itil", "ticketing", "prtg", "nagios",
+        "zabbix", "supervision", "monitoring"
     ],
     "Assurance de la disponibilité": [
         "disponibilite", "haute disponibilite", "sla",
         "uptime", "continuite service", "availability",
-        "high availability", "service level agreement"
+        "high availability", "service level agreement", "failover"
     ],
     "Cybersécurité / firewall": [
         "cybersecurite", "firewall", "securite", "ids",
         "ips", "siem", "pentest", "vulnerability",
-        "cybersecurity", "intrusion detection"
+        "cybersecurity", "intrusion detection", "soar"
     ],
     "Haute disponibilité / PRA/PCA": [
         "haute disponibilite", "pra", "pca", "plan de reprise",
         "continuite activite", "disaster recovery", "basculement",
-        "business continuity", "disaster recovery plan"
+        "business continuity", "disaster recovery plan", "failover"
     ],
     "Gestion ATM ou systèmes bancaires": [
         "atm", "systemes bancaires", "gab", "distributeur automatique",
         "systeme bancaire core", "temenos", "flexcube",
-        "banking systems", "core banking"
+        "banking systems", "core banking", "interconnexion gab"
     ],
     "Certifications Cisco ou Microsoft": [
         "ccna", "ccnp", "ccie", "cisco", "microsoft certified",
         "mcse", "network+", "certification reseau",
-        "cisco certification", "microsoft certification"
+        "cisco certification", "microsoft certification", "encor", "350-401"
     ]
 }
 
@@ -861,6 +868,16 @@ def get_keywords_for_language(criterion, lang='fr'):
 # 📅 EXTRACTION DES ANNÉES D'EXPÉRIENCE (hors stage)
 # ══════════════════════════════════════════════════════════════════════════
 
+# Mois en français pour le parsing de dates
+FRENCH_MONTHS = {
+    'janvier': 1, 'jan': 1, 'février': 2, 'fevrier': 2, 'fev': 2,
+    'mars': 3, 'mar': 3, 'avril': 4, 'avr': 4, 'mai': 5,
+    'juin': 6, 'juillet': 7, 'juil': 7, 'août': 8, 'aout': 8, 'aou': 8,
+    'septembre': 9, 'sep': 9, 'octobre': 10, 'oct': 10,
+    'novembre': 11, 'nov': 11, 'décembre': 12, 'decembre': 12, 'dec': 12
+}
+
+
 def split_into_jobs(raw_text):
     """
     Découpe le texte brut en blocs correspondant à des postes.
@@ -868,10 +885,17 @@ def split_into_jobs(raw_text):
     """
     # Séparateurs typiques de blocs CV (multi-langue)
     separators = re.compile(
-        r'(?:^|\n)(?=\s*(?:\d{4}|jan|fev|mar|avr|mai|juin|juil|août|sep|oct|nov|dec'
-        r'|january|february|march|april|june|july|august|september|october|november|december'
-        r'|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic'  # Espagnol/Portugais
-        r'|depuis|de |from |since |desde |a partir de ))',
+        r'(?:^|\n)(?=\s*(?:'
+        # Dates avec mois français
+        r'(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
+        r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s+'
+        # Ou année seule
+        r'(?:20\d{2}|19\d{2})|'
+        # Ou format mm/aaaa
+        r'\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|'
+        # Mots-clés de début de période
+        r'(?:depuis|de |from |since |desde |a partir de |starting |beginning)'
+        r'))',
         re.IGNORECASE | re.MULTILINE
     )
     blocks = separators.split(raw_text)
@@ -886,7 +910,15 @@ def is_stage_block(block_text):
 def extract_duration_years_from_block(block_text):
     """
     Extrait la durée en années d'un bloc de texte de poste.
-    Gère les formats : "2019 – 2022", "03/2018 - 06/2021", "3 ans", "2 ans 6 mois".
+    ✅ CORRECTION MAJEURE : Support complet des dates françaises avec mois en toutes lettres
+    
+    Formats supportés :
+    - "Aout 2023 à aujourd'hui"
+    - "Novembre 2020 - Août 2023" 
+    - "Jan 2021 à ce jour"
+    - "3 ans", "2 ans 6 mois"
+    - "03/2018 - 06/2021"
+    
     Retourne un float (nombre d'années) ou 0 si non trouvable.
     """
     years = 0.0
@@ -901,38 +933,67 @@ def extract_duration_years_from_block(block_text):
         except ValueError:
             pass
 
-    # ── Intervalle d'années "AAAA – AAAA" ou "AAAA - AAAA" ──────────────
-    m = re.search(r'(20\d{2}|19\d{2})\s*[-–—]\s*(20\d{2}|19\d{2}|aujourd\'hui|present|actuel|en cours|now|current|actual|hoje)', text)
+    # ── Pattern: "Mois AAAA à aujourd'hui/present/current" (CORRIGÉ) ─────
+    # Supporte: "Aout 2023 à aujourd'hui", "Nov 2020 - present", "Janvier 2021 à ce jour"
+    pattern_present = re.compile(
+        r'(?:(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
+        r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s+)?'
+        r'(20\d{2}|19\d{2})'
+        r'\s*(?:à|-|–|—|au|jusqu\'au|to|until|au\s+)?'
+        r'(?:aujourd\'hui|present|actuel|en cours|now|current|actual|hoje|ce jour)',
+        re.IGNORECASE
+    )
+    m = pattern_present.search(text)
     if m:
-        start_year = int(m.group(1))
-        end_raw = m.group(2)
-        if re.match(r'\d{4}', str(end_raw)):
-            end_year = int(end_raw)
-        else:
-            end_year = datetime.datetime.now().year
-        diff = end_year - start_year
-        if 0 < diff <= 40:
-            return float(diff)
+        year_str = m.group(2)
+        start_year = int(year_str)
+        start_month = FRENCH_MONTHS.get((m.group(1) or '').lower(), 1)
+        end_year = datetime.datetime.now().year
+        end_month = datetime.datetime.now().month
+        delta = (end_year - start_year) + (end_month - start_month) / 12.0
+        if 0 < delta <= 40:
+            return round(delta, 1)
 
-    # ── Intervalle avec mois "mm/AAAA – mm/AAAA" ─────────────────────────
+    # ── Pattern: "Mois AAAA - Mois AAAA" (CORRIGÉ) ───────────────────────
+    pattern_range = re.compile(
+        r'(?:(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
+        r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s+)?'
+        r'(20\d{2}|19\d{2})'
+        r'\s*(?:à|-|–|—|au|jusqu\'au|to|until)?\s*'
+        r'(?:(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
+        r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s+)?'
+        r'(20\d{2}|19\d{2})',
+        re.IGNORECASE
+    )
+    m = pattern_range.search(text)
+    if m:
+        start_month = FRENCH_MONTHS.get((m.group(1) or '').lower(), 1)
+        start_year = int(m.group(2))
+        end_month = FRENCH_MONTHS.get((m.group(3) or '').lower(), 12)
+        end_year = int(m.group(4))
+        delta = (end_year - start_year) + (end_month - start_month) / 12.0
+        if 0 < delta <= 40:
+            return round(delta, 1)
+
+    # ── Fallback : format numérique "mm/aaaa - mm/aaaa" ──────────────────
     m = re.search(
-        r'(\d{1,2})[/\-\.](20\d{2}|19\d{2})\s*[-–—\.]\s*(?:(\d{1,2})[/\-\.])?(20\d{2}|19\d{2}|present|actuel|en cours|aujourd\'hui|now|current|actual|hoje)',
+        r'(\d{1,2})[/\-\.](20\d{2}|19\d{2})\s*[-–—\.]?\s*(?:(\d{1,2})[/\-\.])?(20\d{2}|19\d{2}|present|current|now)',
         text
     )
     if m:
         start_month = int(m.group(1))
-        start_year  = int(m.group(2))
-        end_raw     = m.group(4)
+        start_year = int(m.group(2))
+        end_raw = m.group(4)
         end_month_raw = m.group(3)
         if re.match(r'\d{4}', str(end_raw)):
-            end_year  = int(end_raw)
+            end_year = int(end_raw)
             end_month = int(end_month_raw) if end_month_raw else 12
         else:
-            end_year  = datetime.datetime.now().year
+            end_year = datetime.datetime.now().year
             end_month = datetime.datetime.now().month
         delta = (end_year - start_year) + (end_month - start_month) / 12.0
         if 0 < delta <= 40:
-            return delta
+            return round(delta, 1)
 
     return 0.0
 
@@ -993,7 +1054,8 @@ DOMAIN_KEYWORDS_MAP = {
     ],
     "EXP_IT_2ANS": [
         "reseau", "infrastructure", "systeme", "informatique", "it",
-        "network", "serveur", "technicien", "ingenieur", "networking"
+        "network", "serveur", "technicien", "ingenieur", "networking",
+        "cisco", "admin", "administrateur"
     ],
 }
 
@@ -1064,8 +1126,11 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE PRINCIPAL — STRICT avec scoring Excel
+# 🧠 MOTEUR D'ANALYSE PRINCIPAL — STRICT avec scoring Excel + LOGS DEBUG
 # ══════════════════════════════════════════════════════════════════════════
+
+DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
+
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     """
@@ -1109,11 +1174,25 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     raw_full     = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
 
     # ── Version normalisée (pour matching mots-clés) ──────────────────────
-    normalized   = normalize_text_for_matching(raw_full)
+    normalized   = normalize_for_matching(raw_full)[0]
 
     # ── Détection langue (optionnel mais utile pour adaptation keywords) ─
     detected_lang = detect_language(cv_text[:500]) if cv_text else None
     print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
+
+    # 🔍 LOGS DE DÉBOGAGE DEMANDÉS PAR L'UTILISATEUR
+    print(f"🔤 Texte normalisé (extrait): {normalized[:500]}")
+    print(f"🔑 Mots-clés recherchés pour IT: {DOMAIN_KEYWORDS_MAP['EXP_IT_2ANS']}")
+
+    # Mode debug complet si activé
+    if DEBUG_EXTRACTION:
+        print(f"\n{'='*70}\n🔍 DEBUG: {poste}")
+        print(f"📄 CV extrait ({len(cv_text)} chars):\n{cv_text[:1200]}")
+        print(f"\n🎯 Critères éliminatoires:")
+        for crit in grille['eliminatoire']:
+            ok, conf, found = check_criterion_match_advanced(crit, normalized, raw_full)
+            print(f"   {'✅' if ok else '❌'} {crit} (conf: {conf:.0%}) → {found}")
+        print(f"{'='*70}\n")
 
     checklist       = {}
     flags_elim      = []
@@ -1305,7 +1384,7 @@ def normalize_text_for_matching(text):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🔄 ANALYSE ASYNCHRONE
+# 🔄 ANALYSE ASYNCHRONE — avec logs de débogage extraction
 # ══════════════════════════════════════════════════════════════════════════
 
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
@@ -1337,7 +1416,10 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 if t:
                     att_texts.append(t)
 
+        # 🔍 LOG DE DÉBOGAGE EXTRACTION DEMANDÉ
         print(f"📄 Analyse {token}: CV={len(cv_text)}c, LM={len(lm_text)}c, Certs={len(att_texts)}f")
+        if DEBUG_EXTRACTION and cv_text:
+            print(f"🔍 TEXTE EXTRAIT CV ({token}):\n{cv_text[:1500]}")
 
         result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
 
@@ -1370,6 +1452,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 # ══════════════════════════════════════════════════════════════════════════
 
 def get_recommandation_from_score(score):
+    """Retourne la recommandation basée sur le score."""
     s = int(score)
     if s >= 8:  return "🥇 Entretien prioritaire"
     if s >= 6:  return "🥈 Entretien si besoin"
@@ -1377,6 +1460,7 @@ def get_recommandation_from_score(score):
 
 
 def calculate_ranking_score(c, poste):
+    """Calcule le score de classement avec bonus."""
     sb = c.get('score_breakdown_parsed', {})
     if sb.get('bloc1_eliminatoire'):
         return -999
@@ -1394,6 +1478,7 @@ def calculate_ranking_score(c, poste):
 
 
 def generate_ranking_for_poste(poste, candidats_data):
+    """Génère le classement pour un poste donné."""
     pool = [c for c in candidats_data if c.get('poste') == poste]
     for c in pool:
         c['ranking_score']          = calculate_ranking_score(c, poste)
@@ -1415,6 +1500,7 @@ def generate_ranking_for_poste(poste, candidats_data):
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
+    """Génère un rapport Excel des candidats."""
     if not OPENPYXL_AVAILABLE:
         return None
 
@@ -1481,15 +1567,18 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell        = ws.cell(row=row_i, column=col, value=val)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                # Couleurs rang
                 if col == 1:
                     color = {1: "FFD700", 2: "C0C0C0", 3: "CD7F32"}.get(rang)
                     if color:
                         cell.fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
                         cell.font = Font(bold=True, size=12)
+                # Score
                 if col == 10:
                     sc = "90EE90" if total >= 8 else ("FFD700" if total >= 6 else "FF6B6B")
                     cell.fill = PatternFill(start_color=sc, end_color=sc, fill_type="solid")
                     cell.font = Font(bold=True)
+                # Reco
                 if col == 11:
                     rc = "90EE90" if "prioritaire" in str(reco).lower() \
                          else ("FFD700" if "besoin" in str(reco).lower() else "FF6B6B")
@@ -1514,6 +1603,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_csv_report(candidats_data):
+    """Génère un rapport CSV des candidats."""
     out = io.StringIO()
     w   = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL)
     w.writerow([
@@ -1544,6 +1634,7 @@ def generate_csv_report(candidats_data):
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data):
+    """Génère un rapport PDF des candidats."""
     if not REPORTLAB_AVAILABLE:
         return None
     buf  = io.BytesIO()
@@ -1598,9 +1689,11 @@ def generate_pdf_report(candidats_data):
 # ══════════════════════════════════════════════════════════════════════════
 
 def hash_pwd(pwd):
+    """Hash du mot de passe avec SHA256."""
     return hashlib.sha256(pwd.encode()).hexdigest()
 
 def init_recruteur():
+    """Initialise le compte recruteur par défaut dans Redis."""
     try:
         redis_client.ping()
         if not redis_client.exists("recruteur:1"):
@@ -1625,11 +1718,13 @@ init_recruteur()
 
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
+    """Retourne la liste des postes disponibles."""
     return jsonify(POSTES), 200
 
 
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
+    """Retourne la grille de sélection pour un poste donné."""
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
@@ -1639,6 +1734,7 @@ def get_grille(poste):
 # ── AUTH ─────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login', methods=['POST'])
 def login():
+    """Authentification du recruteur."""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({'error': 'JSON manquant'}), 400
@@ -1655,6 +1751,7 @@ def login():
 # ── CANDIDATURE ──────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
+    """Soumission d'une nouvelle candidature."""
     try:
         nom       = (request.form.get('nom')       or '').strip()
         prenom    = (request.form.get('prenom')    or '').strip()
@@ -1722,6 +1819,7 @@ def postuler():
 
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
+    """Retourne le statut d'une candidature (côté candidat)."""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidature introuvable'}), 404
@@ -1738,6 +1836,7 @@ def get_statut(token):
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
+    """Retourne les statistiques globales des candidatures."""
     keys  = redis_client.keys("candidat:*")
     stats = {"total": len(keys), "en_attente": 0, "retenu": 0,
              "rejete": 0, "entretien": 0, "by_poste": []}
@@ -1757,6 +1856,7 @@ def get_stats():
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
+    """Liste les candidatures avec filtres."""
     poste_filter  = request.args.get('poste', '')
     statut_filter = request.args.get('statut', '')
     search        = request.args.get('search', '').lower()
@@ -1785,6 +1885,7 @@ def list_candidats():
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
+    """Retourne le détail complet d'une candidature."""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -1807,6 +1908,7 @@ def get_candidat_detail(token):
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
+    """Met à jour le statut d'une candidature."""
     key = f"candidat:{token}"
     if not redis_client.exists(key):
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -1827,6 +1929,7 @@ def update_candidat(token):
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
+    """Déclenche manuellement une ré-analyse d'une candidature."""
     key  = f"candidat:{token}"
     data = redis_client.hgetall(key)
     if not data:
@@ -1853,6 +1956,7 @@ def trigger_analyze(token):
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
+    """Exporte les candidatures au format CSV, Excel ou PDF."""
     try:
         keys   = redis_client.keys("candidat:*")
         result = []
@@ -1907,6 +2011,7 @@ def export_candidates(fmt):
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
+    """Génère un aperçu d'email pour un candidat."""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -1947,6 +2052,7 @@ def email_preview(token):
 # ── SERVIR LES FICHIERS ──────────────────────────────────────────────────
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
+    """Sert les fichiers uploadés (CV, lettre, attestations)."""
     safe = secure_filename(filename)
     if not safe or safe != filename:
         return jsonify({'error': 'Nom de fichier invalide'}), 400
@@ -1968,5 +2074,8 @@ if __name__ == '__main__':
     print(f"🚫 Stages EXCLUS du calcul des années d'expérience")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
+    print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
     print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | 📕 PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
+    print(f"🔧 DEBUG: {'ACTIF' if DEBUG_EXTRACTION else 'INACTIF'} (var: DEBUG_EXTRACTION)")
+    print(f"🔍 Logs: Texte normalisé + Mots-clés IT affichés dans analyze_cv_against_grille")
     app.run(host="0.0.0.0", port=port, debug=False)
