@@ -1,7 +1,6 @@
-# server.py - Backend Flask pour RecrutBank avec analyse automatique EXACTE des CV
-# Basé sur la grille Word : Matching EXACT (soit ça passe, soit ça casse)
-# Analyse TOUS les documents (CV + Lettre + Certificats)
-# Rapports larges pour texte non coupé
+# server.py - Backend Flask pour RecrutBank avec analyse automatique STRICTE
+# Élimination AUTOMATIQUE si UN critère éliminatoire manque (logique AND stricte)
+# Analyse TOUS les documents (CV + Lettre + Certificats) avec matching EXACT
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -85,8 +84,10 @@ POSTES = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 📋 GRILLE DE PRÉSÉLECTION - MATCHING EXACT (SOIT ÇA PASSE, SOIT ÇA CASSE)
+# 📋 GRILLE DE PRÉSÉLECTION - ÉLIMINATION STRICTE (TOUS critères requis)
 # ══════════════════════════════════════════════════════════════════════════════
+# ⚠️ LOGIQUE STRICTE : Si UN SEUL critère éliminatoire n'est PAS trouvé → ÉLIMINATION AUTOMATIQUE
+# Même si les autres critères sont validés, le candidat est rejeté.
 
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -114,7 +115,6 @@ GRILLE = {
     "Analyste Crédit CCB": {
         "eliminatoire": [
             "Expérience en analyse crédit",
-            "Profil purement commercial sans analyse",
             "Capacité à lire des états financiers",
             "3 ans expérience institution financière"
         ],
@@ -149,7 +149,7 @@ GRILLE = {
             "Manipulation de garanties ou contrats"
         ],
         "points_attention": [
-            "Profils trop généralistes assistants administratifs sans spécialisation",
+            "Profils trop généralistes",
             "CV désorganisé"
         ]
     },
@@ -194,11 +194,11 @@ GRILLE = {
         "signaux_forts": [
             "Bâle II / III",
             "Gestion ALM / liquidité",
-            "Produits FICC FX taux commodities",
+            "Produits FICC",
             "Reporting risque"
         ],
         "points_attention": [
-            "CV trop théorique académique sans pratique",
+            "CV trop théorique académique",
             "Aucune mention d'outils",
             "Incapacité implicite à modéliser"
         ]
@@ -206,12 +206,12 @@ GRILLE = {
     "IT Réseau & Infrastructure": {
         "eliminatoire": [
             "Expérience en réseau / infrastructure",
-            "Exposition à environnement critique banque telco datacenter",
+            "Exposition à environnement critique",
             "Notion de sécurité IT",
             "2 ans expérience minimum"
         ],
         "a_verifier": [
-            "Gestion réseaux LAN/WAN VPN",
+            "Gestion réseaux LAN/WAN/VPN",
             "Gestion serveurs Windows/Linux",
             "Cloud même basique",
             "Gestion des incidents",
@@ -249,7 +249,6 @@ KEYWORD_MAPPING = {
     
     # === Analyste Crédit CCB ===
     "Expérience en analyse crédit": ["analyse crédit", "credit analysis", "évaluation crédit", "scoring crédit", "analyse financière crédit"],
-    "Profil purement commercial sans analyse": ["commercial", "vente", "business development", "chargé d'affaires commercial"],
     "Capacité à lire des états financiers": ["états financiers", "bilan", "compte de résultat", "ratios financiers", "analyse financière"],
     "3 ans expérience institution financière": ["3 ans", "trois ans", "3 années", "institution financière", "banque", "secteur bancaire", "4 ans", "5 ans", "6 ans"],
     "Type de clients PME": ["PME", "petites entreprises", "moyennes entreprises", "TPE"],
@@ -292,15 +291,15 @@ KEYWORD_MAPPING = {
     "VBA / Python": ["VBA", "Python", "programmation", "scripting"],
     "Bâle II / III": ["Bâle II", "Bâle III", "Basel II", "Basel III", "accords de Bâle", "réglementation Bâle"],
     "Gestion ALM / liquidité": ["ALM", "Asset Liability Management", "liquidité", "gestion ALM", "actif-passif"],
-    "Produits FICC FX taux commodities": ["FICC", "produits dérivés", "commodities", "matières premières", "produits de taux", "FX"],
+    "Produits FICC": ["FICC", "produits dérivés", "commodities", "matières premières", "produits de taux", "FX"],
     "Reporting risque": ["reporting risque", "reporting des risques", "rapport de risque"],
     
     # === IT Réseau & Infrastructure ===
     "Expérience en réseau / infrastructure": ["réseau", "infrastructure", "LAN", "WAN", "VPN", "réseaux", "infrastructure IT", "network"],
-    "Exposition à environnement critique banque telco datacenter": ["banque", "telco", "télécom", "datacenter", "centre de données", "environnement critique", "secteur bancaire"],
+    "Exposition à environnement critique": ["banque", "telco", "télécom", "datacenter", "centre de données", "environnement critique", "secteur bancaire"],
     "Notion de sécurité IT": ["sécurité IT", "cybersécurité", "sécurité informatique", "firewall", "sécurité réseau"],
     "2 ans expérience minimum": ["2 ans", "deux ans", "2 années", "expérience", "3 ans", "4 ans", "5 ans"],
-    "Gestion réseaux LAN/WAN VPN": ["LAN", "WAN", "VPN", "réseaux locaux", "réseaux étendus", "virtual private network"],
+    "Gestion réseaux LAN/WAN/VPN": ["LAN", "WAN", "VPN", "réseaux locaux", "réseaux étendus", "virtual private network"],
     "Gestion serveurs Windows/Linux": ["Windows Server", "Linux", "serveurs", "administration serveurs", "Windows", "Unix"],
     "Cloud même basique": ["cloud", "AWS", "Azure", "Google Cloud", "cloud computing", "infrastructure cloud"],
     "Gestion des incidents": ["incident", "gestion des incidents", "support", "résolution", "ITIL", "incident management"],
@@ -384,7 +383,7 @@ def normalize_text(text):
     return text
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE CV - MATCHING EXACT (SOIT ÇA PASSE, SOIT ÇA CASSE)
+# 🧠 MOTEUR D'ANALYSE CV - ÉLIMINATION STRICTE (TOUS critères requis)
 # Analyse TOUS les documents : CV + Lettre + TOUS les certificats
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -406,10 +405,14 @@ def check_criterion_match(criterion, full_text):
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     """
-    Analyse STRICTE selon la grille Word - MATCHING EXACT.
+    Analyse STRICTE selon la grille Word - ÉLIMINATION AUTOMATIQUE.
+    
+    ⚠️ RÈGLE STRICTE : Si UN SEUL critère éliminatoire n'est PAS trouvé → Score = 0
+    Même si les autres critères éliminatoires sont validés, le candidat est éliminé.
+    
     Analyse TOUS les documents soumis : CV + Lettre + TOUS les certificats.
     
-    🔴 Bloc 1: Éliminatoire (filtre dur) → Score = 0 si manquant
+    🔴 Bloc 1: Éliminatoire (filtre dur, logique AND) → Score = 0 si UN critère manquant
     🟠 Bloc 2: Cohérence → +1 point par critère validé
     🟡 Bloc 3: Signaux → +2 points par signal détecté
     
@@ -461,7 +464,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         }
     }
     
-    # 🔴 BLOC 1 : ÉLIMINATOIRE (critères POSITIFS requis) - MATCHING EXACT
+    # 🔴 BLOC 1 : ÉLIMINATOIRE (critères POSITIFS requis) - LOGIQUE AND STRICTE
+    # ⚠️ Si UN SEUL critère n'est PAS trouvé → ÉLIMINATION AUTOMATIQUE
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
         is_present, found_keywords = check_criterion_match(crit, full_text)
@@ -469,7 +473,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         checklist[key] = is_present
         
         if not is_present:
-            # MATCHING EXACT ÉCHOUÉ → ÉLIMINATOIRE
+            # ⚠️ MATCHING EXACT ÉCHOUÉ → CRITÈRE ÉLIMINATOIRE MANQUANT
             flags_elim.append(f"❌ {crit} (non trouvé)")
             details['alertes_attention'].append(f"🔴 Éliminatoire: {crit} manquant")
             details['matching_details'][crit] = {
@@ -478,12 +482,42 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
             }
         else:
-            # MATCHING EXACT RÉUSSI → VALIDÉ
+            # ✅ MATCHING EXACT RÉUSSI → Critère validé
             details['matching_details'][crit] = {
                 'found': True, 
                 'status': 'VALIDÉ',
                 'matched': found_keywords
             }
+    
+    # ⚠️ VÉRIFICATION STRICTE : Si AU MOINS UN critère éliminatoire manque → ÉLIMINATION
+    if flags_elim:
+        # Le candidat est éliminé même si d'autres critères éliminatoires sont validés
+        return {
+            'score': 0,
+            'checklist': checklist,
+            'flags_eliminatoires': flags_elim,
+            'signaux_detectes': [],
+            'details': details,
+            'score_breakdown': {
+                'bloc1_eliminatoire': True,
+                'flags_eliminatoires_count': len(flags_elim),
+                'adequation_experience': 0,
+                'coherence_parcours': 0,
+                'exposition_risque_metier': 0,
+                'qualite_cv': 0,
+                'lettre_motivation': 0,
+                'bloc2_criteres_valides': 0,
+                'bloc2_points': 0,
+                'bloc3_signaux_detectes': 0,
+                'bloc3_points': 0,
+                'total_raw_points': 0,
+                'score_final': 0,
+                'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)",
+                'documents_analyses': details['documents_analyses']
+            }
+        }
+    
+    # ✅ Tous les critères éliminatoires sont validés → on continue l'analyse
     
     # 🟠 BLOC 2 : COHÉRENCE (+1 point par critère validé) - MATCHING EXACT
     for i, crit in enumerate(grille['a_verifier']):
@@ -516,47 +550,43 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             details['alertes_attention'].append(f"⚠️ {crit}")
     
     # 🧮 CALCUL DU SCORE FINAL selon modèle Excel (sur 10) - STRICT
-    if flags_elim:
-        score_final = 0
-        details['alertes_attention'].insert(0, f"🚫 Score bloqué à 0 : {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)")
-    else:
-        # Mapping selon modèle Excel :
-        # Adéquation expérience (0-3) = critères éliminatoires validés (max 3)
-        adequation = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
-        # Cohérence parcours (0-2) = critères à vérifier validés (max 2)
-        coherence = min(2, points_bloc2)
-        # Exposition au risque de métier (0-3) = signaux forts détectés (max 3)
-        risque_metier = min(3, len(signaux))
-        # Qualité du CV (0-1) = 1 si score partiel >= 5
-        qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
-        # Lettre motivation (0-1) = 1 si lettre fournie
-        lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 0 else 0
-        
-        score_total_excel = adequation + coherence + risque_metier + qualite_cv + lettre_motiv
-        score_final = min(10, score_total_excel)
+    # Mapping selon modèle Excel :
+    # Adéquation expérience (0-3) = critères éliminatoires validés (max 3)
+    adequation = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
+    # Cohérence parcours (0-2) = critères à vérifier validés (max 2)
+    coherence = min(2, points_bloc2)
+    # Exposition au risque de métier (0-3) = signaux forts détectés (max 3)
+    risque_metier = min(3, len(signaux))
+    # Qualité du CV (0-1) = 1 si score partiel >= 5
+    qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
+    # Lettre motivation (0-1) = 1 si lettre fournie
+    lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 0 else 0
+    
+    score_total_excel = adequation + coherence + risque_metier + qualite_cv + lettre_motiv
+    score_final = min(10, score_total_excel)
     
     score_breakdown = {
-        'bloc1_eliminatoire': len(flags_elim) > 0,
-        'flags_eliminatoires_count': len(flags_elim),
-        'adequation_experience': adequation if not flags_elim else 0,
-        'coherence_parcours': coherence if not flags_elim else 0,
-        'exposition_risque_metier': risque_metier if not flags_elim else 0,
-        'qualite_cv': qualite_cv if not flags_elim else 0,
-        'lettre_motivation': lettre_motiv if not flags_elim else 0,
+        'bloc1_eliminatoire': False,
+        'flags_eliminatoires_count': 0,
+        'adequation_experience': adequation,
+        'coherence_parcours': coherence,
+        'exposition_risque_metier': risque_metier,
+        'qualite_cv': qualite_cv,
+        'lettre_motivation': lettre_motiv,
         'bloc2_criteres_valides': len(details['criteres_valides_bloc2']),
         'bloc2_points': points_bloc2,
         'bloc3_signaux_detectes': len(signaux),
         'bloc3_points': points_bloc3,
         'total_raw_points': points_bloc2 + points_bloc3,
         'score_final': score_final,
-        'note': f"Score 0 = {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)" if flags_elim else f"Score Excel: {score_final}/10",
+        'note': f"Score Excel: {score_final}/10",
         'documents_analyses': details['documents_analyses']
     }
     
     return {
         'score': score_final,
         'checklist': checklist,
-        'flags_eliminatoires': flags_elim,
+        'flags_eliminatoires': [],
         'signaux_detectes': signaux,
         'details': details,
         'score_breakdown': score_breakdown
@@ -612,6 +642,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         
         print(f"✅ Analyse auto terminée pour {token}: score={result['score']}/10")
         print(f"   Documents analysés: CV={len(cv_text)} chars, Lettre={len(lettre_text)} chars, Certificats={len(attestation_texts)} fichiers")
+        if result['score_breakdown']['bloc1_eliminatoire']:
+            print(f"   ⚠️ CANDIDAT ÉLIMINÉ : {result['score_breakdown']['note']}")
         
     except Exception as e:
         print(f"⚠️ Erreur analyse auto pour candidat {token}: {e}")
@@ -1307,6 +1339,7 @@ if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     print(f"🚀 Serveur RecrutBank démarré sur le port {port}")
     print(f"📋 Grille Word chargée: {len(GRILLE)} postes")
+    print(f"⚠️ ÉLIMINATION STRICTE : Si UN critère éliminatoire manque → Score=0")
     print(f"🔍 Analyse auto: MATCHING EXACT (soit ça passe, soit ça casse)")
     print(f"📄 Analyse TOUS documents: CV + Lettre + Certificats")
     print(f"🏆 Classement STRICT avec RANG automatique + EMAIL")
