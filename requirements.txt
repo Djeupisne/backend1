@@ -1,3 +1,4 @@
+# requirements.txt - COMPLET
 flask>=2.3.0
 flask-cors>=4.0.0
 flask-jwt-extended>=4.5.0
@@ -10,3 +11,4 @@ langdetect>=1.0.9
 rapidfuzz>=3.0.0
 reportlab>=4.0.0
 openpyxl>=3.1.0
+gunicorn>=21.2.0         
