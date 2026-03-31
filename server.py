@@ -1,6 +1,7 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique STRICTE
 # Élimination AUTOMATIQUE si UN critère éliminatoire manque (logique AND stricte)
 # Analyse TOUS les documents (CV + Lettre + Certificats) avec matching EXACT
+# ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -87,14 +88,14 @@ POSTES = [
 # 📋 GRILLE DE PRÉSÉLECTION - ÉLIMINATION STRICTE (TOUS critères requis)
 # ══════════════════════════════════════════════════════════════════════════════
 # ⚠️ LOGIQUE STRICTE : Si UN SEUL critère éliminatoire n'est PAS trouvé → ÉLIMINATION AUTOMATIQUE
-# Même si les autres critères sont validés, le candidat est rejeté.
+# ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
 
 GRILLE = {
     "Responsable Administration de Crédit": {
         "eliminatoire": [
-            "Expérience bancaire",
-            "3 ans ou plus en crédit / risque",
-            "Exposition aux garanties ou conformité"
+            "Expérience professionnelle bancaire",
+            "3 ans d'expérience professionnelle en crédit / risque",
+            "Exposition professionnelle aux garanties ou conformité"
         ],
         "a_verifier": [
             "Validation de dossiers",
@@ -114,9 +115,9 @@ GRILLE = {
     },
     "Analyste Crédit CCB": {
         "eliminatoire": [
-            "Expérience en analyse crédit",
-            "Capacité à lire des états financiers",
-            "3 ans expérience institution financière"
+            "Expérience professionnelle en analyse crédit",
+            "Capacité professionnelle à lire des états financiers",
+            "3 ans d'expérience professionnelle en institution financière"
         ],
         "a_verifier": [
             "Type de clients PME",
@@ -137,15 +138,15 @@ GRILLE = {
     },
     "Archiviste (Administration Crédit)": {
         "eliminatoire": [
-            "Expérience en gestion documentaire structurée",
-            "Rigueur démontrée"
+            "Expérience professionnelle en gestion documentaire structurée",
+            "Rigueur professionnelle démontrée"
         ],
         "a_verifier": [
             "Archivage physique et électronique",
             "Gestion des dossiers sensibles"
         ],
         "signaux_forts": [
-            "Expérience en banque / juridique",
+            "Expérience professionnelle en banque / juridique",
             "Manipulation de garanties ou contrats"
         ],
         "points_attention": [
@@ -155,10 +156,10 @@ GRILLE = {
     },
     "Senior Finance Officer": {
         "eliminatoire": [
-            "Expérience en reporting financier structuré",
-            "Exposition aux états financiers",
-            "Interaction avec auditeurs",
-            "3 ans expérience département finance"
+            "Expérience professionnelle en reporting financier structuré",
+            "Exposition professionnelle aux états financiers",
+            "Interaction professionnelle avec auditeurs",
+            "3 ans d'expérience professionnelle en département finance"
         ],
         "a_verifier": [
             "Production états financiers",
@@ -180,10 +181,10 @@ GRILLE = {
     },
     "Market Risk Officer": {
         "eliminatoire": [
-            "Base en risques de marché",
-            "Compétences quantitatives",
-            "Exposition à FX / taux / liquidité",
-            "3 ans expérience institution financière"
+            "Base professionnelle en risques de marché",
+            "Compétences professionnelles quantitatives",
+            "Exposition professionnelle à FX / taux / liquidité",
+            "3 ans d'expérience professionnelle en institution financière"
         ],
         "a_verifier": [
             "Maîtrise VaR / stress testing",
@@ -205,10 +206,10 @@ GRILLE = {
     },
     "IT Réseau & Infrastructure": {
         "eliminatoire": [
-            "Expérience en réseau / infrastructure",
-            "Exposition à environnement critique",
-            "Notion de sécurité IT",
-            "2 ans expérience minimum"
+            "Expérience professionnelle en réseau / infrastructure",
+            "Exposition professionnelle à environnement critique",
+            "Notion professionnelle de sécurité IT",
+            "2 ans d'expérience professionnelle minimum"
         ],
         "a_verifier": [
             "Gestion réseaux LAN/WAN/VPN",
@@ -237,9 +238,9 @@ GRILLE = {
 
 KEYWORD_MAPPING = {
     # === Responsable Administration de Crédit ===
-    "Expérience bancaire": ["expérience bancaire", "secteur bancaire", "établissement bancaire", "banque commerciale", "institution financière", "banque"],
-    "3 ans ou plus en crédit / risque": ["3 ans", "trois ans", "3 années", "4 ans", "5 ans", "6 ans", "7 ans", "8 ans", "9 ans", "10 ans", "plusieurs années", "expérience crédit", "gestion risque crédit"],
-    "Exposition aux garanties ou conformité": ["garanties", "nantissement", "hypothèque", "sûreté", "conformité", "COBAC", "réglementation bancaire", "BCAC", "audit"],
+    "Expérience professionnelle bancaire": ["expérience bancaire", "secteur bancaire", "établissement bancaire", "banque commerciale", "institution financière", "banque", "employé banque", "ingénieur banque"],
+    "3 ans d'expérience professionnelle en crédit / risque": ["3 ans", "trois ans", "3 années", "4 ans", "5 ans", "6 ans", "7 ans", "8 ans", "9 ans", "10 ans", "plusieurs années", "expérience crédit", "gestion risque crédit", "analyste crédit", "responsable crédit"],
+    "Exposition professionnelle aux garanties ou conformité": ["garanties", "nantissement", "hypothèque", "sûreté", "conformité", "COBAC", "réglementation bancaire", "BCAC", "audit", "compliance"],
     "Validation de dossiers": ["validation dossier", "instruction crédit", "approbation crédit", "dossier crédit", "validation des dossiers"],
     "Gestion des garanties": ["gestion garanties", "suivi garanties", "garanties réelles", "sûretés", "portefeuille garanties"],
     "Participation à des audits": ["audit", "contrôle interne", "inspection", "compliance audit", "audit interne"],
@@ -248,9 +249,9 @@ KEYWORD_MAPPING = {
     "Suivi portefeuille / impayés": ["portefeuille crédit", "impayés", "recouvrement", "contentieux", "encours", "suivi portefeuille"],
     
     # === Analyste Crédit CCB ===
-    "Expérience en analyse crédit": ["analyse crédit", "credit analysis", "évaluation crédit", "scoring crédit", "analyse financière crédit"],
-    "Capacité à lire des états financiers": ["états financiers", "bilan", "compte de résultat", "ratios financiers", "analyse financière"],
-    "3 ans expérience institution financière": ["3 ans", "trois ans", "3 années", "institution financière", "banque", "secteur bancaire", "4 ans", "5 ans", "6 ans"],
+    "Expérience professionnelle en analyse crédit": ["analyse crédit", "credit analysis", "évaluation crédit", "scoring crédit", "analyse financière crédit", "analyste crédit"],
+    "Capacité professionnelle à lire des états financiers": ["états financiers", "bilan", "compte de résultat", "ratios financiers", "analyse financière", "lecture bilan"],
+    "3 ans d'expérience professionnelle en institution financière": ["3 ans", "trois ans", "3 années", "institution financière", "banque", "secteur bancaire", "4 ans", "5 ans", "6 ans", "employé banque"],
     "Type de clients PME": ["PME", "petites entreprises", "moyennes entreprises", "TPE"],
     "Type de clients particuliers": ["particuliers", "clients particuliers", "retail", "clientèle particulière"],
     "Structuration de crédit": ["structuration crédit", "montage crédit", "dossier de crédit", "structurer un crédit"],
@@ -260,18 +261,18 @@ KEYWORD_MAPPING = {
     "Comités de crédit": ["comité crédit", "commission crédit", "credit committee", "validation comité"],
     
     # === Archiviste ===
-    "Expérience en gestion documentaire structurée": ["gestion documentaire", "archivage", "GED", "records management", "classement", "documentation"],
-    "Rigueur démontrée": ["rigueur", "méthode", "organisation", "procédures", "processus", "traçabilité", "précision"],
+    "Expérience professionnelle en gestion documentaire structurée": ["gestion documentaire", "archivage", "GED", "records management", "classement", "documentation", "archiviste"],
+    "Rigueur professionnelle démontrée": ["rigueur", "méthode", "organisation", "procédures", "processus", "traçabilité", "précision", "rigoureux"],
     "Archivage physique et électronique": ["archivage physique", "archivage électronique", "dématérialisation", "numérisation", "archives"],
     "Gestion des dossiers sensibles": ["dossiers sensibles", "confidentiel", "sécurisé", "accès restreint", "données sensibles"],
-    "Expérience en banque / juridique": ["banque", "établissement financier", "juridique", "droit bancaire", "secteur bancaire"],
+    "Expérience professionnelle en banque / juridique": ["banque", "établissement financier", "juridique", "droit bancaire", "secteur bancaire"],
     "Manipulation de garanties ou contrats": ["garanties", "contrats", "conventions", "actes juridiques", "documentation juridique"],
     
     # === Senior Finance Officer ===
-    "Expérience en reporting financier structuré": ["reporting financier", "reporting", "tableaux de bord", "KPI", "indicateurs", "états financiers"],
-    "Exposition aux états financiers": ["états financiers", "bilan", "compte de résultat", "consolidation", "reporting financier"],
-    "Interaction avec auditeurs": ["auditeurs", "audit", "CAC", "commissaires aux comptes", "audit externe"],
-    "3 ans expérience département finance": ["3 ans", "trois ans", "3 années", "département finance", "finance", "4 ans", "5 ans", "6 ans"],
+    "Expérience professionnelle en reporting financier structuré": ["reporting financier", "reporting", "tableaux de bord", "KPI", "indicateurs", "états financiers", "analyste financier"],
+    "Exposition professionnelle aux états financiers": ["états financiers", "bilan", "compte de résultat", "consolidation", "reporting financier"],
+    "Interaction professionnelle avec auditeurs": ["auditeurs", "audit", "CAC", "commissaires aux comptes", "audit externe", "interaction auditeurs"],
+    "3 ans d'expérience professionnelle en département finance": ["3 ans", "trois ans", "3 années", "département finance", "finance", "4 ans", "5 ans", "6 ans", "contrôleur de gestion"],
     "Production états financiers": ["production états financiers", "établissement des états financiers", "élaboration des états financiers"],
     "Reporting groupe": ["reporting groupe", "reporting consolidé", "consolidation groupe"],
     "Connaissance IFRS": ["IFRS", "normes internationales", "comptabilité internationale", "IAS"],
@@ -281,10 +282,10 @@ KEYWORD_MAPPING = {
     "Outils type SPECTRA / CERBER / ERP": ["SPECTRA", "CERBER", "ERP", "SAP", "Oracle", "outil de reporting"],
     
     # === Market Risk Officer ===
-    "Base en risques de marché": ["risque marché", "market risk", "risques de marché", "gestion des risques de marché"],
-    "Compétences quantitatives": ["quantitatif", "quantitative", "mathématiques", "statistiques", "modélisation"],
-    "Exposition à FX / taux / liquidité": ["FX", "change", "taux", "liquidité", "forex", "taux d'intérêt", "risque de liquidité"],
-    "3 ans expérience institution financière": ["3 ans", "trois ans", "3 années", "institution financière", "banque", "secteur bancaire", "4 ans", "5 ans", "6 ans"],
+    "Base professionnelle en risques de marché": ["risque marché", "market risk", "risques de marché", "gestion des risques de marché", "analyste risque"],
+    "Compétences professionnelles quantitatives": ["quantitatif", "quantitative", "mathématiques", "statistiques", "modélisation", "analyste quantitatif"],
+    "Exposition professionnelle à FX / taux / liquidité": ["FX", "change", "taux", "liquidité", "forex", "taux d'intérêt", "risque de liquidité"],
+    "3 ans d'expérience professionnelle en institution financière": ["3 ans", "trois ans", "3 années", "institution financière", "banque", "secteur bancaire", "4 ans", "5 ans", "6 ans"],
     "Maîtrise VaR / stress testing": ["VaR", "Value at Risk", "stress testing", "back-testing", "scénarios"],
     "Analyse des positions": ["analyse des positions", "positions", "analyse de portefeuille", "suivi des positions"],
     "Excel avancé": ["Excel avancé", "Excel", "tableaux croisés", "macros", "pivot", "VBA"],
@@ -295,10 +296,10 @@ KEYWORD_MAPPING = {
     "Reporting risque": ["reporting risque", "reporting des risques", "rapport de risque"],
     
     # === IT Réseau & Infrastructure ===
-    "Expérience en réseau / infrastructure": ["réseau", "infrastructure", "LAN", "WAN", "VPN", "réseaux", "infrastructure IT", "network"],
-    "Exposition à environnement critique": ["banque", "telco", "télécom", "datacenter", "centre de données", "environnement critique", "secteur bancaire"],
-    "Notion de sécurité IT": ["sécurité IT", "cybersécurité", "sécurité informatique", "firewall", "sécurité réseau"],
-    "2 ans expérience minimum": ["2 ans", "deux ans", "2 années", "expérience", "3 ans", "4 ans", "5 ans"],
+    "Expérience professionnelle en réseau / infrastructure": ["réseau", "infrastructure", "LAN", "WAN", "VPN", "réseaux", "infrastructure IT", "network", "ingénieur réseau", "administrateur réseau"],
+    "Exposition professionnelle à environnement critique": ["banque", "telco", "télécom", "datacenter", "centre de données", "environnement critique", "secteur bancaire", "opérateur télécom"],
+    "Notion professionnelle de sécurité IT": ["sécurité IT", "cybersécurité", "sécurité informatique", "firewall", "sécurité réseau", "IT security", "analyste sécurité"],
+    "2 ans d'expérience professionnelle minimum": ["2 ans", "deux ans", "2 années", "expérience", "3 ans", "4 ans", "5 ans", "emploi", "contrat", "CDI", "CDD"],
     "Gestion réseaux LAN/WAN/VPN": ["LAN", "WAN", "VPN", "réseaux locaux", "réseaux étendus", "virtual private network"],
     "Gestion serveurs Windows/Linux": ["Windows Server", "Linux", "serveurs", "administration serveurs", "Windows", "Unix"],
     "Cloud même basique": ["cloud", "AWS", "Azure", "Google Cloud", "cloud computing", "infrastructure cloud"],
@@ -309,6 +310,21 @@ KEYWORD_MAPPING = {
     "Gestion ATM ou systèmes bancaires": ["ATM", "systèmes bancaires", "GAB", "distributeur automatique", "système bancaire", "bancaire"],
     "Certifications Cisco Microsoft": ["CCNA", "CCNP", "CCIE", "Cisco", "Microsoft", "certification", "Network+", "MCSE"]
 }
+
+# ── MOTS-CLÉS POUR DÉTECTER LES STAGES (À EXCLURE DU CALCUL D'EXPÉRIENCE) ─────
+STAGE_KEYWORDS = [
+    "stage", "stagiaire", "internship", "intern", "pfe", "projet de fin d'études",
+    "alternance", "apprentissage", "formation pratique", "immersion professionnelle",
+    "stage de", "stage en", "stage chez", "période de stage", "stage académique"
+]
+
+# ── MOTS-CLÉS POUR DÉTECTER L'EXPÉRIENCE PROFESSIONNELLE (À INCLURE) ──────────
+PROFESSIONAL_KEYWORDS = [
+    "cdi", "cdd", "contrat", "employé", "ingénieur", "technicien", "chef de projet",
+    "responsable", "consultant", "freelance", "indépendant", "salarié", "titulaire",
+    "poste", "fonction", "mission", "expérience professionnelle", "année(s) d'expérience",
+    "en poste", "recruté", "embauché", "collaborateur", "cadre", "agent"
+]
 
 # ── HELPERS AUTH ───────────────────────────────────────────────────────────────
 def hash_pwd(pwd):
@@ -383,8 +399,67 @@ def normalize_text(text):
     return text
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 🧮 CALCUL EXPÉRIENCE PROFESSIONNELLE (STAGES EXCLUS)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def calculate_professional_experience_years(cv_text, lettre_text, attestation_texts_list):
+    """
+    Calcule les années d'expérience professionnelle ACTIVE uniquement.
+    ⚠️ EXCLUT les stages, alternances, PFE, etc.
+    Retourne le nombre d'années (float).
+    """
+    full_text = normalize_text(cv_text + " " + (lettre_text or "") + " " + " ".join(attestation_texts_list or []))
+    
+    # Patterns pour extraire les périodes d'emploi (format simplifié)
+    # Format: "2020-2022", "Janvier 2020 - Décembre 2022", "Depuis 2020"
+    date_patterns = [
+        r'(\d{4})\s*[-–/]\s*(\d{4})',  # 2020-2022
+        r'(\d{1,2}/\d{4})\s*[-–/]\s*(\d{1,2}/\d{4})',  # 01/2020-12/2022
+    ]
+    
+    total_months = 0
+    
+    # Parser le texte ligne par ligne pour distinguer stages vs expérience pro
+    lines = full_text.split('\n')
+    
+    for line in lines:
+        line_lower = line.lower()
+        
+        # 🔴 Si la ligne contient un mot-clé de stage → IGNORER cette période
+        if any(stage_kw in line_lower for stage_kw in STAGE_KEYWORDS):
+            continue
+        
+        # ✅ Si la ligne contient un mot-clé pro + une période → calculer la durée
+        if any(pro_kw in line_lower for pro_kw in PROFESSIONAL_KEYWORDS):
+            # Chercher des patterns de dates dans la ligne
+            for pattern in date_patterns:
+                matches = re.findall(pattern, line)
+                for match in matches:
+                    try:
+                        # Extraire les années
+                        if '/' in match[0]:
+                            start_year = int(match[0].split('/')[1])
+                            end_year = int(match[1].split('/')[1])
+                        else:
+                            start_year = int(match[0])
+                            end_year = int(match[1])
+                        
+                        # Calculer la durée en mois
+                        duration_months = (end_year - start_year) * 12
+                        total_months += max(0, duration_months)
+                    except:
+                        continue
+    
+    # Convertir en années
+    professional_years = total_months / 12.0
+    
+    return round(professional_years, 1)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 🧠 MOTEUR D'ANALYSE CV - ÉLIMINATION STRICTE (TOUS critères requis)
 # Analyse TOUS les documents : CV + Lettre + TOUS les certificats
+# ⚠️ STAGES EXCLUS du calcul d'expérience
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_criterion_match(criterion, full_text):
@@ -409,6 +484,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     
     ⚠️ RÈGLE STRICTE : Si UN SEUL critère éliminatoire n'est PAS trouvé → Score = 0
     Même si les autres critères éliminatoires sont validés, le candidat est éliminé.
+    
+    ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
     
     Analyse TOUS les documents soumis : CV + Lettre + TOUS les certificats.
     
@@ -468,26 +545,55 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     # ⚠️ Si UN SEUL critère n'est PAS trouvé → ÉLIMINATION AUTOMATIQUE
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
-        is_present, found_keywords = check_criterion_match(crit, full_text)
         
-        checklist[key] = is_present
-        
-        if not is_present:
-            # ⚠️ MATCHING EXACT ÉCHOUÉ → CRITÈRE ÉLIMINATOIRE MANQUANT
-            flags_elim.append(f"❌ {crit} (non trouvé)")
-            details['alertes_attention'].append(f"🔴 Éliminatoire: {crit} manquant")
-            details['matching_details'][crit] = {
-                'found': False, 
-                'status': 'ÉLIMINATOIRE - Critère requis non trouvé dans les documents',
-                'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
-            }
+        # 🔍 CAS SPÉCIAL : Critères d'expérience minimale (2 ans IT, 3 ans Finance)
+        # → Calculer l'expérience professionnelle UNIQUEMENT (hors stages)
+        if ("expérience professionnelle" in crit.lower() or "ans d'expérience professionnelle" in crit.lower()) and ("ans" in crit.lower() or "année" in crit.lower()):
+            
+            # Calculer l'expérience professionnelle uniquement (stages exclus)
+            prof_experience_years = calculate_professional_experience_years(cv_text, lettre_text, attestation_texts_list)
+            
+            # Extraire le nombre d'années requis du critère
+            required_years = 2 if "2 ans" in crit.lower() else 3
+            
+            is_present = prof_experience_years >= required_years
+            checklist[key] = is_present
+            
+            if not is_present:
+                flags_elim.append(f"❌ {crit} (seulement {prof_experience_years:.1f} ans d'expérience professionnelle, {required_years} requis - stages exclus)")
+                details['alertes_attention'].append(f"🔴 Éliminatoire: {crit} manquant")
+                details['matching_details'][crit] = {
+                    'found': False,
+                    'status': f'ÉLIMINATOIRE - Seulement {prof_experience_years:.1f} ans pro (stages exclus), {required_years} ans requis',
+                    'professional_experience_years': prof_experience_years,
+                    'required_years': required_years
+                }
+            else:
+                details['matching_details'][crit] = {
+                    'found': True,
+                    'status': f'VALIDÉ ({prof_experience_years:.1f} ans pro >= {required_years} ans requis - stages exclus)',
+                    'professional_experience_years': prof_experience_years,
+                    'required_years': required_years
+                }
         else:
-            # ✅ MATCHING EXACT RÉUSSI → Critère validé
-            details['matching_details'][crit] = {
-                'found': True, 
-                'status': 'VALIDÉ',
-                'matched': found_keywords
-            }
+            # Critères normaux (non expérience) : recherche de mots-clés EXACTS
+            is_present, found_keywords = check_criterion_match(crit, full_text)
+            checklist[key] = is_present
+            
+            if not is_present:
+                flags_elim.append(f"❌ {crit} (non trouvé)")
+                details['alertes_attention'].append(f"🔴 Éliminatoire: {crit} manquant")
+                details['matching_details'][crit] = {
+                    'found': False, 
+                    'status': 'ÉLIMINATOIRE - Critère requis non trouvé dans les documents',
+                    'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
+                }
+            else:
+                details['matching_details'][crit] = {
+                    'found': True, 
+                    'status': 'VALIDÉ',
+                    'matched': found_keywords
+                }
     
     # ⚠️ VÉRIFICATION STRICTE : Si AU MOINS UN critère éliminatoire manque → ÉLIMINATION
     if flags_elim:
@@ -513,7 +619,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'total_raw_points': 0,
                 'score_final': 0,
                 'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)",
-                'documents_analyses': details['documents_analyses']
+                'documents_analyses': details['documents_analyses'],
+                'professional_experience_years': details.get('matching_details', {}).get('2 ans d\'expérience professionnelle minimum', {}).get('professional_experience_years', 0)
             }
         }
     
@@ -580,7 +687,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         'total_raw_points': points_bloc2 + points_bloc3,
         'score_final': score_final,
         'note': f"Score Excel: {score_final}/10",
-        'documents_analyses': details['documents_analyses']
+        'documents_analyses': details['documents_analyses'],
+        'professional_experience_years': details.get('matching_details', {}).get('2 ans d\'expérience professionnelle minimum', {}).get('professional_experience_years', 0)
     }
     
     return {
@@ -596,6 +704,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
     """
     Analyse TOUS les documents soumis par le candidat.
+    ⚠️ STAGES EXCLUS du calcul d'expérience professionnelle
     """
     try:
         key = f"candidat:{token}"
@@ -642,6 +751,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         
         print(f"✅ Analyse auto terminée pour {token}: score={result['score']}/10")
         print(f"   Documents analysés: CV={len(cv_text)} chars, Lettre={len(lettre_text)} chars, Certificats={len(attestation_texts)} fichiers")
+        if result['score_breakdown'].get('professional_experience_years') is not None:
+            print(f"   📊 Expérience professionnelle (stages exclus): {result['score_breakdown']['professional_experience_years']} ans")
         if result['score_breakdown']['bloc1_eliminatoire']:
             print(f"   ⚠️ CANDIDAT ÉLIMINÉ : {result['score_breakdown']['note']}")
         
@@ -905,7 +1016,7 @@ def generate_csv_report(candidats_data):
     
     writer.writerow([
         'Rang', 'Email', 'Nom', 'Prénom', 'Téléphone', 'Poste', 'Date candidature',
-        'Score (/10)', 'Statut', 'Éliminatoire', 'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque (0-3)', 'Note'
+        'Score (/10)', 'Statut', 'Éliminatoire', 'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque (0-3)', 'Note', 'Expérience Pro (ans)'
     ])
     
     for idx, c in enumerate(candidats_data, 1):
@@ -924,7 +1035,8 @@ def generate_csv_report(candidats_data):
             sb.get('adequation_experience', 0),
             sb.get('coherence_parcours', 0),
             sb.get('exposition_risque_metier', 0),
-            sb.get('note', '')
+            sb.get('note', ''),
+            sb.get('professional_experience_years', 0)
         ])
     
     output.seek(0)
@@ -951,11 +1063,12 @@ def generate_pdf_report(candidats_data):
     elements.append(Spacer(1, 0.8*cm))
     
     # ✅ Tableau avec colonnes LARGES
-    data = [['Rang', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score (/10)', 'Recommandation']]
+    data = [['Rang', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score (/10)', 'Exp. Pro (ans)', 'Recommandation']]
     
     for idx, c in enumerate(candidats_data, 1):
         score = int(c.get('score', 0))
         recommandation = get_recommandation_from_score(score)
+        exp_pro = c.get('score_breakdown_parsed', {}).get('professional_experience_years', 0)
         
         data.append([
             str(idx),
@@ -964,11 +1077,12 @@ def generate_pdf_report(candidats_data):
             c.get('telephone', '') or '–',
             c.get('poste', ''),
             f"{score}/10",
+            f"{exp_pro:.1f} ans" if exp_pro else "–",
             recommandation
         ])
     
     # Colonnes LARGES pour texte non coupé
-    table = Table(data, colWidths=[1.5*cm, 5*cm, 4.5*cm, 3.5*cm, 5*cm, 2.5*cm, 4.5*cm])
+    table = Table(data, colWidths=[1.5*cm, 4.5*cm, 4.5*cm, 3*cm, 4.5*cm, 2*cm, 2.5*cm, 4.5*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1342,6 +1456,7 @@ if __name__ == '__main__':
     print(f"⚠️ ÉLIMINATION STRICTE : Si UN critère éliminatoire manque → Score=0")
     print(f"🔍 Analyse auto: MATCHING EXACT (soit ça passe, soit ça casse)")
     print(f"📄 Analyse TOUS documents: CV + Lettre + Certificats")
+    print(f"🎓 STAGES EXCLUS du calcul d'expérience professionnelle")
     print(f"🏆 Classement STRICT avec RANG automatique + EMAIL")
     print(f"📊 Scoring Excel: Adéquation(0-3)+Cohérence(0-2)+Risque(0-3)+CV(0-1)+Lettre(0-1)=/10")
     print(f"📧 Email extrait dans TOUS les formats")
