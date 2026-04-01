@@ -8,10 +8,9 @@
 #   5. Parsing des dates françaises : "Aout 2023 à aujourd'hui", "Novembre 2020 - Août 2023"
 #   6. Les années de STAGE ne comptent PAS comme années d'expérience
 #   7. Logique AND stricte : 1 critère éliminatoire manquant = score 0
-#   8. Gestion des confiances de matching pour réduire les faux positifs
-#   9. Logs de débogage pour extraction texte et matching
-#  10. Tous les bugs de syntaxe corrigés + logs améliorés
-# ── NOUVELLES MODIFICATIONS ───────────────────────────────────────────────
+#   8. Détection des contextes négatifs ("pas d'expérience") exclus du matching
+#   9. Calcul d'expérience EXACT avec validation seuil strict
+#  10. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
 #  11. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
 #  12. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
 # ============================================================================
@@ -581,6 +580,51 @@ STAGE_MARKERS = [
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 
 # ══════════════════════════════════════════════════════════════════════════
+# 🚫 DÉTECTION PHRASES NÉGATIVES — pour éviter les faux positifs
+# ══════════════════════════════════════════════════════════════════════════
+
+NEGATIVE_PATTERNS = [
+    r'\b(pas\s+de|pas\s+d\')\s*(expérience|experience|expérimenté|competence)\b',
+    r'\b(aucun|aucune|aucuns|aucunes)\s*(expérience|experience|competence|connaissance)\b',
+    r'\b(sans|dépourvu\s+de|manque\s+de)\s*(expérience|experience|competence)\b',
+    r'\b(n\')?(?:ai|as|a|avons|avez|ont)\s+pas\s+(?:d\')?(expérience|experience|competence|connaissance)\b',
+    r'\b(jamais\s+(?:eu|travaillé|exercé|pratiqué))\b',
+    r'\b(peu\s+d\')?expérience\b',
+    r'\b(expérience\s+(?:limitée|insuffisante|faible|partielle))\b',
+    r'\b(ne\s+connais\s+pas|ne\s+maîtrise\s+pas|ne\s+possède\s+pas)\b',
+]
+NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
+
+
+def contains_negative_context(text, keyword):
+    """
+    Vérifie si le texte contient le mot-clé MAIS dans un contexte négatif.
+    Retourne True si le contexte est négatif (donc le critère NE compte PAS).
+    """
+    if not text or not keyword:
+        return False
+    
+    # Chercher les occurrences du mot-clé
+    keyword_pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+    matches = list(keyword_pattern.finditer(text))
+    
+    if not matches:
+        return False
+    
+    # Pour chaque occurrence, vérifier le contexte sur ~100 caractères autour
+    for match in matches:
+        start = max(0, match.start() - 100)
+        end = min(len(text), match.end() + 100)
+        context = text[start:end]
+        
+        # Si un pattern négatif est trouvé dans le contexte → contexte négatif
+        if NEGATIVE_REGEX.search(context):
+            return True
+    
+    return False
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 🔤 NORMALISATION TEXTE — Unicode complet
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -905,8 +949,12 @@ def compute_real_experience_years(full_raw_text, domain_keywords=None):
         if is_stage_block(block):
             continue
         if domain_keywords:
+            # Exclure les blocs avec contexte négatif
+            if any(contains_negative_context(block, kw) for kw in domain_keywords):
+                continue
             norm_block, _ = normalize_for_matching(block)
-            if not any(kw in norm_block for kw in domain_keywords):
+            if not any(kw in norm_block and not contains_negative_context(block, kw) 
+                      for kw in domain_keywords):
                 continue
         duration = extract_duration_years_from_block(block)
         if duration > 0:
@@ -918,6 +966,42 @@ def has_experience_years(full_raw_text, min_years, domain_keywords=None):
     total = compute_real_experience_years(full_raw_text, domain_keywords)
     print(f"    [EXP] Années réelles: {total} (min requis: {min_years})")
     return total >= min_years
+
+
+def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None):
+    """
+    Calcul STRICT des années d'expérience :
+    - Exclut les stages (déjà fait)
+    - Exclut les mentions dans un contexte négatif
+    - Calcule précisément les durées avec dates françaises
+    - Retourne True SEULEMENT si total >= min_years
+    """
+    blocks = split_into_jobs(full_raw_text)
+    total_years = 0.0
+    
+    for block in blocks:
+        # Exclure les stages
+        if is_stage_block(block):
+            continue
+            
+        # Exclure les blocs avec contexte négatif sur les mots-clés du domaine
+        if domain_keywords:
+            if any(contains_negative_context(block, kw) for kw in domain_keywords):
+                continue
+            # Vérifier que le bloc contient AU MOINS UN mot-clé du domaine (positif)
+            norm_block, _ = normalize_for_matching(block)
+            if not any(kw in norm_block and not contains_negative_context(block, kw) 
+                      for kw in domain_keywords):
+                continue
+                
+        duration = extract_duration_years_from_block(block)
+        if duration > 0:
+            total_years += duration
+            print(f"    [EXP+] Bloc valide: +{duration} ans (total: {total_years})")
+    
+    result = total_years >= min_years
+    print(f"    [EXP] Total années: {total_years} | Requis: {min_years} | Validé: {result}")
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -954,42 +1038,66 @@ EXP_MIN_YEARS_MAP = {
 
 
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None):
+    """
+    Vérification STRICTE d'un critère :
+    - Le critère doit être mentionné POSITIVEMENT quelque part dans les documents
+    - Les contextes négatifs ("pas d'expérience") sont exclus
+    - Pour les critères EXP_*, le calcul d'années doit être exact et >= au minimum requis
+    """
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
         return False, 0.0, []
 
+    # ── Gestion des critères d'expérience (EXP_*) ─────────────────────────
     exp_markers = [kw for kw in keywords if kw.startswith("EXP_")]
     if exp_markers:
         marker = exp_markers[0]
-        min_years     = EXP_MIN_YEARS_MAP.get(marker, 3.0)
-        domain_kws    = DOMAIN_KEYWORDS_MAP.get(marker, [])
-        domain_kws_n  = [normalize_for_matching(k)[0] for k in domain_kws]
-        found = has_experience_years(raw_full_text, min_years, domain_kws_n)
+        min_years = EXP_MIN_YEARS_MAP.get(marker, 3.0)
+        domain_kws = DOMAIN_KEYWORDS_MAP.get(marker, [])
+        domain_kws_n = [normalize_for_matching(k)[0] for k in domain_kws]
+        
+        # Calcul STRICT des années d'expérience (hors stage, hors contexte négatif)
+        found = has_experience_years_strict(raw_full_text, min_years, domain_kws_n)
         return found, 1.0 if found else 0.0, ([marker] if found else [])
 
+    # ── Gestion des critères standards (matching texte) ───────────────────
     best_score = 0.0
     found_kws = []
     text_clean, text_tokens = normalize_for_matching(normalized_text)
 
     for kw in keywords:
         kw_clean, kw_tokens = normalize_for_matching(kw)
+        
+        # 1. Vérifier contexte négatif d'abord → si négatif, on ignore ce mot-clé
+        if contains_negative_context(raw_full_text, kw):
+            continue
+            
+        # 2. Matching exact
         if kw_clean in text_clean:
             found_kws.append(kw)
             best_score = max(best_score, 1.0)
             continue
+            
+        # 3. Matching fuzzy (seulement si pas de contexte négatif)
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 85:
-                found_kws.append(f"{kw}~{ratio/100:.2f}")
-                best_score = max(best_score, ratio / 100)
-                continue
+            if ratio >= 90:  # Seuil relevé pour plus de rigueur
+                # Double vérification contexte négatif sur le match fuzzy
+                if not contains_negative_context(raw_full_text, kw):
+                    found_kws.append(f"{kw}~{ratio/100:.2f}")
+                    best_score = max(best_score, ratio / 100)
+                    continue
+                    
+        # 4. Matching par tokens
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(2, len(kw_tokens) * 0.7):
-                found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
-                best_score = max(best_score, len(common) / len(kw_tokens))
+            if len(common) >= max(2, len(kw_tokens) * 0.8):  # Seuil à 80%
+                if not contains_negative_context(raw_full_text, kw):
+                    found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
+                    best_score = max(best_score, len(common) / len(kw_tokens))
 
-    return best_score >= 0.6, round(best_score, 2), found_kws
+    # 🔴 LOGIQUE STRICTE : seuil à 0.75 minimum pour valider un critère
+    return best_score >= 0.75, round(best_score, 2), found_kws
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1064,35 +1172,51 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         }
     }
 
-    # ── 🔴 BLOC 1 : Éliminatoires (AND strict) ───────────────────────────
+    # ── 🔴 BLOC 1 : Éliminatoires (AND STRICT ABSOLU) ─────────────────────
+    eliminatoire_failed = False
+    
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
+        
+        # Adaptation langue si nécessaire
         original_keywords = None
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
             KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
+            
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full
         )
+        
+        # Restaurer keywords originaux
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
+            
         checklist[key] = is_present
+        
+        # 🔴 LOGIQUE STRICTE : 1 critère manquant = ÉLIMINATION IMMÉDIATE
         if not is_present:
+            eliminatoire_failed = True
             flags_elim.append(f"❌ {crit} (confiance: {confidence:.0%})")
             details['alertes_attention'].append(f"🔴 Éliminatoire manquant: {crit}")
             details['matching_details'][crit] = {
-                'found': False, 'confidence': confidence,
+                'found': False, 
+                'confidence': confidence,
                 'language': detected_lang,
-                'status': 'ÉLIMINATOIRE — critère requis absent',
+                'status': 'ÉLIMINATOIRE — critère requis NON mentionné positivement',
                 'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
             }
         else:
             details['matching_details'][crit] = {
-                'found': True, 'confidence': confidence,
-                'language': detected_lang, 'status': 'VALIDÉ', 'matched': found_kws
+                'found': True, 
+                'confidence': confidence,
+                'language': detected_lang, 
+                'status': 'VALIDÉ', 
+                'matched': found_kws
             }
-
-    if flags_elim:
+    
+    # 🔴 RETOUR IMMÉDIAT si ANY critère éliminatoire échoue
+    if eliminatoire_failed:
         return {
             'score': 0,
             'checklist': checklist,
@@ -1102,18 +1226,18 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'score_breakdown': {
                 'bloc1_eliminatoire': True,
                 'flags_eliminatoires_count': len(flags_elim),
-                'adequation_experience':  0,
-                'coherence_parcours':     0,
+                'adequation_experience': 0,
+                'coherence_parcours': 0,
                 'exposition_risque_metier': 0,
-                'qualite_cv':             0,
-                'lettre_motivation':      0,
+                'qualite_cv': 0,
+                'lettre_motivation': 0,
                 'bloc2_criteres_valides': 0,
-                'bloc2_points':           0,
+                'bloc2_points': 0,
                 'bloc3_signaux_detectes': 0,
-                'bloc3_points':           0,
-                'total_raw_points':       0,
-                'score_final':            0,
-                'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) manquant(s)",
+                'bloc3_points': 0,
+                'total_raw_points': 0,
+                'score_final': 0,
+                'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) non vérifié(s) positivement",
                 'documents_analyses': details['documents_analyses']
             }
         }
@@ -1309,11 +1433,11 @@ def generate_ranking_for_poste(poste, candidats_data):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📊 EXPORT EXCEL
+# 📊 EXPORT EXCEL — SANS COULEURS (rangs et N° Dossier en noir/blanc)
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel des candidats avec colonne N° Dossier."""
+    """Génère un rapport Excel des candidats avec colonne N° Dossier - SANS COULEURS."""
     if not OPENPYXL_AVAILABLE:
         return None
 
@@ -1332,8 +1456,9 @@ def generate_excel_report(candidats_data, poste_filter=None):
         )
         ws = wb.create_sheet(title=poste[:20])
 
-        hfill  = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
-        hfont  = Font(color="FFFFFF", bold=True, size=11)
+        # ── STYLE NEUTRE : pas de couleurs ───────────────────────────────
+        hfill  = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")  # Blanc
+        hfont  = Font(color="000000", bold=True, size=11)  # Noir
         border = Border(
             left=Side(style='thin'),  right=Side(style='thin'),
             top=Side(style='thin'),   bottom=Side(style='thin')
@@ -1342,12 +1467,12 @@ def generate_excel_report(candidats_data, poste_filter=None):
         ws.merge_cells('A1:L1')
         c = ws['A1']
         c.value = f"CLASSEMENT — {poste}"
-        c.font  = Font(bold=True, size=14, color="1a3a5c")
+        c.font  = Font(bold=True, size=14, color="000000")  # Noir au lieu de bleu
         c.alignment = Alignment(horizontal='center', vertical='center')
-        c.fill  = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
+        c.fill  = hfill  # Blanc
         ws.row_dimensions[1].height = 30
 
-        # ── MODIFICATION : ajout de la colonne "N° Dossier" en 2ème position ──
+        # ── En-têtes de colonnes ─────────────────────────────────────────
         headers = [
             'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
             'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
@@ -1384,30 +1509,10 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell        = ws.cell(row=row_i, column=col, value=val)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                # Couleurs rang
-                if col == 1:
-                    color = {1: "FFD700", 2: "C0C0C0", 3: "CD7F32"}.get(rang)
-                    if color:
-                        cell.fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
-                        cell.font = Font(bold=True, size=12)
-                # N° Dossier — fond légèrement coloré pour visibilité
-                if col == 2:
-                    cell.fill = PatternFill(start_color="EBF5FB", end_color="EBF5FB", fill_type="solid")
-                    cell.font = Font(bold=True)
-                # Score
-                if col == 11:
-                    sc = "90EE90" if total >= 8 else ("FFD700" if total >= 6 else "FF6B6B")
-                    cell.fill = PatternFill(start_color=sc, end_color=sc, fill_type="solid")
-                    cell.font = Font(bold=True)
-                # Recommandation
-                if col == 12:
-                    rc = "90EE90" if "prioritaire" in str(reco).lower() \
-                         else ("FFD700" if "besoin" in str(reco).lower() else "FF6B6B")
-                    cell.fill = PatternFill(start_color=rc, end_color=rc, fill_type="solid")
-                    if "prioritaire" in str(reco).lower():
-                        cell.font = Font(bold=True)
+                # 🔴 AUCUNE COULEUR appliquée aux rangs ni aux N° Dossier
+                # Toutes les cellules restent en noir sur blanc
 
-        # Largeurs colonnes : Rang, N°Dossier, Email, Candidat, Tél, Adéq, Coh, Risq, QCV, LM, Score, Reco
+        # Largeurs colonnes
         col_widths = [8, 20, 35, 35, 20, 28, 28, 35, 20, 20, 15, 35]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
@@ -1421,7 +1526,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📄 EXPORT CSV
+# 📄 EXPORT CSV — déjà sans couleurs
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_csv_report(candidats_data):
@@ -1429,7 +1534,6 @@ def generate_csv_report(candidats_data):
     out = io.StringIO()
     w   = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL)
 
-    # ── MODIFICATION : ajout de "N° Dossier" après "Rang" ──
     w.writerow([
         'Rang', 'N° Dossier', 'Email', 'Nom', 'Prénom', 'Téléphone',
         'Poste', 'Date candidature', 'Score (/10)', 'Statut', 'Éliminatoire',
@@ -1459,11 +1563,11 @@ def generate_csv_report(candidats_data):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📕 EXPORT PDF
+# 📕 EXPORT PDF — SANS COULEURS
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF des candidats avec colonne N° Dossier."""
+    """Génère un rapport PDF des candidats avec colonne N° Dossier - SANS COULEURS."""
     if not REPORTLAB_AVAILABLE:
         return None
     buf = io.BytesIO()
@@ -1475,7 +1579,7 @@ def generate_pdf_report(candidats_data):
     els.append(Paragraph(
         "Rapport Candidatures — RecrutBank",
         ParagraphStyle('T', parent=sty['Heading1'],
-                       fontSize=16, textColor=colors.HexColor('#1a3a5c'),
+                       fontSize=16, textColor=colors.black,  # Noir au lieu de bleu
                        spaceAfter=20, alignment=TA_CENTER)
     ))
     els.append(Spacer(1, 0.3*cm))
@@ -1485,7 +1589,7 @@ def generate_pdf_report(candidats_data):
     ))
     els.append(Spacer(1, 0.8*cm))
 
-    # ── MODIFICATION : ajout de la colonne "N° Dossier" ──
+    # ── Données du tableau ───────────────────────────────────────────────
     data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
     for idx, c in enumerate(candidats_data, 1):
         score   = int(c.get('score', 0))
@@ -1501,20 +1605,17 @@ def generate_pdf_report(candidats_data):
             get_recommandation_from_score(score)
         ])
 
-    # Largeurs : Rang, N°Dos, Email, Candidat, Tél, Poste, Score, Reco
+    # ── Tableau SANS COULEURS de fond ────────────────────────────────────
     tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
     tbl.setStyle(TableStyle([
-        ('BACKGROUND',    (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
-        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.whitesmoke),
+        # 🔴 En-tête : texte noir, pas de fond coloré
         ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
         ('FONTSIZE',      (0, 0), (-1,  0), 9),
         ('BOTTOMPADDING', (0, 0), (-1,  0), 10),
-        ('GRID',          (0, 0), (-1, -1), 0.5, colors.black),
-        ('ROWBACKGROUNDS',(0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ('GRID',          (0, 0), (-1, -1), 0.5, colors.black),  # Garder les bordures
         ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        # Légère couleur de fond pour la colonne N° Dossier (col index 1)
-        ('BACKGROUND',    (1, 1), (1, -1), colors.HexColor('#EBF5FB')),
+        # 🔴 AUCUNE couleur de fond : ni en-tête, ni lignes, ni colonnes spécifiques
     ]))
     els.append(tbl)
     doc.build(els)
@@ -1586,8 +1687,6 @@ def login():
 def postuler():
     """
     Soumission d'une nouvelle candidature.
-
-    ✅ MODIFICATION :
     - Un même email peut postuler à PLUSIEURS postes distincts.
     - Le doublon est désormais détecté sur la combinaison (email + poste).
     - Le champ "numero_dossier" est accepté dans le formulaire et stocké.
@@ -1598,13 +1697,12 @@ def postuler():
         email          = (request.form.get('email')          or '').strip().lower()
         telephone      = (request.form.get('telephone')      or '').strip()
         poste          = (request.form.get('poste')          or '').strip()
-        # ── NOUVEAU champ N° Dossier ──────────────────────────────────────
         numero_dossier = (request.form.get('numero_dossier') or '').strip()
 
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
-        # ── MODIFICATION : unicité sur (email, poste) au lieu de (email) seul ──
+        # Unicite sur (email, poste)
         for k in redis_client.keys("candidat:*"):
             existing = redis_client.hgetall(k)
             if existing.get('email') == email and existing.get('poste') == poste:
@@ -1640,9 +1738,7 @@ def postuler():
             "email":                 email,
             "telephone":             telephone,
             "poste":                 poste,
-            # ── NOUVEAU ──────────────────────────────────────────────────
             "numero_dossier":        numero_dossier,
-            # ─────────────────────────────────────────────────────────────
             "cv_filename":           cv_filename,
             "lettre_filename":       lettre_filename,
             "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
@@ -1933,4 +2029,5 @@ if __name__ == '__main__':
     print(f"🔧 DEBUG: {'ACTIF' if DEBUG_EXTRACTION else 'INACTIF'} (var: DEBUG_EXTRACTION)")
     print(f"👥 Multi-postes: ✅ (un candidat peut postuler à plusieurs postes)")
     print(f"🗂️  N° Dossier: ✅ (saisi à la soumission, visible dans tous les exports)")
+    print(f"🎨 Rapports: SANS COULEURS (rangs et N° Dossier en noir/blanc)")
     app.run(host="0.0.0.0", port=port, debug=False)
