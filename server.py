@@ -9,7 +9,7 @@
 #   6. Les années de STAGE ne comptent PAS comme années d'expérience
 #   7. 🔴 LOGIQUE AND STRICTE : 1 critère éliminatoire manquant = score 0 (TOUS POSTES)
 #   8. Détection des contextes négatifs ("pas d'expérience") exclus du matching
-#   9. 🔴 NOUVEAU : Vérification du CONTEXTE SECTORIEL pour TOUS les postes bancaires
+#   9. 🔴 NOUVEAU : Vérification du CONTEXTE SECTORIEL pour TOUS les postes
 #  10. 🔴 NOUVEAU : Co-occurrence obligatoire mot-clé + secteur requis
 #  11. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
 #  12. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
