@@ -13,9 +13,10 @@
 #  10. 🔴 NOUVEAU : Co-occurrence obligatoire mot-clé + secteur requis
 #  11. 🔴 NOUVEAU : Rapports par poste OU global (Excel, PDF, CSV)
 #  12. 🔴 NOUVEAU : Filtres query params (poste, statut) pour exports
-#  13. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
-#  14. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
-#  15. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
+#  13. 🔴 NOUVEAU : Titres de rapports personnalisés (CANDIDATURES / RAPPORT GENERAL)
+#  14. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
+#  15. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
+#  16. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -1646,7 +1647,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
         # Titre
         ws.merge_cells('A1:L1')
         c = ws['A1']
-        c.value = f"CLASSEMENT — {poste}"
+        # ✅ MODIFICATION : Titre personnalisé par poste
+        c.value = f"CANDIDATURES - {poste}"
         c.font = Font(bold=True, size=14, color="000000")
         c.alignment = Alignment(horizontal='center', vertical='center')
         c.fill = hfill
@@ -1784,9 +1786,14 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     sty = getSampleStyleSheet()
     
     # Titre principal
-    rapport_type = f"— {poste_filter}" if poste_filter else "(Global)"
+    # ✅ MODIFICATION : Titre personnalisé pour rapport global ou par poste
+    if poste_filter:
+        rapport_type = f"CANDIDATURES - {poste_filter}"
+    else:
+        rapport_type = "RAPPORT GENERAL"
+    
     els.append(Paragraph(
-        f"Rapport Candidatures {rapport_type} — RecrutBank",
+        f"{rapport_type} — RecrutBank",
         ParagraphStyle('T', parent=sty['Heading1'],
                        fontSize=16, textColor=colors.black,
                        spaceAfter=20, alignment=TA_CENTER)
@@ -2280,6 +2287,7 @@ if __name__ == '__main__':
     print(f"🖥️ Environnement IT critique requis pour IT Réseau")
     print(f"🚫 Secteurs non-bancaires (ONG, holding) EXCLUS")
     print(f"📊 Rapports: par poste OU global (Excel, PDF, CSV)")
+    print(f"📝 Titres: CANDIDATURES - [Poste] / RAPPORT GENERAL")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
