@@ -11,9 +11,11 @@
 #   8. Détection des contextes négatifs ("pas d'expérience") exclus du matching
 #   9. 🔴 NOUVEAU : Vérification du CONTEXTE SECTORIEL pour TOUS les postes
 #  10. 🔴 NOUVEAU : Co-occurrence obligatoire mot-clé + secteur requis
-#  11. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
-#  12. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
-#  13. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
+#  11. 🔴 NOUVEAU : Rapports par poste OU global (Excel, PDF, CSV)
+#  12. 🔴 NOUVEAU : Filtres query params (poste, statut) pour exports
+#  13. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
+#  14. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
+#  15. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -1596,11 +1598,15 @@ def generate_ranking_for_poste(poste, candidats_data):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📊 EXPORT EXCEL — SANS COULEURS
+# 📊 EXPORT EXCEL — SANS COULEURS (par poste OU global)
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel des candidats - SANS COULEURS."""
+    """
+    Génère un rapport Excel des candidats.
+    - Si poste_filter est défini : rapport pour un seul poste
+    - Sinon : rapport global avec un onglet par poste
+    """
     if not OPENPYXL_AVAILABLE:
         return None
 
@@ -1608,32 +1614,45 @@ def generate_excel_report(candidats_data, poste_filter=None):
     if 'Sheet' in wb.sheetnames:
         del wb['Sheet']
 
-    postes_to_export = (
-        [poste_filter] if poste_filter
-        else list(dict.fromkeys(c.get('poste', '') for c in candidats_data))
-    )
+    # Déterminer les postes à exporter
+    if poste_filter and poste_filter in POSTES:
+        postes_to_export = [poste_filter]
+    else:
+        # Rapport global : tous les postes avec candidats
+        postes_to_export = list(dict.fromkeys(
+            c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES
+        ))
 
     for poste in postes_to_export:
         candidats_poste = generate_ranking_for_poste(
             poste, [c for c in candidats_data if c.get('poste') == poste]
         )
-        ws = wb.create_sheet(title=poste[:20])
+        
+        if not candidats_poste:
+            continue
+        
+        # Nom d'onglet court (max 31 caractères pour Excel)
+        sheet_name = poste[:28] if len(poste) > 31 else poste
+        ws = wb.create_sheet(title=sheet_name)
 
+        # Style neutre : pas de couleurs
         hfill  = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         hfont  = Font(color="000000", bold=True, size=11)
         border = Border(
-            left=Side(style='thin'),  right=Side(style='thin'),
-            top=Side(style='thin'),   bottom=Side(style='thin')
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin')
         )
 
+        # Titre
         ws.merge_cells('A1:L1')
         c = ws['A1']
         c.value = f"CLASSEMENT — {poste}"
-        c.font  = Font(bold=True, size=14, color="000000")
+        c.font = Font(bold=True, size=14, color="000000")
         c.alignment = Alignment(horizontal='center', vertical='center')
-        c.fill  = hfill
+        c.fill = hfill
         ws.row_dimensions[1].height = 30
 
+        # En-têtes
         headers = [
             'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
             'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
@@ -1641,24 +1660,25 @@ def generate_excel_report(candidats_data, poste_filter=None):
         ]
         for col, h in enumerate(headers, 1):
             cell = ws.cell(row=3, column=col, value=h)
-            cell.font      = hfont
-            cell.fill      = hfill
-            cell.border    = border
+            cell.font = hfont
+            cell.fill = hfill
+            cell.border = border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
+        # Données
         for row_i, cand in enumerate(candidats_poste, 4):
-            sb       = cand.get('score_breakdown_parsed', {})
-            elim     = sb.get('bloc1_eliminatoire', False)
-            adeq     = sb.get('adequation_experience', 0)    if not elim else 0
-            cohe     = sb.get('coherence_parcours', 0)       if not elim else 0
-            risq     = sb.get('exposition_risque_metier', 0) if not elim else 0
-            qcv      = sb.get('qualite_cv', 0)               if not elim else 0
-            lm       = sb.get('lettre_motivation', 0)        if not elim else 0
-            total    = adeq + cohe + risq + qcv + lm
-            rang     = cand.get('ranking_position', row_i - 3)
-            nom_c    = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip()
-            reco     = cand.get('ranking_recommendation', get_recommandation_from_score(total))
-            num_dos  = cand.get('numero_dossier', '') or '–'
+            sb = cand.get('score_breakdown_parsed', {})
+            elim = sb.get('bloc1_eliminatoire', False)
+            adeq = sb.get('adequation_experience', 0) if not elim else 0
+            cohe = sb.get('coherence_parcours', 0) if not elim else 0
+            risq = sb.get('exposition_risque_metier', 0) if not elim else 0
+            qcv = sb.get('qualite_cv', 0) if not elim else 0
+            lm = sb.get('lettre_motivation', 0) if not elim else 0
+            total = adeq + cohe + risq + qcv + lm
+            rang = cand.get('ranking_position', row_i - 3)
+            nom_c = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip()
+            reco = cand.get('ranking_recommendation', get_recommandation_from_score(total))
+            num_dos = cand.get('numero_dossier', '') or '–'
 
             row_data = [
                 rang, num_dos, cand.get('email', '') or '–', nom_c,
@@ -1667,15 +1687,21 @@ def generate_excel_report(candidats_data, poste_filter=None):
             ]
 
             for col, val in enumerate(row_data, 1):
-                cell        = ws.cell(row=row_i, column=col, value=val)
+                cell = ws.cell(row=row_i, column=col, value=val)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                # 🔴 AUCUNE COULEUR : tout en noir/blanc
 
+        # Largeurs colonnes
         col_widths = [8, 20, 35, 35, 20, 28, 28, 35, 20, 20, 15, 35]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
         for row in range(3, ws.max_row + 1):
             ws.row_dimensions[row].height = 40
+
+    # Supprimer l'onglet par défaut s'il est vide
+    if 'Sheet' in wb.sheetnames:
+        del wb['Sheet']
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1684,29 +1710,45 @@ def generate_excel_report(candidats_data, poste_filter=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📄 EXPORT CSV
+# 📄 EXPORT CSV — SANS COULEURS (par poste OU global)
 # ══════════════════════════════════════════════════════════════════════════
 
-def generate_csv_report(candidats_data):
-    """Génère un rapport CSV des candidats."""
+def generate_csv_report(candidats_data, poste_filter=None):
+    """
+    Génère un rapport CSV des candidats.
+    - Si poste_filter est défini : filtre sur ce poste
+    - Sinon : tous les postes mélangés avec colonne Poste
+    """
     out = io.StringIO()
-    w   = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL)
+    w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL)
 
-    w.writerow([
+    # En-têtes avec colonne Poste pour rapport global
+    headers = [
         'Rang', 'N° Dossier', 'Email', 'Nom', 'Prénom', 'Téléphone',
         'Poste', 'Date candidature', 'Score (/10)', 'Statut', 'Éliminatoire',
         'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque (0-3)', 'Note'
-    ])
-    for idx, c in enumerate(candidats_data, 1):
+    ]
+    w.writerow(headers)
+    
+    # Filtrer les candidats
+    if poste_filter and poste_filter in POSTES:
+        candidats_filtered = [c for c in candidats_data if c.get('poste') == poste_filter]
+    else:
+        candidats_filtered = candidats_data
+
+    # Trier par poste puis par date
+    candidats_filtered.sort(key=lambda x: (x.get('poste', ''), x.get('date_candidature', '')), reverse=True)
+
+    for idx, c in enumerate(candidats_filtered, 1):
         sb = c.get('score_breakdown_parsed', {})
         w.writerow([
             idx,
             c.get('numero_dossier', '') or '–',
-            c.get('email', '')     or '–',
+            c.get('email', '') or '–',
             c.get('nom', ''),
             c.get('prenom', ''),
             c.get('telephone', '') or '–',
-            c.get('poste', ''),
+            c.get('poste', ''),  # Colonne Poste pour rapport global
             c.get('date_candidature', ''),
             c.get('score', '0'),
             c.get('statut', ''),
@@ -1716,26 +1758,35 @@ def generate_csv_report(candidats_data):
             sb.get('exposition_risque_metier', 0),
             sb.get('note', '')
         ])
+    
     out.seek(0)
     return out.getvalue()
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📕 EXPORT PDF — SANS COULEURS
+# 📕 EXPORT PDF — SANS COULEURS (par poste OU global)
 # ══════════════════════════════════════════════════════════════════════════
 
-def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF des candidats - SANS COULEURS."""
+def generate_pdf_report(candidats_data, poste_filter=None):
+    """
+    Génère un rapport PDF des candidats.
+    - Si poste_filter est défini : rapport pour un seul poste
+    - Sinon : rapport global avec section par poste
+    """
     if not REPORTLAB_AVAILABLE:
         return None
+        
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
                             rightMargin=1*cm, leftMargin=1*cm,
-                            topMargin=2*cm,   bottomMargin=2*cm)
+                            topMargin=2*cm, bottomMargin=2*cm)
     els = []
     sty = getSampleStyleSheet()
+    
+    # Titre principal
+    rapport_type = f"— {poste_filter}" if poste_filter else "(Global)"
     els.append(Paragraph(
-        "Rapport Candidatures — RecrutBank",
+        f"Rapport Candidatures {rapport_type} — RecrutBank",
         ParagraphStyle('T', parent=sty['Heading1'],
                        fontSize=16, textColor=colors.black,
                        spaceAfter=20, alignment=TA_CENTER)
@@ -1747,31 +1798,60 @@ def generate_pdf_report(candidats_data):
     ))
     els.append(Spacer(1, 0.8*cm))
 
-    data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
-    for idx, c in enumerate(candidats_data, 1):
-        score   = int(c.get('score', 0))
-        num_dos = c.get('numero_dossier', '') or '–'
-        data.append([
-            str(idx),
-            num_dos,
-            c.get('email', '')   or '–',
-            f"{c.get('prenom', '')} {c.get('nom', '')}",
-            c.get('telephone', '') or '–',
-            c.get('poste', ''),
-            f"{score}/10",
-            get_recommandation_from_score(score)
-        ])
+    # Déterminer les postes à inclure
+    if poste_filter and poste_filter in POSTES:
+        postes_to_export = [poste_filter]
+    else:
+        postes_to_export = list(dict.fromkeys(
+            c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES
+        ))
 
-    tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
-    tbl.setStyle(TableStyle([
-        ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
-        ('FONTSIZE',      (0, 0), (-1,  0), 9),
-        ('BOTTOMPADDING', (0, 0), (-1,  0), 10),
-        ('GRID',          (0, 0), (-1, -1), 0.5, colors.black),
-        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    els.append(tbl)
+    for poste in postes_to_export:
+        candidats_poste = generate_ranking_for_poste(
+            poste, [c for c in candidats_data if c.get('poste') == poste]
+        )
+        
+        if not candidats_poste:
+            continue
+            
+        # Titre du poste
+        els.append(Paragraph(
+            f"📋 {poste}",
+            ParagraphStyle('P', parent=sty['Heading2'],
+                           fontSize=12, textColor=colors.black,
+                           spaceAfter=10, alignment=TA_LEFT)
+        ))
+        
+        # Données du tableau
+        data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
+        for idx, c in enumerate(candidats_poste, 1):
+            score = int(c.get('score', 0))
+            num_dos = c.get('numero_dossier', '') or '–'
+            data.append([
+                str(idx),
+                num_dos,
+                c.get('email', '') or '–',
+                f"{c.get('prenom', '')} {c.get('nom', '')}",
+                c.get('telephone', '') or '–',
+                poste,
+                f"{score}/10",
+                get_recommandation_from_score(score)
+            ])
+
+        # Tableau SANS COULEURS
+        tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
+        tbl.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            # 🔴 AUCUNE couleur de fond
+        ]))
+        els.append(tbl)
+        els.append(Spacer(1, 0.5*cm))  # Espacement entre postes
+
     doc.build(els)
     buf.seek(0)
     return buf
@@ -2051,51 +2131,79 @@ def trigger_analyze(token):
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
 
-# ── EXPORT ───────────────────────────────────────────────────────────────
+# ── EXPORT — NOUVEAU : Support poste_filter et statut_filter ─────────────
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
+    """
+    Export des candidatures avec filtre optionnel par poste et/ou statut.
+    
+    Query params:
+    - poste: (optionnel) Nom du poste pour filtrer le rapport
+    - statut: (optionnel) Filtrer par statut (en_attente, retenu, rejete, entretien)
+    
+    Formats: csv, excel/xlsx, pdf
+    """
     try:
-        keys   = redis_client.keys("candidat:*")
+        # Récupérer les paramètres de filtrage
+        poste_filter = request.args.get('poste', '')  # Filtre par poste
+        statut_filter = request.args.get('statut', '')  # Filtre par statut
+        
+        keys = redis_client.keys("candidat:*")
         result = []
+        
         for k in keys:
             c = redis_client.hgetall(k)
             c['id'] = k.split(':', 1)[1]
+            
+            # Appliquer les filtres
+            if poste_filter and c.get('poste') != poste_filter:
+                continue
+            if statut_filter and c.get('statut') != statut_filter:
+                continue
+                
             if c.get('score_breakdown'):
                 try:
                     c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
                 except Exception:
                     pass
             result.append(c)
+        
+        # Trier par date de candidature (plus récent en premier)
         result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Déterminer le nom de fichier
+        poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else "_global"
+        statut_suffix = f"_{statut_filter}" if statut_filter else ""
+        filename_base = f"rapport{poste_suffix}{statut_suffix}_{ts}"
 
         if fmt.lower() == 'csv':
-            csv_bytes = generate_csv_report(result).encode('utf-8-sig')
+            csv_bytes = generate_csv_report(result, poste_filter=poste_filter).encode('utf-8-sig')
             return send_file(io.BytesIO(csv_bytes), mimetype='text/csv',
                              as_attachment=True,
-                             download_name=f'rapport_{ts}.csv')
+                             download_name=f'{filename_base}.csv')
 
         elif fmt.lower() in ('excel', 'xlsx'):
             if not OPENPYXL_AVAILABLE:
                 return jsonify({'error': 'openpyxl non installé'}), 503
-            buf = generate_excel_report(result)
+            buf = generate_excel_report(result, poste_filter=poste_filter)
             if not buf:
                 return jsonify({'error': 'Erreur génération Excel'}), 500
             return send_file(buf,
                              mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                              as_attachment=True,
-                             download_name=f'rapport_{ts}.xlsx')
+                             download_name=f'{filename_base}.xlsx')
 
         elif fmt.lower() == 'pdf':
             if not REPORTLAB_AVAILABLE:
                 return jsonify({'error': 'reportlab non installé'}), 503
-            buf = generate_pdf_report(result)
+            buf = generate_pdf_report(result, poste_filter=poste_filter)
             if not buf:
                 return jsonify({'error': 'Erreur génération PDF'}), 500
             return send_file(buf, mimetype='application/pdf',
                              as_attachment=True,
-                             download_name=f'rapport_{ts}.pdf')
+                             download_name=f'{filename_base}.pdf')
 
         return jsonify({'error': 'Format non supporté. Utilisez: csv, excel ou pdf'}), 400
 
@@ -2171,6 +2279,7 @@ if __name__ == '__main__':
     print(f"🏦 Contexte bancaire OBLIGATOIRE pour postes bancaires")
     print(f"🖥️ Environnement IT critique requis pour IT Réseau")
     print(f"🚫 Secteurs non-bancaires (ONG, holding) EXCLUS")
+    print(f"📊 Rapports: par poste OU global (Excel, PDF, CSV)")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
