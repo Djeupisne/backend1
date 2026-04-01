@@ -9,10 +9,11 @@
 #   6. Les années de STAGE ne comptent PAS comme années d'expérience
 #   7. Logique AND stricte : 1 critère éliminatoire manquant = score 0
 #   8. Détection des contextes négatifs ("pas d'expérience") exclus du matching
-#   9. Calcul d'expérience EXACT avec validation seuil strict
-#  10. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
-#  11. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
-#  12. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
+#   9. 🔴 NOUVEAU : Vérification du CONTEXTE SECTORIEL (banque vs ONG vs autre)
+#  10. 🔴 NOUVEAU : Co-occurrence obligatoire mot-clé + secteur bancaire
+#  11. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
+#  12. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
+#  13. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -595,6 +596,51 @@ NEGATIVE_PATTERNS = [
 ]
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
 
+# ══════════════════════════════════════════════════════════════════════════
+# 🏢 SECTEURS NON-BANCAIRES — à exclure pour critères bancaires
+# ══════════════════════════════════════════════════════════════════════════
+
+NON_BANKING_SECTORS = [
+    'ong', 'organisation non gouvernementale', 'world vision', 'unicef',
+    'association', 'humanitaire', 'aide humanitaire', 'ngo',
+    'holding', 'groupe industriel', 'industrie', 'manufacturing',
+    'administration publique', 'fonction publique', 'ministère',
+    'école', 'université', 'enseignement', 'education',
+    'santé', 'hôpital', 'clinique', 'medical',
+    'commerce', 'retail', 'distribution', 'vente',
+    'agriculture', 'agroalimentaire', 'farming',
+    'transport', 'logistique', 'shipping',
+    'télécom', 'telecom', 'communication',
+    'énergie', 'oil', 'gaz', 'petrole', 'mining',
+    'construction', 'btp', 'batiment', 'travaux publics',
+    'assurance', 'insurance',
+    'cabinet', 'consulting', 'conseil', 'audit externe',
+    'media', 'presse', 'journalisme',
+    'immobilier', 'real estate',
+    'tourisme', 'hôtel', 'hotel', 'restauration',
+    'encobat', 'ensen', 'cdo consulting'
+]
+
+NON_BANKING_PATTERN = re.compile('|'.join(NON_BANKING_SECTORS), re.IGNORECASE)
+
+# ══════════════════════════════════════════════════════════════════════════
+# 🏦 SECTEURS BANCAIRES — requis pour critères bancaires
+# ══════════════════════════════════════════════════════════════════════════
+
+BANKING_SECTORS = [
+    'banque', 'bancaire', 'bank', 'banking',
+    'établissement de crédit', 'etablissement de credit',
+    'institution financière', 'institution financiere',
+    'microfinance', 'établissement financier', 'etablissement financier',
+    'société financière', 'societe financière', 'societe financiere',
+    'credit institution', 'financial institution',
+    'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
+    'bceao', 'cobac', 'banque centrale', 'banque des etats',
+    'core banking', 'banque commerciale', 'banque d affaires'
+]
+
+BANKING_PATTERN = re.compile('|'.join(BANKING_SECTORS), re.IGNORECASE)
+
 
 def contains_negative_context(text, keyword):
     """
@@ -622,6 +668,130 @@ def contains_negative_context(text, keyword):
             return True
     
     return False
+
+
+def is_banking_context(text_window):
+    """
+    Vérifie si un bloc de texte contient un contexte bancaire.
+    Retourne True si le contexte est bancaire, False si non-bancaire ou neutre.
+    """
+    if not text_window:
+        return False
+    
+    text_lower = text_window.lower()
+    
+    # 1. Vérifier si secteur NON-BANCAIRE est mentionné
+    if NON_BANKING_PATTERN.search(text_lower):
+        return False
+    
+    # 2. Vérifier si secteur BANCAIRE est mentionné
+    if BANKING_PATTERN.search(text_lower):
+        return True
+    
+    return False
+
+
+def check_criterion_banking_context(criterion, raw_text):
+    """
+    🔴 VÉRIFICATION STRICTE DU CONTEXTE SECTORIEL
+    Pour les critères bancaires, exige que le mot-clé apparaisse DANS un contexte bancaire.
+    Un candidat avec "gestion du crédit" dans une ONG ≠ expérience bancaire.
+    """
+    text_lower = raw_text.lower()
+    
+    # ── Critère: Expérience bancaire ─────────────────────────────────────
+    if criterion == "Expérience bancaire":
+        # Chercher les termes bancaires dans le texte
+        banking_matches = list(BANKING_PATTERN.finditer(text_lower))
+        
+        if not banking_matches:
+            return False  # Aucun terme bancaire trouvé
+        
+        # Pour chaque mention bancaire, vérifier qu'elle est associée à une expérience
+        experience_terms = ['expérience', 'poste', 'fonction', 'responsable', 'chargé', 
+                          'analyste', 'gestionnaire', 'directeur', 'chef', 'occupé',
+                          'travaillé', 'employé', 'recruté', 'engagement']
+        
+        for match in banking_matches:
+            idx = match.start()
+            # Fenêtre de 400 caractères autour de la mention bancaire
+            window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
+            window_lower = window.lower()
+            
+            # Vérifier si un terme d'expérience est présent dans la fenêtre
+            if any(exp in window_lower for exp in experience_terms):
+                # Vérifier que ce n'est pas dans un contexte non-bancaire
+                if not NON_BANKING_PATTERN.search(window_lower):
+                    return True
+        
+        return False
+    
+    # ── Critère: Minimum 3 ans en crédit / risque ────────────────────────
+    if criterion == "Minimum 3 ans en crédit / risque (hors stage)":
+        # Crédit/risque DOIT être associé à contexte bancaire
+        credit_terms = ['crédit', 'risque', 'credit', 'risk', 'credit risk', 'risque de crédit']
+        
+        for credit in credit_terms:
+            if credit in text_lower:
+                idx = text_lower.find(credit)
+                # Fenêtre large de 500 caractères
+                window = raw_text[max(0, idx-500): min(len(raw_text), idx+500)]
+                window_lower = window.lower()
+                
+                # Doit avoir contexte bancaire ET pas de contexte non-bancaire dominant
+                has_banking = BANKING_PATTERN.search(window_lower)
+                has_non_banking = NON_BANKING_PATTERN.search(window_lower)
+                
+                # Si contexte bancaire présent ET non-bancaire absent → valide
+                if has_banking and not has_non_banking:
+                    return True
+        
+        return False
+    
+    # ── Critère: Exposition aux garanties ou conformité ──────────────────
+    if criterion == "Exposition aux garanties ou conformité":
+        guarantee_terms = ['garantie', 'nantissement', 'hypothèque', 'sûreté', 'collatéral',
+                          'garanties', 'surete', 'suretes', 'collateral']
+        compliance_terms = ['conformité', 'compliance', 'cobac', 'bceao', 'réglementation bancaire',
+                          'conformite', 'reglementation bancaire', 'commission bancaire']
+        
+        all_terms = guarantee_terms + compliance_terms
+        
+        for term in all_terms:
+            if term in text_lower:
+                idx = text_lower.find(term)
+                window = raw_text[max(0, idx-350): min(len(raw_text), idx+350)]
+                window_lower = window.lower()
+                
+                # Pour garanties/conformité, exiger contexte bancaire ou réglementaire bancaire
+                has_banking = BANKING_PATTERN.search(window_lower)
+                has_cobac_bceao = 'cobac' in window_lower or 'bceao' in window_lower or 'commission bancaire' in window_lower
+                has_non_banking = NON_BANKING_PATTERN.search(window_lower)
+                
+                # Valide si: (bancaire OU cobac/bceao) ET pas non-bancaire dominant
+                if (has_banking or has_cobac_bceao) and not has_non_banking:
+                    return True
+        
+        return False
+    
+    # ── Critère: Minimum 3 ans institution financière ────────────────────
+    if criterion in ["Minimum 3 ans institution financière (hors stage)", 
+                     "Minimum 3 ans département finance (hors stage)"]:
+        banking_matches = list(BANKING_PATTERN.finditer(text_lower))
+        
+        if not banking_matches:
+            return False
+        
+        for match in banking_matches:
+            idx = match.start()
+            window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
+            if not NON_BANKING_PATTERN.search(window.lower()):
+                return True
+        
+        return False
+    
+    # ── Pour les autres critères, comportement normal ────────────────────
+    return True
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -973,6 +1143,7 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None):
     Calcul STRICT des années d'expérience :
     - Exclut les stages (déjà fait)
     - Exclut les mentions dans un contexte négatif
+    - Exclut les expériences hors secteur bancaire pour critères bancaires
     - Calcule précisément les durées avec dates françaises
     - Retourne True SEULEMENT si total >= min_years
     """
@@ -982,6 +1153,11 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None):
     for block in blocks:
         # Exclure les stages
         if is_stage_block(block):
+            continue
+        
+        # 🔴 EXCLURE les blocs dans contexte NON-BANCAIRE pour critères bancaires
+        if NON_BANKING_PATTERN.search(block.lower()):
+            print(f"    [EXP-] Bloc exclu (secteur non-bancaire): {block[:100]}...")
             continue
             
         # Exclure les blocs avec contexte négatif sur les mots-clés du domaine
@@ -1042,6 +1218,7 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
     Vérification STRICTE d'un critère :
     - Le critère doit être mentionné POSITIVEMENT quelque part dans les documents
     - Les contextes négatifs ("pas d'expérience") sont exclus
+    - 🔴 NOUVEAU : Les contextes non-bancaires sont exclus pour critères bancaires
     - Pour les critères EXP_*, le calcul d'années doit être exact et >= au minimum requis
     """
     keywords = KEYWORD_MAPPING.get(criterion, [])
@@ -1056,9 +1233,23 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
         domain_kws = DOMAIN_KEYWORDS_MAP.get(marker, [])
         domain_kws_n = [normalize_for_matching(k)[0] for k in domain_kws]
         
-        # Calcul STRICT des années d'expérience (hors stage, hors contexte négatif)
+        # Calcul STRICT des années d'expérience (hors stage, hors contexte négatif, hors non-bancaire)
         found = has_experience_years_strict(raw_full_text, min_years, domain_kws_n)
         return found, 1.0 if found else 0.0, ([marker] if found else [])
+
+    # ── 🔴 VÉRIFICATION CONTEXTE BANCAIRE pour critères sensibles ─────────
+    banking_criteria = [
+        "Expérience bancaire",
+        "Minimum 3 ans en crédit / risque (hors stage)",
+        "Exposition aux garanties ou conformité",
+        "Minimum 3 ans institution financière (hors stage)",
+        "Minimum 3 ans département finance (hors stage)"
+    ]
+    
+    if criterion in banking_criteria:
+        if not check_criterion_banking_context(criterion, raw_full_text):
+            print(f"    [CTX-] {criterion}: Échec contexte bancaire")
+            return False, 0.0, []
 
     # ── Gestion des critères standards (matching texte) ───────────────────
     best_score = 0.0
@@ -1140,7 +1331,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
 
     print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
     print(f"🔤 Texte normalisé (extrait): {normalized[:500]}")
-    print(f"🔑 Mots-clés recherchés pour IT: {DOMAIN_KEYWORDS_MAP['EXP_IT_2ANS']}")
 
     if DEBUG_EXTRACTION:
         print(f"\n{'='*70}\n🔍 DEBUG: {poste}")
@@ -1204,7 +1394,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'confidence': confidence,
                 'language': detected_lang,
                 'status': 'ÉLIMINATOIRE — critère requis NON mentionné positivement',
-                'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
+                'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5],
+                'reason': 'Contexte bancaire non vérifié' if crit in ['Expérience bancaire', 'Minimum 3 ans en crédit / risque (hors stage)', 'Exposition aux garanties ou conformité'] else 'Critère non trouvé'
             }
         else:
             details['matching_details'][crit] = {
@@ -1726,7 +1917,7 @@ def postuler():
         att_filenames = []
         for f in request.files.getlist('attestation'):
             if f and f.filename and allowed_file(f.filename):
-                ext = f.filename.rsplit('.', 1)[-1].lower()
+                ext = f.filename.rsplit('.', 1)[-1][-1].lower()
                 fn  = f"{uuid.uuid4().hex}_attestation.{ext}"
                 f.save(os.path.join(UPLOAD_FOLDER, fn))
                 att_filenames.append(fn)
@@ -2022,6 +2213,8 @@ if __name__ == '__main__':
     print(f"📋 Grille: {len(GRILLE)} postes")
     print(f"⚠️  Élimination STRICTE: 1 critère manquant → score 0")
     print(f"🚫 Stages EXCLUS du calcul des années d'expérience")
+    print(f"🏦 Contexte bancaire OBLIGATOIRE pour critères bancaires")
+    print(f"🚫 Secteurs non-bancaires (ONG, holding) EXCLUS pour crédit/risque")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
