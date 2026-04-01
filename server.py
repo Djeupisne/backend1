@@ -11,6 +11,9 @@
 #   8. Gestion des confiances de matching pour réduire les faux positifs
 #   9. Logs de débogage pour extraction texte et matching
 #  10. Tous les bugs de syntaxe corrigés + logs améliorés
+# ── NOUVELLES MODIFICATIONS ───────────────────────────────────────────────
+#  11. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
+#  12. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -462,9 +465,6 @@ KEYWORD_MAPPING = {
         "taux d interet", "risque de liquidite", "risque de change",
         "foreign exchange", "interest rate", "liquidity risk"
     ],
-    "Minimum 3 ans institution financière (hors stage)": [
-        "EXP_FIN_3ANS"
-    ],
     "Maîtrise VaR / stress testing": [
         "var", "value at risk", "stress testing", "back testing",
         "backtesting", "scenario de stress", "value-at-risk"
@@ -576,7 +576,6 @@ STAGE_MARKERS = [
     r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b',
     r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b',
     r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b',
-    # Versions anglaises
     r'\bintern\b', r'\btrainee\b', r'\bapprenticeship\b',
 ]
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
@@ -585,49 +584,27 @@ STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 # 🔤 NORMALISATION TEXTE — Unicode complet
 # ══════════════════════════════════════════════════════════════════════════
 
-# Map complète pour accents (latin + cyrillique + autres)
 _ACCENT_MAP = str.maketrans(
     'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ',
     'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'
 )
 
 def normalize_unicode(text):
-    """
-    Normalisation Unicode complète :
-    - NFC pour uniformiser les caractères composés
-    - Suppression des caractères de contrôle invisibles
-    - Conservation des lettres pour le matching
-    """
     if not text:
         return ""
-    # Normalisation NFC (décomposition puis recomposition)
     text = unicodedata.normalize('NFC', text)
-    # Suppression des caractères de contrôle (sauf sauts utiles)
     text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
-    # Remplacement des espaces spéciaux par espace normal
     text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
     return text.strip()
 
 
 def normalize_for_matching(text):
-    """
-    Normalisation OPTIMISÉE pour le matching :
-    - Minuscules + suppression accents (pour matching large)
-    - Nettoyage ponctuation
-    - Tokenisation pour recherche partielle
-    """
     if not text:
         return "", []
-    
-    # Version sans accents pour matching large
     no_accents = text.lower().translate(_ACCENT_MAP)
-    # Nettoyage : garder lettres, chiffres, espaces, tirets, slash, points
     cleaned = re.sub(r'[^\w\s\-/\.]', ' ', no_accents)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    
-    # Tokens pour recherche partielle (mots de 2+ caractères)
     tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
-    
     return cleaned, tokens
 
 
@@ -636,20 +613,14 @@ def normalize_for_matching(text):
 # ══════════════════════════════════════════════════════════════════════════
 
 def extract_text_from_pdf_robust(filepath):
-    """Extraction PDF avec 3 niveaux de fallback + gestion OCR si disponible."""
     text = ""
-    
-    # Niveau 1 : pdfplumber (meilleur pour les tableaux/mise en page)
     if PDFPLUMBER_AVAILABLE:
         try:
             with pdfplumber.open(filepath) as pdf:
                 for page in pdf.pages:
-                    # Extraction avec paramètres optimisés pour CV
                     content = page.extract_text(
-                        x_tolerance=3,
-                        y_tolerance=3,
-                        keep_blank_chars=True,
-                        use_text_flow=True  # Respecte l'ordre de lecture
+                        x_tolerance=3, y_tolerance=3,
+                        keep_blank_chars=True, use_text_flow=True
                     )
                     if content:
                         text += content + "\n"
@@ -657,8 +628,7 @@ def extract_text_from_pdf_robust(filepath):
                 return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ pdfplumber erreur: {e}")
-    
-    # Niveau 2 : PyPDF2
+
     if PYPDF2_AVAILABLE:
         try:
             with open(filepath, 'rb') as f:
@@ -671,8 +641,7 @@ def extract_text_from_pdf_robust(filepath):
                 return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ PyPDF2 erreur: {e}")
-    
-    # Niveau 3 : Fallback pdftotext (si disponible sur le système)
+
     try:
         import subprocess
         result = subprocess.run(
@@ -683,58 +652,44 @@ def extract_text_from_pdf_robust(filepath):
             return normalize_unicode(result.stdout.strip())
     except Exception:
         pass
-    
+
     return ""
 
 
 def extract_text_from_docx_robust(filepath, raw_bytes=None):
-    """Extraction DOCX avec récupération complète : paragraphes, tableaux, en-têtes, commentaires."""
     if not DOCX_AVAILABLE:
         return ""
-    
     try:
         doc = Document(filepath)
         parts = []
-        
-        # 1. Paragraphes principaux (inclut titres de sections)
         for para in doc.paragraphs:
             t = para.text.strip()
             if t:
                 parts.append(t)
-        
-        # 2. Tableaux (critique pour les CV structurés en tableau)
         for table in doc.tables:
             for row in table.rows:
                 cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
                 if cells:
                     parts.append(" | ".join(cells))
-        
-        # 3. En-têtes / pieds de page
         for section in doc.sections:
             for element in (section.header.paragraphs + section.footer.paragraphs):
                 t = element.text.strip()
                 if t:
                     parts.append(t)
-        
-        # 4. Commentaires (parfois utiles pour les notes du recruteur)
         try:
             for comment in doc.comments:
                 t = comment.text.strip()
                 if t:
                     parts.append(f"[Commentaire] {t}")
         except Exception:
-            pass  # Optionnel, certains DOCX n'ont pas cette propriété
-        
+            pass
         result = "\n".join(parts).strip()
         return normalize_unicode(result)
-        
     except Exception as e:
         print(f"⚠️ Erreur lecture DOCX: {e}")
-        # Fallback : lecture brute si python-docx échoue
         if raw_bytes:
             try:
-                # Extraction basique des chaînes imprimables
-                text = re.sub(r'[^\x20-\x7E\u00C0-\u017F\u0400-\u04FF\u0600-\u06FF]+', ' ', 
+                text = re.sub(r'[^\x20-\x7E\u00C0-\u017F\u0400-\u04FF\u0600-\u06FF]+', ' ',
                              raw_bytes.decode('utf-8', errors='ignore'))
                 return normalize_unicode(text.strip())
             except Exception:
@@ -743,17 +698,13 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
 
 
 def extract_text_from_txt(filepath, raw_bytes=None):
-    """Lecture de fichier texte avec gestion multi-encodage."""
     if raw_bytes and CHARDET_AVAILABLE:
-        # Utiliser l'encodage détecté par chardet
         try:
             detected = chardet.detect(raw_bytes[:10000])
             encoding = detected['encoding'] or 'utf-8'
             return normalize_unicode(raw_bytes.decode(encoding, errors='ignore'))
         except Exception:
             pass
-    
-    # Lecture classique avec fallback d'encodages
     for enc in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']:
         try:
             with open(filepath, 'r', encoding=enc) as f:
@@ -764,40 +715,28 @@ def extract_text_from_txt(filepath, raw_bytes=None):
 
 
 def extract_text_robust(filepath, filename):
-    """
-    Extraction texte robuste : gère PDF, DOCX, TXT, encodages variés, 
-    et fallbacks multiples pour maximiser le contenu récupéré.
-    """
     if not filepath or not os.path.exists(filepath):
         print(f"⚠️ Fichier introuvable: {filepath}")
         return ""
-    
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     raw_bytes = None
-    
-    # Lecture binaire pour détection d'encodage (DOC/TXT)
     if CHARDET_AVAILABLE and ext in ('doc', 'docx', 'txt'):
         try:
             with open(filepath, 'rb') as f:
                 raw_bytes = f.read()
         except Exception as e:
             print(f"⚠️ Erreur lecture binaire: {e}")
-    
-    # Dispatch par type de fichier
     if ext == 'pdf':
         return extract_text_from_pdf_robust(filepath)
     elif ext in ('doc', 'docx'):
         return extract_text_from_docx_robust(filepath, raw_bytes)
     elif ext == 'txt':
         return extract_text_from_txt(filepath, raw_bytes)
-    
-    # Fallback : essayer de lire comme texte
     if raw_bytes:
         try:
             return normalize_unicode(raw_bytes.decode('utf-8', errors='ignore').strip())
         except Exception:
             pass
-    
     return ""
 
 
@@ -806,11 +745,9 @@ def extract_text_robust(filepath, filename):
 # ══════════════════════════════════════════════════════════════════════════
 
 def detect_language(text_sample):
-    """Détection de langue du CV pour adapter le matching."""
     if not LANGDETECT_AVAILABLE or not text_sample:
         return None
     try:
-        # Échantillon de 1000 caractères pour fiabilité
         sample = text_sample[:1000].strip()
         if len(sample) < 50:
             return None
@@ -819,7 +756,6 @@ def detect_language(text_sample):
         return None
 
 
-# Dictionnaire de traduction/enrichissement des mots-clés par langue
 KEYWORD_TRANSLATIONS = {
     'en': {
         'credit': ['credit', 'loan', 'lending', 'credit analysis', 'loan portfolio'],
@@ -846,29 +782,21 @@ KEYWORD_TRANSLATIONS = {
 
 
 def get_keywords_for_language(criterion, lang='fr'):
-    """Récupère les mots-clés adaptés à la langue détectée."""
     base_keywords = KEYWORD_MAPPING.get(criterion, [])
-    
     if lang not in KEYWORD_TRANSLATIONS or lang == 'fr':
         return base_keywords
-    
-    # Enrichir avec les traductions
     enriched = list(base_keywords)
     translations = KEYWORD_TRANSLATIONS.get(lang, {})
-    
     for base_term in translations:
-        # Si le critère contient ce terme de base, ajouter les traductions
         if any(base_term in kw.lower() for kw in base_keywords):
             enriched.extend(translations[base_term])
-    
-    return list(set(enriched))  # Supprime les doublons
+    return list(set(enriched))
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # 📅 EXTRACTION DES ANNÉES D'EXPÉRIENCE (hors stage)
 # ══════════════════════════════════════════════════════════════════════════
 
-# Mois en français pour le parsing de dates
 FRENCH_MONTHS = {
     'janvier': 1, 'jan': 1, 'février': 2, 'fevrier': 2, 'fev': 2,
     'mars': 3, 'mar': 3, 'avril': 4, 'avr': 4, 'mai': 5,
@@ -879,21 +807,12 @@ FRENCH_MONTHS = {
 
 
 def split_into_jobs(raw_text):
-    """
-    Découpe le texte brut en blocs correspondant à des postes.
-    Un nouveau bloc commence quand on détecte un pattern de date.
-    """
-    # Séparateurs typiques de blocs CV (multi-langue)
     separators = re.compile(
         r'(?:^|\n)(?=\s*(?:'
-        # Dates avec mois français
         r'(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
         r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s+'
-        # Ou année seule
         r'(?:20\d{2}|19\d{2})|'
-        # Ou format mm/aaaa
         r'\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|'
-        # Mots-clés de début de période
         r'(?:depuis|de |from |since |desde |a partir de |starting |beginning)'
         r'))',
         re.IGNORECASE | re.MULTILINE
@@ -903,28 +822,13 @@ def split_into_jobs(raw_text):
 
 
 def is_stage_block(block_text):
-    """Renvoie True si ce bloc de texte correspond à un stage / apprentissage."""
     return bool(STAGE_PATTERN.search(block_text))
 
 
 def extract_duration_years_from_block(block_text):
-    """
-    Extrait la durée en années d'un bloc de texte de poste.
-    ✅ CORRECTION MAJEURE : Support complet des dates françaises avec mois en toutes lettres
-    
-    Formats supportés :
-    - "Aout 2023 à aujourd'hui"
-    - "Novembre 2020 - Août 2023" 
-    - "Jan 2021 à ce jour"
-    - "3 ans", "2 ans 6 mois"
-    - "03/2018 - 06/2021"
-    
-    Retourne un float (nombre d'années) ou 0 si non trouvable.
-    """
     years = 0.0
     text = block_text.lower()
 
-    # ── Forme "X an(s)" ou "X année(s)" (multi-langue) ───────────────────
     m = re.search(r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)', text)
     if m:
         try:
@@ -933,8 +837,6 @@ def extract_duration_years_from_block(block_text):
         except ValueError:
             pass
 
-    # ── Pattern: "Mois AAAA à aujourd'hui/present/current" (CORRIGÉ) ─────
-    # Supporte: "Aout 2023 à aujourd'hui", "Nov 2020 - present", "Janvier 2021 à ce jour"
     pattern_present = re.compile(
         r'(?:(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
         r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s+)?'
@@ -954,7 +856,6 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(delta, 1)
 
-    # ── Pattern: "Mois AAAA - Mois AAAA" (CORRIGÉ) ───────────────────────
     pattern_range = re.compile(
         r'(?:(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
         r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s+)?'
@@ -975,7 +876,6 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(delta, 1)
 
-    # ── Fallback : format numérique "mm/aaaa - mm/aaaa" ──────────────────
     m = re.search(
         r'(\d{1,2})[/\-\.](20\d{2}|19\d{2})\s*[-–—\.]?\s*(?:(\d{1,2})[/\-\.])?(20\d{2}|19\d{2}|present|current|now)',
         text
@@ -999,35 +899,22 @@ def extract_duration_years_from_block(block_text):
 
 
 def compute_real_experience_years(full_raw_text, domain_keywords=None):
-    """
-    Calcule le nombre total d'années d'expérience RÉELLE (hors stage) dans un domaine.
-    domain_keywords : liste de mots-clés pour filtrer les blocs pertinents.
-    """
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
-
     for block in blocks:
         if is_stage_block(block):
-            continue  # Ignorer les stages
-
-        # Filtrage optionnel sur domaine
+            continue
         if domain_keywords:
             norm_block, _ = normalize_for_matching(block)
             if not any(kw in norm_block for kw in domain_keywords):
                 continue
-
         duration = extract_duration_years_from_block(block)
         if duration > 0:
             total_years += duration
-
     return round(total_years, 1)
 
 
 def has_experience_years(full_raw_text, min_years, domain_keywords=None):
-    """
-    Retourne True si le candidat a au moins min_years d'expérience RÉELLE.
-    Les stages sont exclus du calcul.
-    """
     total = compute_real_experience_years(full_raw_text, domain_keywords)
     print(f"    [EXP] Années réelles: {total} (min requis: {min_years})")
     return total >= min_years
@@ -1037,7 +924,6 @@ def has_experience_years(full_raw_text, min_years, domain_keywords=None):
 # 🧠 VÉRIFICATION D'UN CRITÈRE — matching intelligent multi-niveaux
 # ══════════════════════════════════════════════════════════════════════════
 
-# Mots-clés domaine pour chaque marqueur d'expérience
 DOMAIN_KEYWORDS_MAP = {
     "EXP_CREDIT_3ANS": [
         "credit", "risque", "banque", "bancaire", "institution financiere",
@@ -1059,7 +945,6 @@ DOMAIN_KEYWORDS_MAP = {
     ],
 }
 
-# Années minimales associées à chaque marqueur
 EXP_MIN_YEARS_MAP = {
     "EXP_CREDIT_3ANS":   3.0,
     "EXP_FIN_3ANS":      3.0,
@@ -1069,19 +954,10 @@ EXP_MIN_YEARS_MAP = {
 
 
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None):
-    """
-    Vérifie si un critère est satisfait avec matching intelligent :
-    1. Exact (mot-clé dans texte normalisé)
-    2. Fuzzy (similarité > 85% avec rapidfuzz)
-    3. Tokens (70% des tokens du mot-clé présents)
-    
-    Retourne : (bool, confidence_score, [mots trouvés])
-    """
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
         return False, 0.0, []
 
-    # ── Critère d'années d'expérience (hors stage) ───────────────────────
     exp_markers = [kw for kw in keywords if kw.startswith("EXP_")]
     if exp_markers:
         marker = exp_markers[0]
@@ -1091,59 +967,39 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
         found = has_experience_years(raw_full_text, min_years, domain_kws_n)
         return found, 1.0 if found else 0.0, ([marker] if found else [])
 
-    # ── Matching multi-niveaux pour mots-clés classiques ─────────────────
     best_score = 0.0
     found_kws = []
-    
     text_clean, text_tokens = normalize_for_matching(normalized_text)
-    
+
     for kw in keywords:
         kw_clean, kw_tokens = normalize_for_matching(kw)
-        
-        # Niveau 1 : recherche exacte (cas insensible, sans accents)
         if kw_clean in text_clean:
             found_kws.append(kw)
             best_score = max(best_score, 1.0)
             continue
-        
-        # Niveau 2 : fuzzy matching (si rapidfuzz disponible)
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 85:  # Seuil élevé pour éviter faux positifs
+            if ratio >= 85:
                 found_kws.append(f"{kw}~{ratio/100:.2f}")
                 best_score = max(best_score, ratio / 100)
                 continue
-        
-        # Niveau 3 : matching par tokens (au moins 70% des tokens du mot-clé)
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
             if len(common) >= max(2, len(kw_tokens) * 0.7):
                 found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                 best_score = max(best_score, len(common) / len(kw_tokens))
-    
-    # Seuil de décision : 60% de confiance minimum
+
     return best_score >= 0.6, round(best_score, 2), found_kws
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE PRINCIPAL — STRICT avec scoring Excel + LOGS DEBUG
+# 🧠 MOTEUR D'ANALYSE PRINCIPAL
 # ══════════════════════════════════════════════════════════════════════════
 
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
-    """
-    Analyse STRICTE selon la grille Word.
-    
-    Règles :
-      🔴 Bloc 1 Éliminatoire (AND strict) : 1 critère manquant → score 0
-      🟠 Bloc 2 Cohérence : +1 pt / critère validé
-      🟡 Bloc 3 Signaux   : +2 pts / signal détecté
-    
-    Scoring Excel :
-      Adéquation(0-3) + Cohérence(0-2) + Risque métier(0-3) + CV(0-1) + Lettre(0-1) = /10
-    """
     if not cv_text or len(cv_text.strip()) < 50:
         return {
             'score': 0,
@@ -1169,22 +1025,15 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'score_breakdown': {}
         }
 
-    # ── Concaténation de TOUS les textes bruts (pour analyse années) ──────
     all_att_raw  = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full     = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
-
-    # ── Version normalisée (pour matching mots-clés) ──────────────────────
     normalized   = normalize_for_matching(raw_full)[0]
-
-    # ── Détection langue (optionnel mais utile pour adaptation keywords) ─
     detected_lang = detect_language(cv_text[:500]) if cv_text else None
-    print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
 
-    # 🔍 LOGS DE DÉBOGAGE DEMANDÉS PAR L'UTILISATEUR
+    print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
     print(f"🔤 Texte normalisé (extrait): {normalized[:500]}")
     print(f"🔑 Mots-clés recherchés pour IT: {DOMAIN_KEYWORDS_MAP['EXP_IT_2ANS']}")
 
-    # Mode debug complet si activé
     if DEBUG_EXTRACTION:
         print(f"\n{'='*70}\n🔍 DEBUG: {poste}")
         print(f"📄 CV extrait ({len(cv_text)} chars):\n{cv_text[:1200]}")
@@ -1194,11 +1043,11 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             print(f"   {'✅' if ok else '❌'} {crit} (conf: {conf:.0%}) → {found}")
         print(f"{'='*70}\n")
 
-    checklist       = {}
-    flags_elim      = []
-    signaux         = []
-    points_bloc2    = 0
-    points_bloc3    = 0
+    checklist    = {}
+    flags_elim   = []
+    signaux      = []
+    points_bloc2 = 0
+    points_bloc3 = 0
     details = {
         'cv_words': len(cv_text.split()),
         'lettre_words': len((lettre_text or "").split()),
@@ -1218,43 +1067,31 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     # ── 🔴 BLOC 1 : Éliminatoires (AND strict) ───────────────────────────
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
-        
-        # Adapter les mots-clés à la langue détectée si possible
         original_keywords = None
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
             KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
-        
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full
         )
-        
-        # Restaurer les keywords originaux si modifiés
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
-        
         checklist[key] = is_present
-
         if not is_present:
             flags_elim.append(f"❌ {crit} (confiance: {confidence:.0%})")
             details['alertes_attention'].append(f"🔴 Éliminatoire manquant: {crit}")
             details['matching_details'][crit] = {
-                'found': False,
-                'confidence': confidence,
+                'found': False, 'confidence': confidence,
                 'language': detected_lang,
                 'status': 'ÉLIMINATOIRE — critère requis absent',
-                'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5] if original_keywords else KEYWORD_MAPPING.get(crit, [])[:5]
+                'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5]
             }
         else:
             details['matching_details'][crit] = {
-                'found': True,
-                'confidence': confidence,
-                'language': detected_lang,
-                'status': 'VALIDÉ',
-                'matched': found_kws
+                'found': True, 'confidence': confidence,
+                'language': detected_lang, 'status': 'VALIDÉ', 'matched': found_kws
             }
 
-    # ── Décision stricte : 1 critère éliminatoire manquant = score 0 ─────
     if flags_elim:
         return {
             'score': 0,
@@ -1284,24 +1121,18 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     # ── 🟠 BLOC 2 : Cohérence (+1 pt/critère validé) ─────────────────────
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
-        
-        # Adaptation langue si nécessaire
         original_keywords = None
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
             KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
-        
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full
         )
-        
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
-        
         checklist[key] = is_present
         details['matching_details'][crit] = {
-            'found': is_present,
-            'confidence': confidence,
+            'found': is_present, 'confidence': confidence,
             'matched': found_kws if is_present else []
         }
         if is_present:
@@ -1311,23 +1142,18 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     # ── 🟡 BLOC 3 : Signaux forts (+2 pts/signal détecté) ────────────────
     for i, crit in enumerate(grille['signaux_forts']):
         key = f"signal_{i}"
-        
         original_keywords = None
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
             KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
-        
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full
         )
-        
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
-        
         checklist[key] = is_present
         details['matching_details'][crit] = {
-            'found': is_present,
-            'confidence': confidence,
+            'found': is_present, 'confidence': confidence,
             'matched': found_kws if is_present else []
         }
         if is_present:
@@ -1335,7 +1161,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             signaux.append(crit)
             details['signaux_valides_bloc3'].append(f"🟡 {crit}")
 
-    # ── Points d'attention (informatif, n'impacte pas le score) ──────────
+    # ── Points d'attention ────────────────────────────────────────────────
     for i, crit in enumerate(grille['points_attention']):
         key = f"attn_{i}"
         is_present, _, _ = check_criterion_match_advanced(crit, normalized, raw_full)
@@ -1343,14 +1169,13 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         if is_present:
             details['alertes_attention'].append(f"⚠️ Attention: {crit}")
 
-    # ── Scoring Excel (sur 10) — conforme à la grille ────────────────────
-    adequation   = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
-    coherence    = min(2, points_bloc2)
-    risque_metier= min(3, len(signaux))
-    qualite_cv   = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
-    lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
-
-    score_final  = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
+    # ── Scoring Excel (sur 10) ────────────────────────────────────────────
+    adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
+    coherence     = min(2, points_bloc2)
+    risque_metier = min(3, len(signaux))
+    qualite_cv    = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
+    lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
+    score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
 
     return {
         'score': score_final,
@@ -1359,19 +1184,19 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         'signaux_detectes': signaux,
         'details': details,
         'score_breakdown': {
-            'bloc1_eliminatoire':     False,
+            'bloc1_eliminatoire':       False,
             'flags_eliminatoires_count': 0,
-            'adequation_experience':  adequation,
-            'coherence_parcours':     coherence,
+            'adequation_experience':    adequation,
+            'coherence_parcours':       coherence,
             'exposition_risque_metier': risque_metier,
-            'qualite_cv':             qualite_cv,
-            'lettre_motivation':      lettre_motiv,
-            'bloc2_criteres_valides': len(details['criteres_valides_bloc2']),
-            'bloc2_points':           points_bloc2,
-            'bloc3_signaux_detectes': len(signaux),
-            'bloc3_points':           points_bloc3,
-            'total_raw_points':       points_bloc2 + points_bloc3,
-            'score_final':            score_final,
+            'qualite_cv':               qualite_cv,
+            'lettre_motivation':        lettre_motiv,
+            'bloc2_criteres_valides':   len(details['criteres_valides_bloc2']),
+            'bloc2_points':             points_bloc2,
+            'bloc3_signaux_detectes':   len(signaux),
+            'bloc3_points':             points_bloc3,
+            'total_raw_points':         points_bloc2 + points_bloc3,
+            'score_final':              score_final,
             'note': f"Score Excel: {score_final}/10",
             'documents_analyses': details['documents_analyses']
         }
@@ -1379,35 +1204,27 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
 
 
 def normalize_text_for_matching(text):
-    """Wrapper pour compatibilité avec l'ancien code."""
     return normalize_for_matching(text)[0]
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🔄 ANALYSE ASYNCHRONE — avec logs de débogage extraction
+# 🔄 ANALYSE ASYNCHRONE
 # ══════════════════════════════════════════════════════════════════════════
 
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
-    """Lance l'analyse complète pour un candidat et sauvegarde le résultat."""
     try:
         key = f"candidat:{token}"
-
-        # Normalisation attestation_filenames
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
 
-        # Extraction CV avec méthode robuste
         cv_path  = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
         cv_text  = extract_text_robust(cv_path, cv_filename) if cv_path else ""
-
-        # Extraction Lettre
         lm_path  = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
         lm_text  = extract_text_robust(lm_path, lettre_filename) if lm_path else ""
 
-        # Extraction certificats/attestations
         att_texts = []
         for fn in (attestation_filenames or []):
             ap = os.path.join(UPLOAD_FOLDER, fn)
@@ -1416,7 +1233,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 if t:
                     att_texts.append(t)
 
-        # 🔍 LOG DE DÉBOGAGE EXTRACTION DEMANDÉ
         print(f"📄 Analyse {token}: CV={len(cv_text)}c, LM={len(lm_text)}c, Certs={len(att_texts)}f")
         if DEBUG_EXTRACTION and cv_text:
             print(f"🔍 TEXTE EXTRAIT CV ({token}):\n{cv_text[:1500]}")
@@ -1424,14 +1240,14 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
 
         redis_client.hset(key, mapping={
-            "score":             str(result['score']),
-            "checklist":         json.dumps(result['checklist'],         ensure_ascii=False),
-            "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False),
-            "signaux_detectes":  json.dumps(result['signaux_detectes'],  ensure_ascii=False),
-            "analyse_details":   json.dumps(result['details'],           ensure_ascii=False),
-            "score_breakdown":   json.dumps(result['score_breakdown'],   ensure_ascii=False),
-            "analyse_auto_date": datetime.datetime.now().isoformat(),
-            "analyse_status":    "completed"
+            "score":               str(result['score']),
+            "checklist":           json.dumps(result['checklist'],             ensure_ascii=False),
+            "flags_eliminatoires": json.dumps(result['flags_eliminatoires'],   ensure_ascii=False),
+            "signaux_detectes":    json.dumps(result['signaux_detectes'],      ensure_ascii=False),
+            "analyse_details":     json.dumps(result['details'],               ensure_ascii=False),
+            "score_breakdown":     json.dumps(result['score_breakdown'],       ensure_ascii=False),
+            "analyse_auto_date":   datetime.datetime.now().isoformat(),
+            "analyse_status":      "completed"
         })
 
         tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
@@ -1441,8 +1257,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         import traceback
         traceback.print_exc()
         redis_client.hset(f"candidat:{token}", mapping={
-            "analyse_status": "error",
-            "analyse_error":  str(e),
+            "analyse_status":    "error",
+            "analyse_error":     str(e),
             "analyse_auto_date": datetime.datetime.now().isoformat()
         })
 
@@ -1452,15 +1268,13 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 # ══════════════════════════════════════════════════════════════════════════
 
 def get_recommandation_from_score(score):
-    """Retourne la recommandation basée sur le score."""
     s = int(score)
-    if s >= 8:  return "🥇 Entretien prioritaire"
-    if s >= 6:  return "🥈 Entretien si besoin"
+    if s >= 8: return "🥇 Entretien prioritaire"
+    if s >= 6: return "🥈 Entretien si besoin"
     return "❌ Rejet"
 
 
 def calculate_ranking_score(c, poste):
-    """Calcule le score de classement avec bonus."""
     sb = c.get('score_breakdown_parsed', {})
     if sb.get('bloc1_eliminatoire'):
         return -999
@@ -1470,7 +1284,7 @@ def calculate_ranking_score(c, poste):
     lettre_bonus  = 0.1 if c.get('lettre_filename') else 0
     try:
         days = (datetime.datetime.now() -
-                datetime.datetime.fromisoformat(c.get('date_candidature',''))).days
+                datetime.datetime.fromisoformat(c.get('date_candidature', ''))).days
         date_bonus = max(0, (30 - min(days, 30)) * 0.01)
     except Exception:
         date_bonus = 0
@@ -1478,11 +1292,10 @@ def calculate_ranking_score(c, poste):
 
 
 def generate_ranking_for_poste(poste, candidats_data):
-    """Génère le classement pour un poste donné."""
     pool = [c for c in candidats_data if c.get('poste') == poste]
     for c in pool:
-        c['ranking_score']          = calculate_ranking_score(c, poste)
-        c['ranking_position']       = 0
+        c['ranking_score']    = calculate_ranking_score(c, poste)
+        c['ranking_position'] = 0
     pool.sort(key=lambda x: (
         -x['ranking_score'],
         -len(x.get('signaux_detectes_parsed', [])),
@@ -1500,7 +1313,7 @@ def generate_ranking_for_poste(poste, candidats_data):
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel des candidats."""
+    """Génère un rapport Excel des candidats avec colonne N° Dossier."""
     if not OPENPYXL_AVAILABLE:
         return None
 
@@ -1519,14 +1332,14 @@ def generate_excel_report(candidats_data, poste_filter=None):
         )
         ws = wb.create_sheet(title=poste[:20])
 
-        hfill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
-        hfont = Font(color="FFFFFF", bold=True, size=11)
+        hfill  = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
+        hfont  = Font(color="FFFFFF", bold=True, size=11)
         border = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'), bottom=Side(style='thin')
+            left=Side(style='thin'),  right=Side(style='thin'),
+            top=Side(style='thin'),   bottom=Side(style='thin')
         )
 
-        ws.merge_cells('A1:K1')
+        ws.merge_cells('A1:L1')
         c = ws['A1']
         c.value = f"CLASSEMENT — {poste}"
         c.font  = Font(bold=True, size=14, color="1a3a5c")
@@ -1534,34 +1347,38 @@ def generate_excel_report(candidats_data, poste_filter=None):
         c.fill  = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
         ws.row_dimensions[1].height = 30
 
+        # ── MODIFICATION : ajout de la colonne "N° Dossier" en 2ème position ──
         headers = [
-            'Rang', 'Email', 'Candidat', 'Téléphone',
+            'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
             'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
             'Qualité CV (0-1)', 'Lettre (0-1)', 'Score /10', 'Recommandation'
         ]
         for col, h in enumerate(headers, 1):
             cell = ws.cell(row=3, column=col, value=h)
-            cell.font   = hfont
-            cell.fill   = hfill
-            cell.border = border
+            cell.font      = hfont
+            cell.fill      = hfill
+            cell.border    = border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
         for row_i, cand in enumerate(candidats_poste, 4):
             sb       = cand.get('score_breakdown_parsed', {})
             elim     = sb.get('bloc1_eliminatoire', False)
-            adeq     = sb.get('adequation_experience', 0) if not elim else 0
-            cohe     = sb.get('coherence_parcours', 0)    if not elim else 0
+            adeq     = sb.get('adequation_experience', 0)    if not elim else 0
+            cohe     = sb.get('coherence_parcours', 0)       if not elim else 0
             risq     = sb.get('exposition_risque_metier', 0) if not elim else 0
-            qcv      = sb.get('qualite_cv', 0)             if not elim else 0
-            lm       = sb.get('lettre_motivation', 0)      if not elim else 0
+            qcv      = sb.get('qualite_cv', 0)               if not elim else 0
+            lm       = sb.get('lettre_motivation', 0)        if not elim else 0
             total    = adeq + cohe + risq + qcv + lm
             rang     = cand.get('ranking_position', row_i - 3)
-            nom_c    = f"{cand.get('prenom','')} {cand.get('nom','')}".strip()
+            nom_c    = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip()
             reco     = cand.get('ranking_recommendation', get_recommandation_from_score(total))
+            num_dos  = cand.get('numero_dossier', '') or '–'
 
-            row_data = [rang, cand.get('email','') or '–', nom_c,
-                        cand.get('telephone','') or '–',
-                        adeq, cohe, risq, qcv, lm, total, reco]
+            row_data = [
+                rang, num_dos, cand.get('email', '') or '–', nom_c,
+                cand.get('telephone', '') or '–',
+                adeq, cohe, risq, qcv, lm, total, reco
+            ]
 
             for col, val in enumerate(row_data, 1):
                 cell        = ws.cell(row=row_i, column=col, value=val)
@@ -1573,20 +1390,25 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     if color:
                         cell.fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
                         cell.font = Font(bold=True, size=12)
+                # N° Dossier — fond légèrement coloré pour visibilité
+                if col == 2:
+                    cell.fill = PatternFill(start_color="EBF5FB", end_color="EBF5FB", fill_type="solid")
+                    cell.font = Font(bold=True)
                 # Score
-                if col == 10:
+                if col == 11:
                     sc = "90EE90" if total >= 8 else ("FFD700" if total >= 6 else "FF6B6B")
                     cell.fill = PatternFill(start_color=sc, end_color=sc, fill_type="solid")
                     cell.font = Font(bold=True)
-                # Reco
-                if col == 11:
+                # Recommandation
+                if col == 12:
                     rc = "90EE90" if "prioritaire" in str(reco).lower() \
                          else ("FFD700" if "besoin" in str(reco).lower() else "FF6B6B")
                     cell.fill = PatternFill(start_color=rc, end_color=rc, fill_type="solid")
                     if "prioritaire" in str(reco).lower():
                         cell.font = Font(bold=True)
 
-        col_widths = [8, 35, 35, 20, 28, 28, 35, 20, 20, 15, 35]
+        # Largeurs colonnes : Rang, N°Dossier, Email, Candidat, Tél, Adéq, Coh, Risq, QCV, LM, Score, Reco
+        col_widths = [8, 20, 35, 35, 20, 28, 28, 35, 20, 20, 15, 35]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
         for row in range(3, ws.max_row + 1):
@@ -1603,27 +1425,34 @@ def generate_excel_report(candidats_data, poste_filter=None):
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_csv_report(candidats_data):
-    """Génère un rapport CSV des candidats."""
+    """Génère un rapport CSV des candidats avec colonne N° Dossier."""
     out = io.StringIO()
     w   = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL)
+
+    # ── MODIFICATION : ajout de "N° Dossier" après "Rang" ──
     w.writerow([
-        'Rang','Email','Nom','Prénom','Téléphone','Poste','Date candidature',
-        'Score (/10)','Statut','Éliminatoire',
-        'Adéquation (0-3)','Cohérence (0-2)','Risque (0-3)','Note'
+        'Rang', 'N° Dossier', 'Email', 'Nom', 'Prénom', 'Téléphone',
+        'Poste', 'Date candidature', 'Score (/10)', 'Statut', 'Éliminatoire',
+        'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque (0-3)', 'Note'
     ])
     for idx, c in enumerate(candidats_data, 1):
         sb = c.get('score_breakdown_parsed', {})
         w.writerow([
-            idx, c.get('email','') or '–',
-            c.get('nom',''), c.get('prenom',''),
-            c.get('telephone','') or '–',
-            c.get('poste',''), c.get('date_candidature',''),
-            c.get('score','0'), c.get('statut',''),
+            idx,
+            c.get('numero_dossier', '') or '–',
+            c.get('email', '')     or '–',
+            c.get('nom', ''),
+            c.get('prenom', ''),
+            c.get('telephone', '') or '–',
+            c.get('poste', ''),
+            c.get('date_candidature', ''),
+            c.get('score', '0'),
+            c.get('statut', ''),
             'OUI' if sb.get('bloc1_eliminatoire') else 'NON',
             sb.get('adequation_experience', 0),
             sb.get('coherence_parcours', 0),
             sb.get('exposition_risque_metier', 0),
-            sb.get('note','')
+            sb.get('note', '')
         ])
     out.seek(0)
     return out.getvalue()
@@ -1634,49 +1463,58 @@ def generate_csv_report(candidats_data):
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF des candidats."""
+    """Génère un rapport PDF des candidats avec colonne N° Dossier."""
     if not REPORTLAB_AVAILABLE:
         return None
-    buf  = io.BytesIO()
-    doc  = SimpleDocTemplate(buf, pagesize=landscape(A4),
-                             rightMargin=1*cm, leftMargin=1*cm,
-                             topMargin=2*cm,   bottomMargin=2*cm)
-    els  = []
-    sty  = getSampleStyleSheet()
-    els.append(Paragraph("Rapport Candidatures — RecrutBank",
-                         ParagraphStyle('T', parent=sty['Heading1'],
-                                        fontSize=16, textColor=colors.HexColor('#1a3a5c'),
-                                        spaceAfter=20, alignment=TA_CENTER)))
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                            rightMargin=1*cm, leftMargin=1*cm,
+                            topMargin=2*cm,   bottomMargin=2*cm)
+    els = []
+    sty = getSampleStyleSheet()
+    els.append(Paragraph(
+        "Rapport Candidatures — RecrutBank",
+        ParagraphStyle('T', parent=sty['Heading1'],
+                       fontSize=16, textColor=colors.HexColor('#1a3a5c'),
+                       spaceAfter=20, alignment=TA_CENTER)
+    ))
     els.append(Spacer(1, 0.3*cm))
-    els.append(Paragraph(f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}",
-                         ParagraphStyle('D', parent=sty['Normal'],
-                                        fontSize=9, textColor=colors.grey)))
+    els.append(Paragraph(
+        f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        ParagraphStyle('D', parent=sty['Normal'], fontSize=9, textColor=colors.grey)
+    ))
     els.append(Spacer(1, 0.8*cm))
 
-    data = [['Rang','Email','Candidat','Téléphone','Poste','Score /10','Recommandation']]
+    # ── MODIFICATION : ajout de la colonne "N° Dossier" ──
+    data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
     for idx, c in enumerate(candidats_data, 1):
-        score = int(c.get('score', 0))
+        score   = int(c.get('score', 0))
+        num_dos = c.get('numero_dossier', '') or '–'
         data.append([
             str(idx),
-            c.get('email','') or '–',
-            f"{c.get('prenom','')} {c.get('nom','')}",
-            c.get('telephone','') or '–',
-            c.get('poste',''),
+            num_dos,
+            c.get('email', '')   or '–',
+            f"{c.get('prenom', '')} {c.get('nom', '')}",
+            c.get('telephone', '') or '–',
+            c.get('poste', ''),
             f"{score}/10",
             get_recommandation_from_score(score)
         ])
 
-    tbl = Table(data, colWidths=[1.5*cm, 5*cm, 4.5*cm, 3.5*cm, 5*cm, 2.5*cm, 4.5*cm])
+    # Largeurs : Rang, N°Dos, Email, Candidat, Tél, Poste, Score, Reco
+    tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
     tbl.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a3a5c')),
-        ('TEXTCOLOR',  (0,0), (-1,0), colors.whitesmoke),
-        ('ALIGN',      (0,0), (-1,-1), 'CENTER'),
-        ('FONTNAME',   (0,0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE',   (0,0), (-1, 0), 9),
-        ('BOTTOMPADDING', (0,0), (-1,0), 10),
-        ('GRID',       (0,0), (-1,-1), 0.5, colors.black),
-        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.lightgrey]),
-        ('VALIGN',     (0,0), (-1,-1), 'MIDDLE'),
+        ('BACKGROUND',    (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
+        ('TEXTCOLOR',     (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
+        ('FONTSIZE',      (0, 0), (-1,  0), 9),
+        ('BOTTOMPADDING', (0, 0), (-1,  0), 10),
+        ('GRID',          (0, 0), (-1, -1), 0.5, colors.black),
+        ('ROWBACKGROUNDS',(0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        # Légère couleur de fond pour la colonne N° Dossier (col index 1)
+        ('BACKGROUND',    (1, 1), (1, -1), colors.HexColor('#EBF5FB')),
     ]))
     els.append(tbl)
     doc.build(els)
@@ -1689,11 +1527,9 @@ def generate_pdf_report(candidats_data):
 # ══════════════════════════════════════════════════════════════════════════
 
 def hash_pwd(pwd):
-    """Hash du mot de passe avec SHA256."""
     return hashlib.sha256(pwd.encode()).hexdigest()
 
 def init_recruteur():
-    """Initialise le compte recruteur par défaut dans Redis."""
     try:
         redis_client.ping()
         if not redis_client.exists("recruteur:1"):
@@ -1718,13 +1554,11 @@ init_recruteur()
 
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
-    """Retourne la liste des postes disponibles."""
     return jsonify(POSTES), 200
 
 
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
-    """Retourne la grille de sélection pour un poste donné."""
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
@@ -1734,7 +1568,6 @@ def get_grille(poste):
 # ── AUTH ─────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    """Authentification du recruteur."""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({'error': 'JSON manquant'}), 400
@@ -1751,20 +1584,34 @@ def login():
 # ── CANDIDATURE ──────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
-    """Soumission d'une nouvelle candidature."""
+    """
+    Soumission d'une nouvelle candidature.
+
+    ✅ MODIFICATION :
+    - Un même email peut postuler à PLUSIEURS postes distincts.
+    - Le doublon est désormais détecté sur la combinaison (email + poste).
+    - Le champ "numero_dossier" est accepté dans le formulaire et stocké.
+    """
     try:
-        nom       = (request.form.get('nom')       or '').strip()
-        prenom    = (request.form.get('prenom')    or '').strip()
-        email     = (request.form.get('email')     or '').strip().lower()
-        telephone = (request.form.get('telephone') or '').strip()
-        poste     = (request.form.get('poste')     or '').strip()
+        nom            = (request.form.get('nom')            or '').strip()
+        prenom         = (request.form.get('prenom')         or '').strip()
+        email          = (request.form.get('email')          or '').strip().lower()
+        telephone      = (request.form.get('telephone')      or '').strip()
+        poste          = (request.form.get('poste')          or '').strip()
+        # ── NOUVEAU champ N° Dossier ──────────────────────────────────────
+        numero_dossier = (request.form.get('numero_dossier') or '').strip()
 
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
+        # ── MODIFICATION : unicité sur (email, poste) au lieu de (email) seul ──
         for k in redis_client.keys("candidat:*"):
-            if redis_client.hget(k, 'email') == email:
-                return jsonify({'error': 'Un candidat avec cet email existe déjà'}), 409
+            existing = redis_client.hgetall(k)
+            if existing.get('email') == email and existing.get('poste') == poste:
+                return jsonify({
+                    'error': f'Vous avez déjà soumis une candidature pour le poste "{poste}".'
+                             f' Vous pouvez postuler à un autre poste.'
+                }), 409
 
         def save_file(field, suffix):
             f = request.files.get(field)
@@ -1775,7 +1622,7 @@ def postuler():
                 return fn
             return ''
 
-        cv_filename     = save_file('cv', 'cv')
+        cv_filename     = save_file('cv',     'cv')
         lettre_filename = save_file('lettre', 'lettre')
 
         att_filenames = []
@@ -1788,15 +1635,26 @@ def postuler():
 
         token = uuid.uuid4().hex
         redis_client.hset(f"candidat:{token}", mapping={
-            "nom": nom, "prenom": prenom, "email": email, "telephone": telephone,
-            "poste": poste,
-            "cv_filename":            cv_filename,
-            "lettre_filename":        lettre_filename,
-            "attestation_filenames":  json.dumps(att_filenames, ensure_ascii=False),
-            "statut": "en_attente", "note": "", "score": "0",
-            "checklist": "", "flags_eliminatoires": "", "signaux_detectes": "",
-            "score_breakdown": "", "analyse_status": "pending",
-            "date_candidature": datetime.datetime.now().isoformat()
+            "nom":                   nom,
+            "prenom":                prenom,
+            "email":                 email,
+            "telephone":             telephone,
+            "poste":                 poste,
+            # ── NOUVEAU ──────────────────────────────────────────────────
+            "numero_dossier":        numero_dossier,
+            # ─────────────────────────────────────────────────────────────
+            "cv_filename":           cv_filename,
+            "lettre_filename":       lettre_filename,
+            "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
+            "statut":                "en_attente",
+            "note":                  "",
+            "score":                 "0",
+            "checklist":             "",
+            "flags_eliminatoires":   "",
+            "signaux_detectes":      "",
+            "score_breakdown":       "",
+            "analyse_status":        "pending",
+            "date_candidature":      datetime.datetime.now().isoformat()
         })
 
         threading.Thread(
@@ -1806,9 +1664,10 @@ def postuler():
         ).start()
 
         return jsonify({
-            'message': 'Candidature soumise avec succès',
-            'token': token,
-            'analyse': 'Analyse automatique en cours'
+            'message':        'Candidature soumise avec succès',
+            'token':          token,
+            'numero_dossier': numero_dossier,
+            'analyse':        'Analyse automatique en cours'
         }), 201
 
     except Exception as e:
@@ -1819,13 +1678,12 @@ def postuler():
 
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
-    """Retourne le statut d'une candidature (côté candidat)."""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidature introuvable'}), 404
-    hidden = {'cv_filename','lettre_filename','attestation_filenames',
-              'checklist','flags_eliminatoires','signaux_detectes',
-              'analyse_details','score_breakdown'}
+    hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames',
+              'checklist', 'flags_eliminatoires', 'signaux_detectes',
+              'analyse_details', 'score_breakdown'}
     return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
 
 
@@ -1836,7 +1694,6 @@ def get_statut(token):
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
-    """Retourne les statistiques globales des candidatures."""
     keys  = redis_client.keys("candidat:*")
     stats = {"total": len(keys), "en_attente": 0, "retenu": 0,
              "rejete": 0, "entretien": 0, "by_poste": []}
@@ -1856,8 +1713,7 @@ def get_stats():
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
-    """Liste les candidatures avec filtres."""
-    poste_filter  = request.args.get('poste', '')
+    poste_filter  = request.args.get('poste',  '')
     statut_filter = request.args.get('statut', '')
     search        = request.args.get('search', '').lower()
     min_score     = request.args.get('min_score', type=int)
@@ -1866,12 +1722,14 @@ def list_candidats():
     for k in redis_client.keys("candidat:*"):
         c = redis_client.hgetall(k)
         c['id'] = k.split(':', 1)[1]
-        if poste_filter  and c.get('poste')   != poste_filter:  continue
-        if statut_filter and c.get('statut')  != statut_filter: continue
+        if poste_filter  and c.get('poste')  != poste_filter:  continue
+        if statut_filter and c.get('statut') != statut_filter: continue
         if min_score is not None and int(c.get('score', 0)) < min_score: continue
         if search:
-            hay = f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')} {c.get('poste','')}".lower()
-            if search not in hay: continue
+            hay = (f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')} "
+                   f"{c.get('poste','')} {c.get('numero_dossier','')}").lower()
+            if search not in hay:
+                continue
         if c.get('score_breakdown'):
             try:
                 c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
@@ -1885,7 +1743,6 @@ def list_candidats():
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
-    """Retourne le détail complet d'une candidature."""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -1895,8 +1752,8 @@ def get_candidat_detail(token):
             data['attestation_filenames_parsed'] = json.loads(data['attestation_filenames'])
         except Exception:
             data['attestation_filenames_parsed'] = []
-    for field in ['checklist','flags_eliminatoires','signaux_detectes',
-                  'analyse_details','score_breakdown']:
+    for field in ['checklist', 'flags_eliminatoires', 'signaux_detectes',
+                  'analyse_details', 'score_breakdown']:
         if data.get(field):
             try:
                 data[f'{field}_parsed'] = json.loads(data[field])
@@ -1908,20 +1765,21 @@ def get_candidat_detail(token):
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
-    """Met à jour le statut d'une candidature."""
     key = f"candidat:{token}"
     if not redis_client.exists(key):
         return jsonify({'error': 'Candidat introuvable'}), 404
-    data    = request.get_json(silent=True) or {}
-    statut  = data.get('statut', 'en_attente')
-    note    = data.get('note', '')
-    score   = str(min(10, max(0, int(data.get('score', 0)))))
-    if statut not in ('en_attente','retenu','rejete','entretien'):
+    data   = request.get_json(silent=True) or {}
+    statut = data.get('statut', 'en_attente')
+    note   = data.get('note', '')
+    score  = str(min(10, max(0, int(data.get('score', 0)))))
+    if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
         return jsonify({'error': 'Statut invalide'}), 400
     redis_client.hset(key, mapping={
-        "statut": statut, "note": note, "score": score,
+        "statut":        statut,
+        "note":          note,
+        "score":         score,
         "decision_date": datetime.datetime.now().isoformat(),
-        "decided_by": get_jwt_identity()
+        "decided_by":    get_jwt_identity()
     })
     return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
 
@@ -1929,7 +1787,6 @@ def update_candidat(token):
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
-    """Déclenche manuellement une ré-analyse d'une candidature."""
     key  = f"candidat:{token}"
     data = redis_client.hgetall(key)
     if not data:
@@ -1941,8 +1798,8 @@ def trigger_analyze(token):
     if not cv_fn:
         return jsonify({'error': 'CV manquant pour analyse'}), 400
     redis_client.hset(key, mapping={
-        "analyse_status": "pending",
-        "analyse_manual_trigger": datetime.datetime.now().isoformat()
+        "analyse_status":          "pending",
+        "analyse_manual_trigger":  datetime.datetime.now().isoformat()
     })
     threading.Thread(
         target=run_analysis_for_candidat,
@@ -1956,7 +1813,6 @@ def trigger_analyze(token):
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
-    """Exporte les candidatures au format CSV, Excel ou PDF."""
     try:
         keys   = redis_client.keys("candidat:*")
         result = []
@@ -2011,13 +1867,12 @@ def export_candidates(fmt):
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
-    """Génère un aperçu d'email pour un candidat."""
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
     body     = request.get_json(silent=True) or {}
     msg_type = body.get('type', data.get('statut', 'en_attente'))
-    nom_c    = f"{data.get('prenom','')} {data.get('nom','')}".strip()
+    nom_c    = f"{data.get('prenom', '')} {data.get('nom', '')}".strip()
     poste    = data.get('poste', '')
     to_email = data.get('email', '')
     sign     = "\n\nCordialement,\nL'équipe Ressources Humaines\nRecrutBank"
@@ -2052,7 +1907,6 @@ def email_preview(token):
 # ── SERVIR LES FICHIERS ──────────────────────────────────────────────────
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
-    """Sert les fichiers uploadés (CV, lettre, attestations)."""
     safe = secure_filename(filename)
     if not safe or safe != filename:
         return jsonify({'error': 'Nom de fichier invalide'}), 400
@@ -2077,5 +1931,6 @@ if __name__ == '__main__':
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
     print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | 📕 PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
     print(f"🔧 DEBUG: {'ACTIF' if DEBUG_EXTRACTION else 'INACTIF'} (var: DEBUG_EXTRACTION)")
-    print(f"🔍 Logs: Texte normalisé + Mots-clés IT affichés dans analyze_cv_against_grille")
+    print(f"👥 Multi-postes: ✅ (un candidat peut postuler à plusieurs postes)")
+    print(f"🗂️  N° Dossier: ✅ (saisi à la soumission, visible dans tous les exports)")
     app.run(host="0.0.0.0", port=port, debug=False)
