@@ -7,10 +7,10 @@
 #   4. Détection automatique de langue et adaptation des mots-clés
 #   5. Parsing des dates françaises : "Aout 2023 à aujourd'hui", "Novembre 2020 - Août 2023"
 #   6. Les années de STAGE ne comptent PAS comme années d'expérience
-#   7. Logique AND stricte : 1 critère éliminatoire manquant = score 0
+#   7. 🔴 LOGIQUE AND STRICTE : 1 critère éliminatoire manquant = score 0 (TOUS POSTES)
 #   8. Détection des contextes négatifs ("pas d'expérience") exclus du matching
-#   9. 🔴 NOUVEAU : Vérification du CONTEXTE SECTORIEL (banque vs ONG vs autre)
-#  10. 🔴 NOUVEAU : Co-occurrence obligatoire mot-clé + secteur bancaire
+#   9. 🔴 NOUVEAU : Vérification du CONTEXTE SECTORIEL pour TOUS les postes bancaires
+#  10. 🔴 NOUVEAU : Co-occurrence obligatoire mot-clé + secteur requis
 #  11. Rapports SANS COULEURS (rangs et N° Dossier en noir/blanc uniquement)
 #  12. Un candidat peut postuler à PLUSIEURS postes (unicité email+poste)
 #  13. Champ "N° Dossier" saisi à la soumission, présent dans tous les exports
@@ -136,7 +136,7 @@ POSTES = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📋 GRILLE DE PRÉSÉLECTION — fidèle au document Word
+# 📋 GRILLE DE PRÉSÉLECTION — fidèle au document Word (TOUS POSTES)
 # ══════════════════════════════════════════════════════════════════════════
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -281,7 +281,7 @@ GRILLE = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🔍 MAPPING MOTS-CLÉS — matching large mais pertinent
+# 🔍 MAPPING MOTS-CLÉS — matching large mais pertinent (TOUS POSTES)
 # ══════════════════════════════════════════════════════════════════════════
 KEYWORD_MAPPING = {
     # ── Responsable Administration de Crédit ──────────────────────────────
@@ -597,7 +597,7 @@ NEGATIVE_PATTERNS = [
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🏢 SECTEURS NON-BANCAIRES — à exclure pour critères bancaires
+# 🏢 SECTEURS NON-BANCAIRES — à exclure pour critères bancaires/finance
 # ══════════════════════════════════════════════════════════════════════════
 
 NON_BANKING_SECTORS = [
@@ -618,7 +618,7 @@ NON_BANKING_SECTORS = [
     'media', 'presse', 'journalisme',
     'immobilier', 'real estate',
     'tourisme', 'hôtel', 'hotel', 'restauration',
-    'encobat', 'ensen', 'cdo consulting'
+    'encobat', 'ensen', 'cdo consulting', 'ensobat'
 ]
 
 NON_BANKING_PATTERN = re.compile('|'.join(NON_BANKING_SECTORS), re.IGNORECASE)
@@ -641,6 +641,22 @@ BANKING_SECTORS = [
 
 BANKING_PATTERN = re.compile('|'.join(BANKING_SECTORS), re.IGNORECASE)
 
+# ══════════════════════════════════════════════════════════════════════════
+# 🖥️ SECTEURS IT CRITIQUE — requis pour IT Réseau & Infrastructure
+# ══════════════════════════════════════════════════════════════════════════
+
+IT_CRITICAL_SECTORS = [
+    'banque', 'bancaire', 'bank', 'banking',
+    'telco', 'telecom', 'télécom', 'opérateur',
+    'datacenter', 'centre de données', 'data center',
+    'hébergement', 'hosting', 'cloud provider',
+    'faa', 'gouvernement', 'ministère', 'défense',
+    'hôpital', 'santé', 'critical infrastructure',
+    'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam'
+]
+
+IT_CRITICAL_PATTERN = re.compile('|'.join(IT_CRITICAL_SECTORS), re.IGNORECASE)
+
 
 def contains_negative_context(text, keyword):
     """
@@ -650,20 +666,17 @@ def contains_negative_context(text, keyword):
     if not text or not keyword:
         return False
     
-    # Chercher les occurrences du mot-clé
     keyword_pattern = re.compile(re.escape(keyword), re.IGNORECASE)
     matches = list(keyword_pattern.finditer(text))
     
     if not matches:
         return False
     
-    # Pour chaque occurrence, vérifier le contexte sur ~100 caractères autour
     for match in matches:
         start = max(0, match.start() - 100)
         end = min(len(text), match.end() + 100)
         context = text[start:end]
         
-        # Si un pattern négatif est trouvé dans le contexte → contexte négatif
         if NEGATIVE_REGEX.search(context):
             return True
     
@@ -680,117 +693,111 @@ def is_banking_context(text_window):
     
     text_lower = text_window.lower()
     
-    # 1. Vérifier si secteur NON-BANCAIRE est mentionné
     if NON_BANKING_PATTERN.search(text_lower):
         return False
     
-    # 2. Vérifier si secteur BANCAIRE est mentionné
     if BANKING_PATTERN.search(text_lower):
         return True
     
     return False
 
 
-def check_criterion_banking_context(criterion, raw_text):
+def is_it_critical_context(text_window):
     """
-    🔴 VÉRIFICATION STRICTE DU CONTEXTE SECTORIEL
-    Pour les critères bancaires, exige que le mot-clé apparaisse DANS un contexte bancaire.
-    Un candidat avec "gestion du crédit" dans une ONG ≠ expérience bancaire.
+    Vérifie si un bloc de texte contient un environnement IT critique.
+    """
+    if not text_window:
+        return False
+    
+    text_lower = text_window.lower()
+    
+    if IT_CRITICAL_PATTERN.search(text_lower):
+        return True
+    
+    return False
+
+
+def check_criterion_context(criterion, raw_text, poste):
+    """
+    🔴 VÉRIFICATION STRICTE DU CONTEXTE SECTORIEL (TOUS POSTES)
+    Pour les critères sensibles, exige que le mot-clé apparaisse DANS le contexte requis.
     """
     text_lower = raw_text.lower()
     
-    # ── Critère: Expérience bancaire ─────────────────────────────────────
-    if criterion == "Expérience bancaire":
-        # Chercher les termes bancaires dans le texte
-        banking_matches = list(BANKING_PATTERN.finditer(text_lower))
-        
-        if not banking_matches:
-            return False  # Aucun terme bancaire trouvé
-        
-        # Pour chaque mention bancaire, vérifier qu'elle est associée à une expérience
-        experience_terms = ['expérience', 'poste', 'fonction', 'responsable', 'chargé', 
-                          'analyste', 'gestionnaire', 'directeur', 'chef', 'occupé',
-                          'travaillé', 'employé', 'recruté', 'engagement']
-        
-        for match in banking_matches:
-            idx = match.start()
-            # Fenêtre de 400 caractères autour de la mention bancaire
-            window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
-            window_lower = window.lower()
-            
-            # Vérifier si un terme d'expérience est présent dans la fenêtre
-            if any(exp in window_lower for exp in experience_terms):
-                # Vérifier que ce n'est pas dans un contexte non-bancaire
-                if not NON_BANKING_PATTERN.search(window_lower):
-                    return True
-        
-        return False
+    # ── POSTES BANCAIRES (Crédit, Finance, Risk) ─────────────────────────
+    banking_posts = [
+        "Responsable Administration de Crédit",
+        "Analyste Crédit CCB",
+        "Senior Finance Officer",
+        "Market Risk Officer"
+    ]
     
-    # ── Critère: Minimum 3 ans en crédit / risque ────────────────────────
-    if criterion == "Minimum 3 ans en crédit / risque (hors stage)":
-        # Crédit/risque DOIT être associé à contexte bancaire
-        credit_terms = ['crédit', 'risque', 'credit', 'risk', 'credit risk', 'risque de crédit']
+    if poste in banking_posts:
+        banking_criteria = [
+            "Expérience bancaire",
+            "Minimum 3 ans en crédit / risque (hors stage)",
+            "Exposition aux garanties ou conformité",
+            "Minimum 3 ans institution financière (hors stage)",
+            "Minimum 3 ans département finance (hors stage)",
+            "Expérience en analyse crédit",
+            "Capacité à lire des états financiers",
+            "Base en risques de marché",
+            "Compétences quantitatives",
+            "Exposition à FX / taux / liquidité",
+            "Expérience en reporting financier structuré",
+            "Exposition aux états financiers"
+        ]
         
-        for credit in credit_terms:
-            if credit in text_lower:
-                idx = text_lower.find(credit)
-                # Fenêtre large de 500 caractères
+        if criterion in banking_criteria:
+            banking_matches = list(BANKING_PATTERN.finditer(text_lower))
+            
+            if not banking_matches:
+                return False
+            
+            for match in banking_matches:
+                idx = match.start()
                 window = raw_text[max(0, idx-500): min(len(raw_text), idx+500)]
                 window_lower = window.lower()
                 
-                # Doit avoir contexte bancaire ET pas de contexte non-bancaire dominant
-                has_banking = BANKING_PATTERN.search(window_lower)
-                has_non_banking = NON_BANKING_PATTERN.search(window_lower)
+                if NON_BANKING_PATTERN.search(window_lower):
+                    continue
                 
-                # Si contexte bancaire présent ET non-bancaire absent → valide
-                if has_banking and not has_non_banking:
-                    return True
-        
-        return False
-    
-    # ── Critère: Exposition aux garanties ou conformité ──────────────────
-    if criterion == "Exposition aux garanties ou conformité":
-        guarantee_terms = ['garantie', 'nantissement', 'hypothèque', 'sûreté', 'collatéral',
-                          'garanties', 'surete', 'suretes', 'collateral']
-        compliance_terms = ['conformité', 'compliance', 'cobac', 'bceao', 'réglementation bancaire',
-                          'conformite', 'reglementation bancaire', 'commission bancaire']
-        
-        all_terms = guarantee_terms + compliance_terms
-        
-        for term in all_terms:
-            if term in text_lower:
-                idx = text_lower.find(term)
-                window = raw_text[max(0, idx-350): min(len(raw_text), idx+350)]
-                window_lower = window.lower()
-                
-                # Pour garanties/conformité, exiger contexte bancaire ou réglementaire bancaire
-                has_banking = BANKING_PATTERN.search(window_lower)
-                has_cobac_bceao = 'cobac' in window_lower or 'bceao' in window_lower or 'commission bancaire' in window_lower
-                has_non_banking = NON_BANKING_PATTERN.search(window_lower)
-                
-                # Valide si: (bancaire OU cobac/bceao) ET pas non-bancaire dominant
-                if (has_banking or has_cobac_bceao) and not has_non_banking:
-                    return True
-        
-        return False
-    
-    # ── Critère: Minimum 3 ans institution financière ────────────────────
-    if criterion in ["Minimum 3 ans institution financière (hors stage)", 
-                     "Minimum 3 ans département finance (hors stage)"]:
-        banking_matches = list(BANKING_PATTERN.finditer(text_lower))
-        
-        if not banking_matches:
-            return False
-        
-        for match in banking_matches:
-            idx = match.start()
-            window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
-            if not NON_BANKING_PATTERN.search(window.lower()):
                 return True
-        
-        return False
+            
+            return False
     
-    # ── Pour les autres critères, comportement normal ────────────────────
+    # ── Archiviste (Administration Crédit) ───────────────────────────────
+    if poste == "Archiviste (Administration Crédit)":
+        if criterion in ["Expérience en banque ou juridique"]:
+            banking_matches = list(BANKING_PATTERN.finditer(text_lower))
+            legal_terms = ['juridique', 'legal', 'law', 'droit', 'notaire', 'cabinet']
+            
+            if banking_matches:
+                for match in banking_matches:
+                    idx = match.start()
+                    window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
+                    if not NON_BANKING_PATTERN.search(window.lower()):
+                        return True
+            
+            for legal in legal_terms:
+                if legal in text_lower:
+                    idx = text_lower.find(legal)
+                    window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
+                    if any(t in window.lower() for t in ['contrat', 'garantie', 'documentation', 'archive']):
+                        return True
+            
+            return False
+    
+    # ── IT Réseau & Infrastructure ───────────────────────────────────────
+    if poste == "IT Réseau & Infrastructure":
+        if criterion == "Exposition à environnement critique":
+            critical_matches = list(IT_CRITICAL_PATTERN.finditer(text_lower))
+            
+            if critical_matches:
+                return True
+            
+            return False
+    
     return True
 
 
@@ -1112,59 +1119,42 @@ def extract_duration_years_from_block(block_text):
     return 0.0
 
 
-def compute_real_experience_years(full_raw_text, domain_keywords=None):
-    blocks = split_into_jobs(full_raw_text)
-    total_years = 0.0
-    for block in blocks:
-        if is_stage_block(block):
-            continue
-        if domain_keywords:
-            # Exclure les blocs avec contexte négatif
-            if any(contains_negative_context(block, kw) for kw in domain_keywords):
-                continue
-            norm_block, _ = normalize_for_matching(block)
-            if not any(kw in norm_block and not contains_negative_context(block, kw) 
-                      for kw in domain_keywords):
-                continue
-        duration = extract_duration_years_from_block(block)
-        if duration > 0:
-            total_years += duration
-    return round(total_years, 1)
-
-
-def has_experience_years(full_raw_text, min_years, domain_keywords=None):
-    total = compute_real_experience_years(full_raw_text, domain_keywords)
-    print(f"    [EXP] Années réelles: {total} (min requis: {min_years})")
-    return total >= min_years
-
-
-def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None):
+def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     """
-    Calcul STRICT des années d'expérience :
-    - Exclut les stages (déjà fait)
+    Calcul STRICT des années d'expérience (TOUS POSTES) :
+    - Exclut les stages
     - Exclut les mentions dans un contexte négatif
-    - Exclut les expériences hors secteur bancaire pour critères bancaires
+    - Exclut les expériences hors secteur requis pour postes bancaires/IT
     - Calcule précisément les durées avec dates françaises
     - Retourne True SEULEMENT si total >= min_years
     """
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
     
+    banking_posts = [
+        "Responsable Administration de Crédit",
+        "Analyste Crédit CCB",
+        "Senior Finance Officer",
+        "Market Risk Officer"
+    ]
+    
     for block in blocks:
-        # Exclure les stages
         if is_stage_block(block):
             continue
         
-        # 🔴 EXCLURE les blocs dans contexte NON-BANCAIRE pour critères bancaires
-        if NON_BANKING_PATTERN.search(block.lower()):
-            print(f"    [EXP-] Bloc exclu (secteur non-bancaire): {block[:100]}...")
-            continue
-            
-        # Exclure les blocs avec contexte négatif sur les mots-clés du domaine
+        # 🔴 EXCLURE les blocs hors secteur requis
+        if poste in banking_posts:
+            if NON_BANKING_PATTERN.search(block.lower()):
+                print(f"    [EXP-] Bloc exclu (secteur non-bancaire): {block[:100]}...")
+                continue
+        elif poste == "IT Réseau & Infrastructure":
+            if not IT_CRITICAL_PATTERN.search(block.lower()):
+                print(f"    [EXP-] Bloc exclu (pas environnement IT critique): {block[:100]}...")
+                continue
+        
         if domain_keywords:
             if any(contains_negative_context(block, kw) for kw in domain_keywords):
                 continue
-            # Vérifier que le bloc contient AU MOINS UN mot-clé du domaine (positif)
             norm_block, _ = normalize_for_matching(block)
             if not any(kw in norm_block and not contains_negative_context(block, kw) 
                       for kw in domain_keywords):
@@ -1213,13 +1203,13 @@ EXP_MIN_YEARS_MAP = {
 }
 
 
-def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None):
+def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
     """
-    Vérification STRICTE d'un critère :
-    - Le critère doit être mentionné POSITIVEMENT quelque part dans les documents
-    - Les contextes négatifs ("pas d'expérience") sont exclus
-    - 🔴 NOUVEAU : Les contextes non-bancaires sont exclus pour critères bancaires
-    - Pour les critères EXP_*, le calcul d'années doit être exact et >= au minimum requis
+    Vérification STRICTE d'un critère (TOUS POSTES) :
+    - Le critère doit être mentionné POSITIVEMENT
+    - Les contextes négatifs sont exclus
+    - 🔴 Les contextes hors secteur requis sont exclus
+    - Pour les critères EXP_*, calcul d'années exact >= minimum requis
     """
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1233,22 +1223,13 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
         domain_kws = DOMAIN_KEYWORDS_MAP.get(marker, [])
         domain_kws_n = [normalize_for_matching(k)[0] for k in domain_kws]
         
-        # Calcul STRICT des années d'expérience (hors stage, hors contexte négatif, hors non-bancaire)
-        found = has_experience_years_strict(raw_full_text, min_years, domain_kws_n)
+        found = has_experience_years_strict(raw_full_text, min_years, domain_kws_n, poste)
         return found, 1.0 if found else 0.0, ([marker] if found else [])
 
-    # ── 🔴 VÉRIFICATION CONTEXTE BANCAIRE pour critères sensibles ─────────
-    banking_criteria = [
-        "Expérience bancaire",
-        "Minimum 3 ans en crédit / risque (hors stage)",
-        "Exposition aux garanties ou conformité",
-        "Minimum 3 ans institution financière (hors stage)",
-        "Minimum 3 ans département finance (hors stage)"
-    ]
-    
-    if criterion in banking_criteria:
-        if not check_criterion_banking_context(criterion, raw_full_text):
-            print(f"    [CTX-] {criterion}: Échec contexte bancaire")
+    # ── 🔴 VÉRIFICATION CONTEXTE SECTORIEL pour critères sensibles ─────────
+    if poste:
+        if not check_criterion_context(criterion, raw_full_text, poste):
+            print(f"    [CTX-] {criterion}: Échec contexte sectoriel pour {poste}")
             return False, 0.0, []
 
     # ── Gestion des critères standards (matching texte) ───────────────────
@@ -1259,35 +1240,29 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
     for kw in keywords:
         kw_clean, kw_tokens = normalize_for_matching(kw)
         
-        # 1. Vérifier contexte négatif d'abord → si négatif, on ignore ce mot-clé
         if contains_negative_context(raw_full_text, kw):
             continue
             
-        # 2. Matching exact
         if kw_clean in text_clean:
             found_kws.append(kw)
             best_score = max(best_score, 1.0)
             continue
             
-        # 3. Matching fuzzy (seulement si pas de contexte négatif)
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 90:  # Seuil relevé pour plus de rigueur
-                # Double vérification contexte négatif sur le match fuzzy
+            if ratio >= 90:
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
                     best_score = max(best_score, ratio / 100)
                     continue
                     
-        # 4. Matching par tokens
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(2, len(kw_tokens) * 0.8):  # Seuil à 80%
+            if len(common) >= max(2, len(kw_tokens) * 0.8):
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
 
-    # 🔴 LOGIQUE STRICTE : seuil à 0.75 minimum pour valider un critère
     return best_score >= 0.75, round(best_score, 2), found_kws
 
 
@@ -1330,14 +1305,13 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     detected_lang = detect_language(cv_text[:500]) if cv_text else None
 
     print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
-    print(f"🔤 Texte normalisé (extrait): {normalized[:500]}")
 
     if DEBUG_EXTRACTION:
         print(f"\n{'='*70}\n🔍 DEBUG: {poste}")
         print(f"📄 CV extrait ({len(cv_text)} chars):\n{cv_text[:1200]}")
         print(f"\n🎯 Critères éliminatoires:")
         for crit in grille['eliminatoire']:
-            ok, conf, found = check_criterion_match_advanced(crit, normalized, raw_full)
+            ok, conf, found = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
             print(f"   {'✅' if ok else '❌'} {crit} (conf: {conf:.0%}) → {found}")
         print(f"{'='*70}\n")
 
@@ -1362,23 +1336,21 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         }
     }
 
-    # ── 🔴 BLOC 1 : Éliminatoires (AND STRICT ABSOLU) ─────────────────────
+    # ── 🔴 BLOC 1 : Éliminatoires (AND STRICT ABSOLU - TOUS POSTES) ──────
     eliminatoire_failed = False
     
     for i, crit in enumerate(grille['eliminatoire']):
         key = f"elim_{i}"
         
-        # Adaptation langue si nécessaire
         original_keywords = None
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
             KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
             
         is_present, confidence, found_kws = check_criterion_match_advanced(
-            crit, normalized, raw_full
+            crit, normalized, raw_full, poste=poste
         )
         
-        # Restaurer keywords originaux
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
             
@@ -1393,9 +1365,9 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'found': False, 
                 'confidence': confidence,
                 'language': detected_lang,
-                'status': 'ÉLIMINATOIRE — critère requis NON mentionné positivement',
+                'status': 'ÉLIMINATOIRE — critère requis NON vérifié',
                 'keywords_searched': KEYWORD_MAPPING.get(crit, [])[:5],
-                'reason': 'Contexte bancaire non vérifié' if crit in ['Expérience bancaire', 'Minimum 3 ans en crédit / risque (hors stage)', 'Exposition aux garanties ou conformité'] else 'Critère non trouvé'
+                'reason': 'Contexte sectoriel non vérifié' if crit in grille['eliminatoire'] else 'Critère non trouvé'
             }
         else:
             details['matching_details'][crit] = {
@@ -1428,7 +1400,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'bloc3_points': 0,
                 'total_raw_points': 0,
                 'score_final': 0,
-                'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) non vérifié(s) positivement",
+                'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) non vérifié(s)",
                 'documents_analyses': details['documents_analyses']
             }
         }
@@ -1441,7 +1413,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             original_keywords = KEYWORD_MAPPING.get(crit, [])
             KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
         is_present, confidence, found_kws = check_criterion_match_advanced(
-            crit, normalized, raw_full
+            crit, normalized, raw_full, poste=poste
         )
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
@@ -1462,7 +1434,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             original_keywords = KEYWORD_MAPPING.get(crit, [])
             KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
         is_present, confidence, found_kws = check_criterion_match_advanced(
-            crit, normalized, raw_full
+            crit, normalized, raw_full, poste=poste
         )
         if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
@@ -1479,7 +1451,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     # ── Points d'attention ────────────────────────────────────────────────
     for i, crit in enumerate(grille['points_attention']):
         key = f"attn_{i}"
-        is_present, _, _ = check_criterion_match_advanced(crit, normalized, raw_full)
+        is_present, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         checklist[key] = is_present
         if is_present:
             details['alertes_attention'].append(f"⚠️ Attention: {crit}")
@@ -1624,11 +1596,11 @@ def generate_ranking_for_poste(poste, candidats_data):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📊 EXPORT EXCEL — SANS COULEURS (rangs et N° Dossier en noir/blanc)
+# 📊 EXPORT EXCEL — SANS COULEURS
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel des candidats avec colonne N° Dossier - SANS COULEURS."""
+    """Génère un rapport Excel des candidats - SANS COULEURS."""
     if not OPENPYXL_AVAILABLE:
         return None
 
@@ -1647,9 +1619,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
         )
         ws = wb.create_sheet(title=poste[:20])
 
-        # ── STYLE NEUTRE : pas de couleurs ───────────────────────────────
-        hfill  = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")  # Blanc
-        hfont  = Font(color="000000", bold=True, size=11)  # Noir
+        hfill  = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        hfont  = Font(color="000000", bold=True, size=11)
         border = Border(
             left=Side(style='thin'),  right=Side(style='thin'),
             top=Side(style='thin'),   bottom=Side(style='thin')
@@ -1658,12 +1629,11 @@ def generate_excel_report(candidats_data, poste_filter=None):
         ws.merge_cells('A1:L1')
         c = ws['A1']
         c.value = f"CLASSEMENT — {poste}"
-        c.font  = Font(bold=True, size=14, color="000000")  # Noir au lieu de bleu
+        c.font  = Font(bold=True, size=14, color="000000")
         c.alignment = Alignment(horizontal='center', vertical='center')
-        c.fill  = hfill  # Blanc
+        c.fill  = hfill
         ws.row_dimensions[1].height = 30
 
-        # ── En-têtes de colonnes ─────────────────────────────────────────
         headers = [
             'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
             'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
@@ -1700,10 +1670,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell        = ws.cell(row=row_i, column=col, value=val)
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                # 🔴 AUCUNE COULEUR appliquée aux rangs ni aux N° Dossier
-                # Toutes les cellules restent en noir sur blanc
 
-        # Largeurs colonnes
         col_widths = [8, 20, 35, 35, 20, 28, 28, 35, 20, 20, 15, 35]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
@@ -1717,11 +1684,11 @@ def generate_excel_report(candidats_data, poste_filter=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📄 EXPORT CSV — déjà sans couleurs
+# 📄 EXPORT CSV
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_csv_report(candidats_data):
-    """Génère un rapport CSV des candidats avec colonne N° Dossier."""
+    """Génère un rapport CSV des candidats."""
     out = io.StringIO()
     w   = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL)
 
@@ -1758,7 +1725,7 @@ def generate_csv_report(candidats_data):
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data):
-    """Génère un rapport PDF des candidats avec colonne N° Dossier - SANS COULEURS."""
+    """Génère un rapport PDF des candidats - SANS COULEURS."""
     if not REPORTLAB_AVAILABLE:
         return None
     buf = io.BytesIO()
@@ -1770,7 +1737,7 @@ def generate_pdf_report(candidats_data):
     els.append(Paragraph(
         "Rapport Candidatures — RecrutBank",
         ParagraphStyle('T', parent=sty['Heading1'],
-                       fontSize=16, textColor=colors.black,  # Noir au lieu de bleu
+                       fontSize=16, textColor=colors.black,
                        spaceAfter=20, alignment=TA_CENTER)
     ))
     els.append(Spacer(1, 0.3*cm))
@@ -1780,7 +1747,6 @@ def generate_pdf_report(candidats_data):
     ))
     els.append(Spacer(1, 0.8*cm))
 
-    # ── Données du tableau ───────────────────────────────────────────────
     data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
     for idx, c in enumerate(candidats_data, 1):
         score   = int(c.get('score', 0))
@@ -1796,17 +1762,14 @@ def generate_pdf_report(candidats_data):
             get_recommandation_from_score(score)
         ])
 
-    # ── Tableau SANS COULEURS de fond ────────────────────────────────────
     tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
     tbl.setStyle(TableStyle([
-        # 🔴 En-tête : texte noir, pas de fond coloré
         ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
         ('FONTSIZE',      (0, 0), (-1,  0), 9),
         ('BOTTOMPADDING', (0, 0), (-1,  0), 10),
-        ('GRID',          (0, 0), (-1, -1), 0.5, colors.black),  # Garder les bordures
+        ('GRID',          (0, 0), (-1, -1), 0.5, colors.black),
         ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-        # 🔴 AUCUNE couleur de fond : ni en-tête, ni lignes, ni colonnes spécifiques
     ]))
     els.append(tbl)
     doc.build(els)
@@ -1876,12 +1839,6 @@ def login():
 # ── CANDIDATURE ──────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
-    """
-    Soumission d'une nouvelle candidature.
-    - Un même email peut postuler à PLUSIEURS postes distincts.
-    - Le doublon est désormais détecté sur la combinaison (email + poste).
-    - Le champ "numero_dossier" est accepté dans le formulaire et stocké.
-    """
     try:
         nom            = (request.form.get('nom')            or '').strip()
         prenom         = (request.form.get('prenom')         or '').strip()
@@ -1893,13 +1850,11 @@ def postuler():
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
-        # Unicite sur (email, poste)
         for k in redis_client.keys("candidat:*"):
             existing = redis_client.hgetall(k)
             if existing.get('email') == email and existing.get('poste') == poste:
                 return jsonify({
                     'error': f'Vous avez déjà soumis une candidature pour le poste "{poste}".'
-                             f' Vous pouvez postuler à un autre poste.'
                 }), 409
 
         def save_file(field, suffix):
@@ -1917,7 +1872,7 @@ def postuler():
         att_filenames = []
         for f in request.files.getlist('attestation'):
             if f and f.filename and allowed_file(f.filename):
-                ext = f.filename.rsplit('.', 1)[-1][-1].lower()
+                ext = f.filename.rsplit('.', 1)[-1].lower()
                 fn  = f"{uuid.uuid4().hex}_attestation.{ext}"
                 f.save(os.path.join(UPLOAD_FOLDER, fn))
                 att_filenames.append(fn)
@@ -2211,10 +2166,11 @@ if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     print(f"🚀 RecrutBank démarré sur le port {port}")
     print(f"📋 Grille: {len(GRILLE)} postes")
-    print(f"⚠️  Élimination STRICTE: 1 critère manquant → score 0")
+    print(f"⚠️  Élimination STRICTE: 1 critère manquant → score 0 (TOUS POSTES)")
     print(f"🚫 Stages EXCLUS du calcul des années d'expérience")
-    print(f"🏦 Contexte bancaire OBLIGATOIRE pour critères bancaires")
-    print(f"🚫 Secteurs non-bancaires (ONG, holding) EXCLUS pour crédit/risque")
+    print(f"🏦 Contexte bancaire OBLIGATOIRE pour postes bancaires")
+    print(f"🖥️ Environnement IT critique requis pour IT Réseau")
+    print(f"🚫 Secteurs non-bancaires (ONG, holding) EXCLUS")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
