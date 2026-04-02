@@ -6,6 +6,9 @@
 #   3. ✅ PDF generation optimale
 #   4. ✅ Gestion des erreurs améliorée
 #   5. ✅ Noms de fichiers propres et explicites
+#   6. ✅ COULEURS dans colonne Recommandation (Vert/Jaune/Rouge)
+#   7. ✅ Senior Finance Officer: "ou en cabinet d'audit" ajouté
+#   8. ✅ Toutes fonctionnalités strictes conservées
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -199,7 +202,7 @@ GRILLE = {
             "Expérience en reporting financier structuré",
             "Exposition aux états financiers",
             "Interaction avec auditeurs",
-            "Minimum 3 ans département finance (hors stage)"
+            "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)"
         ],
         "a_verifier": [
             "Production états financiers",
@@ -410,7 +413,7 @@ KEYWORD_MAPPING = {
         "audit externe", "commissariat aux comptes", "revue externe",
         "external auditor", "statutory audit"
     ],
-    "Minimum 3 ans département finance (hors stage)": [
+    "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)": [
         "EXP_FINANCE_3ANS"
     ],
     "Production états financiers": [
@@ -730,7 +733,7 @@ def check_criterion_context(criterion, raw_text, poste):
             "Minimum 3 ans en crédit / risque (hors stage)",
             "Exposition aux garanties ou conformité",
             "Minimum 3 ans institution financière (hors stage)",
-            "Minimum 3 ans département finance (hors stage)",
+            "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)",
             "Expérience en analyse crédit",
             "Capacité à lire des états financiers",
             "Base en risques de marché",
@@ -1553,6 +1556,22 @@ def get_recommandation_from_score(score):
     return "❌ Rejet"
 
 
+def get_recommandation_color(score):
+    """
+    Retourne la couleur pour la recommandation selon le score.
+    - 8-10: Vert (Entretien prioritaire)
+    - 6-7: Orange/Jaune (Entretien si besoin)
+    - <6: Rouge (Rejet)
+    """
+    s = int(score)
+    if s >= 8:
+        return "00FF00"  # Vert
+    elif s >= 6:
+        return "FFA500"  # Orange
+    else:
+        return "FF0000"  # Rouge
+
+
 def calculate_ranking_score(c, poste):
     sb = c.get('score_breakdown_parsed', {})
     if sb.get('bloc1_eliminatoire'):
@@ -1588,7 +1607,7 @@ def generate_ranking_for_poste(poste, candidats_data):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📊 EXPORT EXCEL — CORRIGÉ (GLOBAL + PAR POSTE)
+# 📊 EXPORT EXCEL — CORRIGÉ (GLOBAL + PAR POSTE + COULEURS RECOMMANDATION)
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
@@ -1596,6 +1615,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
     Génère un rapport Excel des candidats.
     - Si poste_filter est défini : rapport pour un seul poste
     - Sinon : rapport global avec un onglet par poste
+    - ✅ COULEURS dans colonne Recommandation uniquement
     """
     if not OPENPYXL_AVAILABLE:
         return None
@@ -1629,7 +1649,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
             sheet_name = poste[:28] if len(poste) > 31 else poste
             ws = wb.create_sheet(title=sheet_name)
 
-            # Style neutre : pas de couleurs
+            # Style neutre : pas de couleurs (sauf recommandation)
             hfill  = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
             hfont  = Font(color="000000", bold=True, size=11)
             border = Border(
@@ -1684,7 +1704,17 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     cell = ws.cell(row=row_i, column=col, value=val if val is not None else '')
                     cell.border = border
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                    # 🔴 AUCUNE COULEUR : tout en noir/blanc
+                    
+                    # ✅ COULEURS UNIQUEMENT pour la colonne Recommandation (colonne 12)
+                    if col == 12:
+                        rec_color = get_recommandation_color(total)
+                        cell.font = Font(bold=True, color="000000")
+                        if rec_color == "00FF00":  # Vert
+                            cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                        elif rec_color == "FFA500":  # Orange
+                            cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+                        else:  # Rouge
+                            cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
             # ✅ CORRECTION : Largeurs colonnes optimisées pour éviter ###
             col_widths = [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
@@ -1717,7 +1747,7 @@ def generate_csv_report(candidats_data, poste_filter=None):
     headers = [
         'Rang', 'N° Dossier', 'Email', 'Nom', 'Prénom', 'Téléphone',
         'Poste', 'Date candidature', 'Score (/10)', 'Statut', 'Éliminatoire',
-        'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque (0-3)', 'Note'
+        'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque (0-3)', 'Note', 'Recommandation'
     ]
     w.writerow(headers)
     
@@ -1732,6 +1762,8 @@ def generate_csv_report(candidats_data, poste_filter=None):
 
     for idx, c in enumerate(candidats_filtered, 1):
         sb = c.get('score_breakdown_parsed', {})
+        score = int(c.get('score', 0))
+        reco = get_recommandation_from_score(score)
         # ✅ CORRECTION : Convertir toutes les valeurs en string pour éviter les erreurs
         w.writerow([
             str(idx),
@@ -1748,7 +1780,8 @@ def generate_csv_report(candidats_data, poste_filter=None):
             str(sb.get('adequation_experience', 0)),
             str(sb.get('coherence_parcours', 0)),
             str(sb.get('exposition_risque_metier', 0)),
-            str(sb.get('note', '') or '')
+            str(sb.get('note', '') or ''),
+            str(reco)
         ])
     
     out.seek(0)
@@ -1756,7 +1789,7 @@ def generate_csv_report(candidats_data, poste_filter=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📕 EXPORT PDF — SANS COULEURS (par poste OU global)
+# 📕 EXPORT PDF — SANS COULEURS (par poste OU global) + COULEUR RECOMMANDATION
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data, poste_filter=None):
@@ -1764,6 +1797,7 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     Génère un rapport PDF des candidats.
     - Si poste_filter est défini : rapport pour un seul poste
     - Sinon : rapport global avec section par poste
+    - ✅ COULEURS dans colonne Recommandation uniquement
     """
     if not REPORTLAB_AVAILABLE:
         return None
@@ -1823,6 +1857,7 @@ def generate_pdf_report(candidats_data, poste_filter=None):
         for idx, c in enumerate(candidats_poste, 1):
             score = int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
+            reco = get_recommandation_from_score(score)
             data.append([
                 str(idx),
                 num_dos,
@@ -1831,19 +1866,33 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 c.get('telephone', '') or '–',
                 poste,
                 f"{score}/10",
-                get_recommandation_from_score(score)
+                reco
             ])
 
-        # Tableau SANS COULEURS
+        # Tableau avec COULEURS pour Recommandation uniquement
         tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
-        tbl.setStyle(TableStyle([
+        
+        # Style de base
+        tbl_style = [
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 9),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ]))
+        ]
+        
+        # ✅ Ajouter des couleurs pour la colonne Recommandation (index 7)
+        for row_idx in range(1, len(data)):
+            score = int(candidats_poste[row_idx-1].get('score', 0)) if row_idx <= len(candidats_poste) else 0
+            if score >= 8:
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))  # Vert clair
+            elif score >= 6:
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))  # Jaune clair
+            else:
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))  # Rouge clair
+        
+        tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
         els.append(Spacer(1, 0.5*cm))
 
@@ -2278,6 +2327,8 @@ if __name__ == '__main__':
     print(f"📝 Titres: 'CANDIDATURES - [Poste]' / 'RAPPORT GENERAL'")
     print(f"✅ Excel GLOBAL: CORRIGÉ")
     print(f"✅ CSV affichage: CORRIGÉ (UTF-8 BOM + colonnes ajustées)")
+    print(f"🎨 COULEURS Recommandation: VERT (8-10) / ORANGE (6-7) / ROUGE (<6)")
+    print(f"📝 Senior Finance Officer: 'ou en cabinet d'audit' ajouté")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
@@ -2285,5 +2336,5 @@ if __name__ == '__main__':
     print(f"🔧 DEBUG: {'ACTIF' if DEBUG_EXTRACTION else 'INACTIF'} (var: DEBUG_EXTRACTION)")
     print(f"👥 Multi-postes: ✅ (un candidat peut postuler à plusieurs postes)")
     print(f"🗂️  N° Dossier: ✅ (saisi à la soumission, visible dans tous les exports)")
-    print(f"🎨 Rapports: SANS COULEURS (rangs et N° Dossier en noir/blanc)")
+    print(f"🎨 Rapports: COULEURS UNIQUEMENT sur colonne Recommandation")
     app.run(host="0.0.0.0", port=port, debug=False)
