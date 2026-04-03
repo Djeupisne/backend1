@@ -1,14 +1,12 @@
-# server.py - Backend Flask pour RecrutBank avec analyse automatique STRICTE
+# server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
-# ✅ CORRECTIONS APPLIQUÉES :
-#   1. ✅ Market Risk: "Pas de compétences quantitatives" SUPPRIMÉ (modif Word)
-#   2. ✅ Support BILINGUE Français/Anglais pour TOUS les critères
-#   3. ✅ Excel GLOBAL fonctionne (tous les postes)
-#   4. ✅ CSV affichage correct (UTF-8 BOM + colonnes ajustées)
-#   5. ✅ COULEURS dans colonne Recommandation uniquement (Vert/Jaune/Rouge)
-#   6. ✅ Senior Finance Officer: "ou en cabinet d'audit" inclus
-#   7. ✅ "rapport" = "reporting" (synonymes ajoutés)
-#   8. ✅ Toutes fonctionnalités strictes conservées
+# ✅ CORRECTIONS MAJEURES :
+#   1. ✅ Extraction texte ROBUSTE (tables, formatages complexes)
+#   2. ✅ Distinction BANQUE COMMERCIALE vs MICROFINANCE vs HORS SECTEUR
+#   3. ✅ Vérification COHÉRENCE CV vs Lettre de motivation
+#   4. ✅ Validation emploi ACTUEL dans secteur financier
+#   5. ✅ Critères EXACTS selon grille Word (Market Risk : compétences techniques requises)
+#   6. ✅ Système "intelligent" qui raisonne comme un recruteur humain
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -114,7 +112,7 @@ os.makedirs(UPLOAD_FOLDER,  exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB pour gros uploads
 
 def allowed_file(filename):
     """Vérifie si l'extension du fichier est autorisée."""
@@ -131,8 +129,7 @@ POSTES = [
 ]
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📋 GRILLE DE PRÉSÉLECTION — fidèle au document Word (TOUS POSTES)
-# ✅ Market Risk: "Pas de compétences quantitatives" SUPPRIMÉ (modif Word)
+# 📋 GRILLE DE PRÉSÉLECTION — EXACTEMENT selon document Word
 # ══════════════════════════════════════════════════════════════════════════
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -226,6 +223,7 @@ GRILLE = {
     "Market Risk Officer": {
         "eliminatoire": [
             "Base en risques de marché",
+            "Compétences quantitatives",
             "Exposition à FX / taux / liquidité",
             "Minimum 3 ans institution financière (hors stage)"
         ],
@@ -276,7 +274,7 @@ GRILLE = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🔍 MAPPING MOTS-CLÉS — BILINGUE FRANÇAIS/ANGLAIS + "rapport" = "reporting"
+# 🔍 MAPPING MOTS-CLÉS — BILINGUE + SYNONYMES "rapport" = "reporting"
 # ══════════════════════════════════════════════════════════════════════════
 KEYWORD_MAPPING = {
     # ── Responsable Administration de Crédit ──────────────────────────────
@@ -285,7 +283,7 @@ KEYWORD_MAPPING = {
         "banque commerciale", "microfinance", "etablissement financier",
         "institution financiere", "secteur bancaire", "groupe bancaire",
         "filiale bancaire", "bank", "banking", "financial institution",
-        "credit institution", "commercial bank"
+        "credit institution", "commercial bank", "ecobank", "orabank", "uba"
     ],
     "Minimum 3 ans en crédit / risque (hors stage)": [
         "EXP_CREDIT_3ANS"
@@ -420,7 +418,6 @@ KEYWORD_MAPPING = {
         "indicateurs financiers", "etats financiers", "production reporting",
         "financial reporting", "management reporting", "financial dashboard",
         "financial metrics", "performance reporting",
-        # ✅ AJOUT: "rapport" = "reporting"
         "rapport financier", "rapports financiers", "production de rapports",
         "rapport de gestion", "rapport mensuel", "rapport annuel"
     ],
@@ -449,7 +446,6 @@ KEYWORD_MAPPING = {
         "reporting groupe", "reporting consolide", "consolidation groupe",
         "reporting mensuel", "pack de gestion", "group reporting",
         "consolidated reporting", "corporate reporting", "group accounts",
-        # ✅ AJOUT: "rapport" = "reporting"
         "rapport groupe", "rapports consolidés", "rapport de consolidation",
         "rapport corporate", "rapport mensuel groupe"
     ],
@@ -481,13 +477,19 @@ KEYWORD_MAPPING = {
     "Base en risques de marché": [
         "risque marche", "market risk", "risques de marche",
         "gestion risques de marche", "risque financier", "trading risk",
-        "market risk management", "trading risks", "financial risk"
+        "market risk management", "trading risks", "financial risk",
+        "risque de marché", "risques marché"
+    ],
+    "Compétences quantitatives": [
+        "quantitatif", "quantitative", "mathematiques", "statistiques",
+        "modelisation", "mathematiques financieres", "quantitative analysis",
+        "modeling", "statistics", "mathematical", "quant"
     ],
     "Exposition à FX / taux / liquidité": [
         "fx", "change", "taux", "liquidite", "forex",
         "taux d interet", "risque de liquidite", "risque de change",
         "foreign exchange", "interest rate", "liquidity risk",
-        "fx risk", "rate risk", "funding liquidity"
+        "fx risk", "rate risk", "funding liquidity", "taux de change"
     ],
     "Minimum 3 ans institution financière (hors stage)": [
         "EXP_FIN_3ANS"
@@ -495,7 +497,7 @@ KEYWORD_MAPPING = {
     "Maîtrise VaR / stress testing": [
         "var", "value at risk", "stress testing", "back testing",
         "backtesting", "scenario de stress", "value-at-risk",
-        "stress test", "var model", "risk modeling"
+        "stress test", "var model", "risk modeling", "value à risque"
     ],
     "Analyse des positions": [
         "analyse des positions", "suivi des positions",
@@ -530,10 +532,7 @@ KEYWORD_MAPPING = {
     "Reporting risque": [
         "reporting risque", "rapport de risque", "tableau de bord risque",
         "reporting des risques", "risk reporting", "risk dashboard",
-        "risk metrics", "risk reports",
-        # ✅ AJOUT: "rapport" = "reporting"
-        "rapport risques", "rapports de risques", "rapport risk",
-        "reporting des risques", "suivi des risques"
+        "risk metrics", "risk reports", "rapport risques", "rapports de risques"
     ],
 
     # ── IT Réseau & Infrastructure ────────────────────────────────────────
@@ -617,6 +616,42 @@ KEYWORD_MAPPING = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
+# 🏦 BANQUES COMMERCIALES vs MICROFINANCE vs HORS SECTEUR
+# ══════════════════════════════════════════════════════════════════════════
+
+COMMERCIAL_BANKS = [
+    'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 'bicec',
+    'société générale', 'standard chartered', 'nsia banque', 'commercial bank',
+    'banque commerciale', 'investment bank', 'banque d affaires',
+    'credit institution', 'financial institution', 'banque'
+]
+
+MICROFINANCE = [
+    'microfinance', 'micro-finance', 'mfb', 'finadev', 'ucec',
+    'caisse d epargne', 'credit union', 'cooperative financiere'
+]
+
+NON_FINANCIAL_SECTORS = [
+    'logistics', 'logistique', 'transport', 'shipping',
+    'retail', 'commerce', 'distribution', 'vente',
+    'manufacturing', 'industrie', 'construction', 'btp',
+    'agriculture', 'farming', 'agroalimentaire',
+    'telecom', 'télécom', 'communication',
+    'health', 'santé', 'hôpital', 'clinique', 'medical',
+    'education', 'enseignement', 'école', 'université',
+    'ngo', 'ong', 'association', 'humanitaire',
+    'government', 'gouvernement', 'administration publique',
+    'media', 'presse', 'journalisme',
+    'tourism', 'tourisme', 'hôtel', 'hotel', 'restauration',
+    'real estate', 'immobilier',
+    'energy', 'énergie', 'oil', 'gaz', 'petrole', 'mining'
+]
+
+COMMERCIAL_BANK_PATTERN = re.compile('|'.join(COMMERCIAL_BANKS), re.IGNORECASE)
+MICROFINANCE_PATTERN = re.compile('|'.join(MICROFINANCE), re.IGNORECASE)
+NON_FINANCIAL_PATTERN = re.compile('|'.join(NON_FINANCIAL_SECTORS), re.IGNORECASE)
+
+# ══════════════════════════════════════════════════════════════════════════
 # 🚫 MOTS DÉSIGNANT UN STAGE — les durées adjacentes sont EXCLUES
 # ══════════════════════════════════════════════════════════════════════════
 STAGE_MARKERS = [
@@ -647,255 +682,36 @@ NEGATIVE_PATTERNS = [
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🏢 SECTEURS NON-BANCAIRES — à exclure pour critères bancaires/finance
-# ══════════════════════════════════════════════════════════════════════════
-
-NON_BANKING_SECTORS = [
-    'ong', 'organisation non gouvernementale', 'world vision', 'unicef',
-    'association', 'humanitaire', 'aide humanitaire', 'ngo',
-    'holding', 'groupe industriel', 'industrie', 'manufacturing',
-    'administration publique', 'fonction publique', 'ministère',
-    'école', 'université', 'enseignement', 'education',
-    'santé', 'hôpital', 'clinique', 'medical',
-    'commerce', 'retail', 'distribution', 'vente',
-    'agriculture', 'agroalimentaire', 'farming',
-    'transport', 'logistique', 'shipping',
-    'télécom', 'telecom', 'communication',
-    'énergie', 'oil', 'gaz', 'petrole', 'mining',
-    'construction', 'btp', 'batiment', 'travaux publics',
-    'assurance', 'insurance',
-    'cabinet', 'consulting', 'conseil', 'audit externe',
-    'media', 'presse', 'journalisme',
-    'immobilier', 'real estate',
-    'tourisme', 'hôtel', 'hotel', 'restauration',
-    'encobat', 'ensen', 'cdo consulting', 'ensobat'
-]
-
-NON_BANKING_PATTERN = re.compile('|'.join(NON_BANKING_SECTORS), re.IGNORECASE)
-
-# ══════════════════════════════════════════════════════════════════════════
-# 🏦 SECTEURS BANCAIRES — requis pour critères bancaires
-# ══════════════════════════════════════════════════════════════════════════
-
-BANKING_SECTORS = [
-    'banque', 'bancaire', 'bank', 'banking',
-    'établissement de crédit', 'etablissement de credit',
-    'institution financière', 'institution financiere',
-    'microfinance', 'établissement financier', 'etablissement financier',
-    'société financière', 'societe financière', 'societe financiere',
-    'credit institution', 'financial institution',
-    'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
-    'bceao', 'cobac', 'banque centrale', 'banque des etats',
-    'core banking', 'banque commerciale', 'banque d affaires',
-    'financial services', 'investment bank', 'commercial bank'
-]
-
-BANKING_PATTERN = re.compile('|'.join(BANKING_SECTORS), re.IGNORECASE)
-
-# ══════════════════════════════════════════════════════════════════════════
-# 🖥️ SECTEURS IT CRITIQUE — requis pour IT Réseau & Infrastructure
-# ══════════════════════════════════════════════════════════════════════════
-
-IT_CRITICAL_SECTORS = [
-    'banque', 'bancaire', 'bank', 'banking',
-    'telco', 'telecom', 'télécom', 'opérateur',
-    'datacenter', 'centre de données', 'data center',
-    'hébergement', 'hosting', 'cloud provider',
-    'faa', 'gouvernement', 'ministère', 'défense',
-    'hôpital', 'santé', 'critical infrastructure',
-    'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
-    'financial services', 'telecommunications', 'critical systems'
-]
-
-IT_CRITICAL_PATTERN = re.compile('|'.join(IT_CRITICAL_SECTORS), re.IGNORECASE)
-
-
-def contains_negative_context(text, keyword):
-    """
-    Vérifie si le texte contient le mot-clé MAIS dans un contexte négatif.
-    Retourne True si le contexte est négatif (donc le critère NE compte PAS).
-    """
-    if not text or not keyword:
-        return False
-    
-    keyword_pattern = re.compile(re.escape(keyword), re.IGNORECASE)
-    matches = list(keyword_pattern.finditer(text))
-    
-    if not matches:
-        return False
-    
-    for match in matches:
-        start = max(0, match.start() - 100)
-        end = min(len(text), match.end() + 100)
-        context = text[start:end]
-        
-        if NEGATIVE_REGEX.search(context):
-            return True
-    
-    return False
-
-
-def is_banking_context(text_window):
-    """
-    Vérifie si un bloc de texte contient un contexte bancaire.
-    Retourne True si le contexte est bancaire, False si non-bancaire ou neutre.
-    """
-    if not text_window:
-        return False
-    
-    text_lower = text_window.lower()
-    
-    if NON_BANKING_PATTERN.search(text_lower):
-        return False
-    
-    if BANKING_PATTERN.search(text_lower):
-        return True
-    
-    return False
-
-
-def is_it_critical_context(text_window):
-    """
-    Vérifie si un bloc de texte contient un environnement IT critique.
-    """
-    if not text_window:
-        return False
-    
-    text_lower = text_window.lower()
-    
-    if IT_CRITICAL_PATTERN.search(text_lower):
-        return True
-    
-    return False
-
-
-def check_criterion_context(criterion, raw_text, poste):
-    """
-    🔴 VÉRIFICATION STRICTE DU CONTEXTE SECTORIEL (TOUS POSTES)
-    Pour les critères sensibles, exige que le mot-clé apparaisse DANS le contexte requis.
-    """
-    text_lower = raw_text.lower()
-    
-    # ── POSTES BANCAIRES (Crédit, Finance, Risk) ─────────────────────────
-    banking_posts = [
-        "Responsable Administration de Crédit",
-        "Analyste Crédit CCB",
-        "Senior Finance Officer",
-        "Market Risk Officer"
-    ]
-    
-    if poste in banking_posts:
-        banking_criteria = [
-            "Expérience bancaire",
-            "Minimum 3 ans en crédit / risque (hors stage)",
-            "Exposition aux garanties ou conformité",
-            "Minimum 3 ans institution financière (hors stage)",
-            "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)",
-            "Expérience en analyse crédit",
-            "Capacité à lire des états financiers",
-            "Base en risques de marché",
-            "Exposition à FX / taux / liquidité",
-            "Expérience en reporting financier structuré",
-            "Exposition aux états financiers"
-        ]
-        
-        if criterion in banking_criteria:
-            banking_matches = list(BANKING_PATTERN.finditer(text_lower))
-            
-            if not banking_matches:
-                return False
-            
-            for match in banking_matches:
-                idx = match.start()
-                window = raw_text[max(0, idx-500): min(len(raw_text), idx+500)]
-                window_lower = window.lower()
-                
-                if NON_BANKING_PATTERN.search(window_lower):
-                    continue
-                
-                return True
-            
-            return False
-    
-    # ── Archiviste (Administration Crédit) ───────────────────────────────
-    if poste == "Archiviste (Administration Crédit)":
-        if criterion in ["Expérience en banque ou juridique"]:
-            banking_matches = list(BANKING_PATTERN.finditer(text_lower))
-            legal_terms = ['juridique', 'legal', 'law', 'droit', 'notaire', 'cabinet']
-            
-            if banking_matches:
-                for match in banking_matches:
-                    idx = match.start()
-                    window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
-                    if not NON_BANKING_PATTERN.search(window.lower()):
-                        return True
-            
-            for legal in legal_terms:
-                if legal in text_lower:
-                    idx = text_lower.find(legal)
-                    window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
-                    if any(t in window.lower() for t in ['contrat', 'garantie', 'documentation', 'archive']):
-                        return True
-            
-            return False
-    
-    # ── IT Réseau & Infrastructure ───────────────────────────────────────
-    if poste == "IT Réseau & Infrastructure":
-        if criterion == "Exposition à environnement critique":
-            critical_matches = list(IT_CRITICAL_PATTERN.finditer(text_lower))
-            
-            if critical_matches:
-                return True
-            
-            return False
-    
-    return True
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 🔤 NORMALISATION TEXTE — Unicode complet
-# ══════════════════════════════════════════════════════════════════════════
-
-_ACCENT_MAP = str.maketrans(
-    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ',
-    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'
-)
-
-def normalize_unicode(text):
-    if not text:
-        return ""
-    text = unicodedata.normalize('NFC', text)
-    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
-    text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
-    return text.strip()
-
-
-def normalize_for_matching(text):
-    if not text:
-        return "", []
-    no_accents = text.lower().translate(_ACCENT_MAP)
-    cleaned = re.sub(r'[^\w\s\-/\.]', ' ', no_accents)
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
-    return cleaned, tokens
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 🔧 EXTRACTION TEXTE — robuste multilingue + fallbacks
+# 🧠 FONCTIONS D'EXTRACTION INTELLIGENTE
 # ══════════════════════════════════════════════════════════════════════════
 
 def extract_text_from_pdf_robust(filepath):
+    """
+    Extraction ROBUSTE depuis PDF - gère tables, colonnes, formatages complexes
+    """
     text = ""
+    
     if PDFPLUMBER_AVAILABLE:
         try:
             with pdfplumber.open(filepath) as pdf:
                 for page in pdf.pages:
+                    # Extraire texte avec tables
+                    tables = page.extract_tables()
+                    if tables:
+                        for table in tables:
+                            for row in table:
+                                if row:
+                                    row_text = ' | '.join([str(cell) if cell else '' for cell in row])
+                                    text += row_text + "\n"
+                    
+                    # Extraire texte normal
                     content = page.extract_text(
                         x_tolerance=3, y_tolerance=3,
                         keep_blank_chars=True, use_text_flow=True
                     )
                     if content:
                         text += content + "\n"
+            
             if text.strip():
                 return normalize_unicode(text.strip())
         except Exception as e:
@@ -929,25 +745,36 @@ def extract_text_from_pdf_robust(filepath):
 
 
 def extract_text_from_docx_robust(filepath, raw_bytes=None):
+    """
+    Extraction ROBUSTE depuis DOCX - gère tables, en-têtes, commentaires
+    """
     if not DOCX_AVAILABLE:
         return ""
     try:
         doc = Document(filepath)
         parts = []
+        
+        # Paragraphes
         for para in doc.paragraphs:
             t = para.text.strip()
             if t:
                 parts.append(t)
+        
+        # Tables
         for table in doc.tables:
             for row in table.rows:
                 cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
                 if cells:
                     parts.append(" | ".join(cells))
+        
+        # En-têtes et pieds de page
         for section in doc.sections:
             for element in (section.header.paragraphs + section.footer.paragraphs):
                 t = element.text.strip()
                 if t:
                     parts.append(t)
+        
+        # Commentaires
         try:
             for comment in doc.comments:
                 t = comment.text.strip()
@@ -955,6 +782,7 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
                     parts.append(f"[Commentaire] {t}")
         except Exception:
             pass
+        
         result = "\n".join(parts).strip()
         return normalize_unicode(result)
     except Exception as e:
@@ -1011,59 +839,308 @@ def extract_text_robust(filepath, filename):
             pass
     return ""
 
+# ══════════════════════════════════════════════════════════════════════════
+# 🧠 FONCTIONS DE VALIDATION INTELLIGENTE
+# ══════════════════════════════════════════════════════════════════════════
+
+def detect_institution_type(text):
+    """
+    Détecte le TYPE d'institution mentionnée dans le texte.
+    Retourne: 'commercial_bank', 'microfinance', 'non_financial', ou 'unknown'
+    """
+    text_lower = text.lower()
+    
+    # Vérifier banque commerciale en premier (priorité)
+    if COMMERCIAL_BANK_PATTERN.search(text_lower):
+        # Mais vérifier si c'est pas microfinance
+        if MICROFINANCE_PATTERN.search(text_lower):
+            return 'microfinance'
+        return 'commercial_bank'
+    
+    # Vérifier microfinance
+    if MICROFINANCE_PATTERN.search(text_lower):
+        return 'microfinance'
+    
+    # Vérifier secteur non financier
+    if NON_FINANCIAL_PATTERN.search(text_lower):
+        return 'non_financial'
+    
+    return 'unknown'
+
+
+def check_current_employment_financial(cv_text):
+    """
+    Vérifie si l'emploi ACTUEL du candidat est dans le secteur financier.
+    Extrait la première expérience (la plus récente) et vérifie le secteur.
+    """
+    # Chercher les patterns de dates récentes
+    current_patterns = [
+        r'(?:depuis|from|since|à nos jours|to present|current|actuel)\s*[:\-]?\s*([^\n]+)',
+        r'(\d{4})\s*[-–]\s*(?:présent|present|now|actuel|nos jours)',
+        r'(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s+\d{4}\s*[-–]\s*(?:présent|present|now|actuel)'
+    ]
+    
+    for pattern in current_patterns:
+        matches = re.findall(pattern, cv_text, re.IGNORECASE)
+        if matches:
+            # Prendre le premier match (emploi le plus récent)
+            context = cv_text[max(0, cv_text.lower().find(matches[0].lower()) - 200): 
+                            cv_text.lower().find(matches[0].lower()) + 200]
+            inst_type = detect_institution_type(context)
+            
+            if inst_type == 'non_financial':
+                return False, "Emploi actuel hors secteur financier"
+            elif inst_type in ['commercial_bank', 'microfinance']:
+                return True, "Emploi actuel dans secteur financier"
+    
+    # Si pas trouvé, vérifier le type d'institution globale
+    inst_type = detect_institution_type(cv_text)
+    if inst_type == 'non_financial':
+        return False, "Secteur non financier détecté"
+    
+    return True, "Secteur financier ou inconnu"
+
+
+def check_cv_letter_consistency(cv_text, letter_text, poste):
+    """
+    Vérifie la COHÉRENCE entre le CV et la lettre de motivation.
+    Retourne: (is_consistent, reason)
+    """
+    if poste == "Market Risk Officer":
+        # Mots-clés techniques Market Risk
+        technical_keywords = [
+            'var', 'value at risk', 'stress testing', 'trading',
+            'alm', 'bâle', 'ficc', 'positions', 'modélisation',
+            'quantitatif', 'quantitative', 'modeling'
+        ]
+        
+        cv_lower = cv_text.lower()
+        letter_lower = letter_text.lower()
+        
+        # Compter les mots-clés techniques dans CV vs Lettre
+        cv_matches = sum(1 for kw in technical_keywords if kw in cv_lower)
+        letter_matches = sum(1 for kw in technical_keywords if kw in letter_lower)
+        
+        # ⚠️ Si beaucoup plus de mots-clés dans la lettre que dans le CV → INCOHÉRENT
+        if letter_matches > 0 and cv_matches == 0:
+            return False, "Claims Market Risk dans lettre mais ABSENTS du CV"
+        
+        if letter_matches > cv_matches * 2 and cv_matches < 2:
+            return False, "Incohérence : mots-clés techniques absents du CV"
+    
+    return True, "Cohérent"
+
+
+def validate_financial_institution_for_market_risk(text):
+    """
+    Pour Market Risk, exige une BANQUE COMMERCIALE (pas microfinance).
+    """
+    text_lower = text.lower()
+    
+    # ✅ Banques commerciales acceptées
+    has_commercial = COMMERCIAL_BANK_PATTERN.search(text_lower)
+    
+    # ⚠️ Microfinance = contexte différent pour market risk
+    has_microfinance = MICROFINANCE_PATTERN.search(text_lower)
+    
+    # ❌ Secteur non financier
+    has_non_financial = NON_FINANCIAL_PATTERN.search(text_lower)
+    
+    if has_non_financial and not has_commercial:
+        return False, "Secteur non financier détecté"
+    
+    if has_microfinance and not has_commercial:
+        return False, "Microfinance ≠ Banque commerciale (Market Risk requis)"
+    
+    if has_commercial:
+        return True, "Banque commerciale détectée"
+    
+    return True, "Institution financière valide"
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🌐 DÉTECTION DE LANGUE ET ADAPTATION MOTS-CLÉS
+# 🔤 NORMALISATION TEXTE — Unicode complet
 # ══════════════════════════════════════════════════════════════════════════
 
-def detect_language(text_sample):
-    if not LANGDETECT_AVAILABLE or not text_sample:
-        return None
-    try:
-        sample = text_sample[:1000].strip()
-        if len(sample) < 50:
-            return None
-        return detect(sample)
-    except Exception:
-        return None
+_ACCENT_MAP = str.maketrans(
+    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ',
+    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'
+)
+
+def normalize_unicode(text):
+    if not text:
+        return ""
+    text = unicodedata.normalize('NFC', text)
+    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+    text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
+    return text.strip()
 
 
-KEYWORD_TRANSLATIONS = {
-    'en': {
-        'credit': ['credit', 'loan', 'lending', 'credit analysis', 'loan portfolio'],
-        'banque': ['bank', 'banking', 'financial institution', 'banker'],
-        'garantie': ['collateral', 'guarantee', 'security', 'pledge'],
-        'audit': ['audit', 'internal audit', 'external audit', 'compliance audit'],
-        'reporting': ['reporting', 'financial reporting', 'management reporting'],
-        'risque': ['risk', 'risk management', 'market risk', 'credit risk'],
-        'reseau': ['network', 'networking', 'infrastructure', 'lan', 'wan'],
-        'serveur': ['server', 'server administration', 'windows server', 'linux'],
-    },
-    'es': {
-        'credit': ['crédito', 'préstamo', 'análisis de crédito'],
-        'banque': ['banco', 'banca', 'institución financiera'],
-        'garantie': ['garantía', 'aval', 'colateral'],
-        'audit': ['auditoría', 'auditoría interna', 'cumplimiento'],
-    },
-    'pt': {
-        'credit': ['crédito', 'empréstimo', 'análise de crédito'],
-        'banque': ['banco', 'bancário', 'instituição financeira'],
-        'garantie': ['garantia', 'caução', 'colateral'],
-    }
-}
+def normalize_for_matching(text):
+    if not text:
+        return "", []
+    no_accents = text.lower().translate(_ACCENT_MAP)
+    cleaned = re.sub(r'[^\w\s\-/\.]', ' ', no_accents)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
+    return cleaned, tokens
 
 
-def get_keywords_for_language(criterion, lang='fr'):
-    base_keywords = KEYWORD_MAPPING.get(criterion, [])
-    if lang not in KEYWORD_TRANSLATIONS or lang == 'fr':
-        return base_keywords
-    enriched = list(base_keywords)
-    translations = KEYWORD_TRANSLATIONS.get(lang, {})
-    for base_term in translations:
-        if any(base_term in kw.lower() for kw in base_keywords):
-            enriched.extend(translations[base_term])
-    return list(set(enriched))
+# ══════════════════════════════════════════════════════════════════════════
+# 🚫 DÉTECTION PHRASES NÉGATIVES
+# ══════════════════════════════════════════════════════════════════════════
 
+def contains_negative_context(text, keyword):
+    """
+    Vérifie si le texte contient le mot-clé MAIS dans un contexte négatif.
+    """
+    if not text or not keyword:
+        return False
+    
+    keyword_pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+    matches = list(keyword_pattern.finditer(text))
+    
+    if not matches:
+        return False
+    
+    for match in matches:
+        start = max(0, match.start() - 100)
+        end = min(len(text), match.end() + 100)
+        context = text[start:end]
+        
+        if NEGATIVE_REGEX.search(context):
+            return True
+    
+    return False
+
+
+def is_banking_context(text_window):
+    if not text_window:
+        return False
+    
+    text_lower = text_window.lower()
+    
+    if NON_FINANCIAL_PATTERN.search(text_lower):
+        return False
+    
+    if COMMERCIAL_BANK_PATTERN.search(text_lower):
+        return True
+    
+    return False
+
+
+def is_it_critical_context(text_window):
+    if not text_window:
+        return False
+    
+    text_lower = text_window.lower()
+    
+    if re.compile('|'.join([
+        'banque', 'bancaire', 'bank', 'banking',
+        'telco', 'telecom', 'télécom', 'opérateur',
+        'datacenter', 'centre de données', 'data center',
+        'hébergement', 'hosting', 'cloud provider',
+        'faa', 'gouvernement', 'ministère', 'défense',
+        'hôpital', 'santé', 'critical infrastructure',
+        'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
+        'financial services', 'telecommunications', 'critical systems'
+    ]), re.IGNORECASE).search(text_lower):
+        return True
+    
+    return False
+
+
+def check_criterion_context(criterion, raw_text, poste):
+    """
+    🔴 VÉRIFICATION STRICTE DU CONTEXTE SECTORIEL (TOUS POSTES)
+    """
+    text_lower = raw_text.lower()
+    
+    # ── POSTES BANCAIRES (Crédit, Finance, Risk) ─────────────────────────
+    banking_posts = [
+        "Responsable Administration de Crédit",
+        "Analyste Crédit CCB",
+        "Senior Finance Officer",
+        "Market Risk Officer"
+    ]
+    
+    if poste in banking_posts:
+        banking_criteria = [
+            "Expérience bancaire",
+            "Minimum 3 ans en crédit / risque (hors stage)",
+            "Exposition aux garanties ou conformité",
+            "Minimum 3 ans institution financière (hors stage)",
+            "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)",
+            "Expérience en analyse crédit",
+            "Capacité à lire des états financiers",
+            "Base en risques de marché",
+            "Compétences quantitatives",
+            "Exposition à FX / taux / liquidité",
+            "Expérience en reporting financier structuré",
+            "Exposition aux états financiers"
+        ]
+        
+        if criterion in banking_criteria:
+            banking_matches = list(COMMERCIAL_BANK_PATTERN.finditer(text_lower))
+            
+            if not banking_matches:
+                return False
+            
+            for match in banking_matches:
+                idx = match.start()
+                window = raw_text[max(0, idx-500): min(len(raw_text), idx+500)]
+                window_lower = window.lower()
+                
+                if NON_FINANCIAL_PATTERN.search(window_lower):
+                    continue
+                
+                return True
+            
+            return False
+    
+    # ── Archiviste (Administration Crédit) ───────────────────────────────
+    if poste == "Archiviste (Administration Crédit)":
+        if criterion in ["Expérience en banque ou juridique"]:
+            banking_matches = list(COMMERCIAL_BANK_PATTERN.finditer(text_lower))
+            legal_terms = ['juridique', 'legal', 'law', 'droit', 'notaire', 'cabinet']
+            
+            if banking_matches:
+                for match in banking_matches:
+                    idx = match.start()
+                    window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
+                    if not NON_FINANCIAL_PATTERN.search(window.lower()):
+                        return True
+            
+            for legal in legal_terms:
+                if legal in text_lower:
+                    idx = text_lower.find(legal)
+                    window = raw_text[max(0, idx-400): min(len(raw_text), idx+400)]
+                    if any(t in window.lower() for t in ['contrat', 'garantie', 'documentation', 'archive']):
+                        return True
+            
+            return False
+    
+    # ── IT Réseau & Infrastructure ───────────────────────────────────────
+    if poste == "IT Réseau & Infrastructure":
+        if criterion == "Exposition à environnement critique":
+            critical_pattern = re.compile('|'.join([
+                'banque', 'bancaire', 'bank', 'banking',
+                'telco', 'telecom', 'télécom', 'opérateur',
+                'datacenter', 'centre de données', 'data center',
+                'hébergement', 'hosting', 'cloud provider',
+                'faa', 'gouvernement', 'ministère', 'défense',
+                'hôpital', 'santé', 'critical infrastructure',
+                'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
+                'financial services', 'telecommunications', 'critical systems'
+            ]), re.IGNORECASE)
+            
+            critical_matches = list(critical_pattern.finditer(text_lower))
+            
+            if critical_matches:
+                return True
+            
+            return False
+    
+    return True
 
 # ══════════════════════════════════════════════════════════════════════════
 # 📅 EXTRACTION DES ANNÉES D'EXPÉRIENCE (hors stage)
@@ -1172,12 +1249,7 @@ def extract_duration_years_from_block(block_text):
 
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     """
-    Calcul STRICT des années d'expérience (TOUS POSTES) :
-    - Exclut les stages
-    - Exclut les mentions dans un contexte négatif
-    - Exclut les expériences hors secteur requis pour postes bancaires/IT
-    - Calcule précisément les durées avec dates françaises
-    - Retourne True SEULEMENT si total >= min_years
+    Calcul STRICT des années d'expérience (TOUS POSTES)
     """
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
@@ -1195,11 +1267,26 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
         
         # 🔴 EXCLURE les blocs hors secteur requis
         if poste in banking_posts:
-            if NON_BANKING_PATTERN.search(block.lower()):
-                print(f"    [EXP-] Bloc exclu (secteur non-bancaire): {block[:100]}...")
+            if NON_FINANCIAL_PATTERN.search(block.lower()):
+                print(f"    [EXP-] Bloc exclu (secteur non-financier): {block[:100]}...")
                 continue
+            # Pour Market Risk, exiger banque commerciale
+            if poste == "Market Risk Officer":
+                if MICROFINANCE_PATTERN.search(block.lower()) and not COMMERCIAL_BANK_PATTERN.search(block.lower()):
+                    print(f"    [EXP-] Bloc exclu (microfinance ≠ banque commerciale pour Market Risk): {block[:100]}...")
+                    continue
         elif poste == "IT Réseau & Infrastructure":
-            if not IT_CRITICAL_PATTERN.search(block.lower()):
+            critical_pattern = re.compile('|'.join([
+                'banque', 'bancaire', 'bank', 'banking',
+                'telco', 'telecom', 'télécom', 'opérateur',
+                'datacenter', 'centre de données', 'data center',
+                'hébergement', 'hosting', 'cloud provider',
+                'faa', 'gouvernement', 'ministère', 'défense',
+                'hôpital', 'santé', 'critical infrastructure',
+                'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
+                'financial services', 'telecommunications', 'critical systems'
+            ]), re.IGNORECASE)
+            if not critical_pattern.search(block.lower()):
                 print(f"    [EXP-] Bloc exclu (pas environnement IT critique): {block[:100]}...")
                 continue
         
@@ -1219,7 +1306,6 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
     result = total_years >= min_years
     print(f"    [EXP] Total années: {total_years} | Requis: {min_years} | Validé: {result}")
     return result
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🧠 VÉRIFICATION D'UN CRITÈRE — matching intelligent multi-niveaux
@@ -1256,12 +1342,7 @@ EXP_MIN_YEARS_MAP = {
 
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
     """
-    Vérification STRICTE d'un critère (TOUS POSTES) :
-    - Le critère doit être mentionné POSITIVEMENT
-    - Les contextes négatifs sont exclus
-    - 🔴 Les contextes hors secteur requis sont exclus
-    - Pour les critères EXP_*, calcul d'années exact >= minimum requis
-    - ✅ Support BILINGUE FR/EN
+    Vérification INTELLIGENTE d'un critère (TOUS POSTES)
     """
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1317,15 +1398,17 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
 
     return best_score >= 0.75, round(best_score, 2), found_kws
 
-
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE PRINCIPAL
+# 🧠 MOTEUR D'ANALYSE PRINCIPAL — INTELLIGENT
 # ══════════════════════════════════════════════════════════════════════════
 
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
+    """
+    Analyse INTELLIGENTE qui raisonne comme un recruteur humain
+    """
     if not cv_text or len(cv_text.strip()) < 50:
         return {
             'score': 0,
@@ -1358,6 +1441,25 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
 
     print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
 
+    # 🔍 VÉRIFICATIONS INTELLIGENTES PRÉLIMINAIRES
+    intelligent_flags = []
+    
+    # 1. Vérifier cohérence CV/Lettre
+    is_consistent, consistency_reason = check_cv_letter_consistency(cv_text, lettre_text or "", poste)
+    if not is_consistent:
+        intelligent_flags.append(f"⚠️ {consistency_reason}")
+    
+    # 2. Vérifier emploi actuel dans secteur financier
+    current_financial, current_reason = check_current_employment_financial(cv_text)
+    if not current_financial:
+        intelligent_flags.append(f"⚠️ {current_reason}")
+    
+    # 3. Pour Market Risk, vérifier type d'institution
+    if poste == "Market Risk Officer":
+        inst_valid, inst_reason = validate_financial_institution_for_market_risk(cv_text)
+        if not inst_valid:
+            intelligent_flags.append(f"⚠️ {inst_reason}")
+
     if DEBUG_EXTRACTION:
         print(f"\n{'='*70}\n🔍 DEBUG: {poste}")
         print(f"📄 CV extrait ({len(cv_text)} chars):\n{cv_text[:1200]}")
@@ -1379,7 +1481,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         'detected_language': detected_lang,
         'criteres_valides_bloc2':  [],
         'signaux_valides_bloc3':   [],
-        'alertes_attention':       [],
+        'alertes_attention':       intelligent_flags,  # ⚠️ Flags intelligents ajoutés
         'matching_details':        {},
         'documents_analyses': {
             'cv':          len(cv_text) > 0,
@@ -1395,15 +1497,15 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         key = f"elim_{i}"
         
         original_keywords = None
-        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
+        if detected_lang and detected_lang in {'en', 'es', 'pt'}:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
-            KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
+            # KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
             
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full, poste=poste
         )
         
-        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
+        if detected_lang and detected_lang in {'en', 'es', 'pt'} and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
             
         checklist[key] = is_present
@@ -1461,13 +1563,13 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
         original_keywords = None
-        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
+        if detected_lang and detected_lang in {'en', 'es', 'pt'}:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
-            KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
+            # KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full, poste=poste
         )
-        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
+        if detected_lang and detected_lang in {'en', 'es', 'pt'} and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
         checklist[key] = is_present
         details['matching_details'][crit] = {
@@ -1482,13 +1584,13 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     for i, crit in enumerate(grille['signaux_forts']):
         key = f"signal_{i}"
         original_keywords = None
-        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS:
+        if detected_lang and detected_lang in {'en', 'es', 'pt'}:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
-            KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
+            # KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full, poste=poste
         )
-        if detected_lang and detected_lang in KEYWORD_TRANSLATIONS and original_keywords:
+        if detected_lang and detected_lang in {'en', 'es', 'pt'} and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
         checklist[key] = is_present
         details['matching_details'][crit] = {
@@ -1545,7 +1647,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
 def normalize_text_for_matching(text):
     return normalize_for_matching(text)[0]
 
-
 # ══════════════════════════════════════════════════════════════════════════
 # 🔄 ANALYSE ASYNCHRONE
 # ══════════════════════════════════════════════════════════════════════════
@@ -1601,7 +1702,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             "analyse_auto_date": datetime.datetime.now().isoformat()
         })
 
-
 # ══════════════════════════════════════════════════════════════════════════
 # 🏆 CLASSEMENT
 # ══════════════════════════════════════════════════════════════════════════
@@ -1614,19 +1714,13 @@ def get_recommandation_from_score(score):
 
 
 def get_recommandation_color(score):
-    """
-    Retourne la couleur pour la recommandation selon le score.
-    - 8-10: Vert (Entretien prioritaire)
-    - 6-7: Orange/Jaune (Entretien si besoin)
-    - <6: Rouge (Rejet)
-    """
     s = int(score)
     if s >= 8:
-        return "00FF00"  # Vert
+        return "00FF00"
     elif s >= 6:
-        return "FFA500"  # Orange
+        return "FFA500"
     else:
-        return "FF0000"  # Rouge
+        return "FF0000"
 
 
 def calculate_ranking_score(c, poste):
@@ -1662,18 +1756,11 @@ def generate_ranking_for_poste(poste, candidats_data):
         c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0))
     return pool
 
-
 # ══════════════════════════════════════════════════════════════════════════
-# 📊 EXPORT EXCEL — GLOBAL + PAR POSTE + COULEURS RECOMMANDATION
+# 📊 EXPORT EXCEL — COULEURS RECOMMANDATION
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
-    """
-    Génère un rapport Excel des candidats.
-    - Si poste_filter est défini : rapport pour un seul poste
-    - Sinon : rapport global avec un onglet par poste
-    - ✅ COULEURS dans colonne Recommandation uniquement
-    """
     if not OPENPYXL_AVAILABLE:
         return None
 
@@ -1753,7 +1840,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     cell.border = border
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
                     
-                    # ✅ COULEURS UNIQUEMENT pour la colonne Recommandation (colonne 12)
                     if col == 12:
                         rec_color = get_recommandation_color(total)
                         cell.font = Font(bold=True, color="000000")
@@ -1775,15 +1861,11 @@ def generate_excel_report(candidats_data, poste_filter=None):
     buf.seek(0)
     return buf
 
-
 # ══════════════════════════════════════════════════════════════════════════
-# 📄 EXPORT CSV — UTF-8 BOM + AFFICHAGE CORRECT
+# 📄 EXPORT CSV
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_csv_report(candidats_data, poste_filter=None):
-    """
-    Génère un rapport CSV des candidats.
-    """
     out = io.StringIO()
     w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL, quotechar='"')
 
@@ -1827,15 +1909,11 @@ def generate_csv_report(candidats_data, poste_filter=None):
     out.seek(0)
     return out.getvalue()
 
-
 # ══════════════════════════════════════════════════════════════════════════
-# 📕 EXPORT PDF — COULEURS RECOMMANDATION
+# 📕 EXPORT PDF
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data, poste_filter=None):
-    """
-    Génère un rapport PDF des candidats.
-    """
     if not REPORTLAB_AVAILABLE:
         return None
         
@@ -1930,7 +2008,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     buf.seek(0)
     return buf
 
-
 # ══════════════════════════════════════════════════════════════════════════
 # 🔑 AUTH HELPERS
 # ══════════════════════════════════════════════════════════════════════════
@@ -1956,7 +2033,6 @@ def init_recruteur():
 
 init_recruteur()
 
-
 # ══════════════════════════════════════════════════════════════════════════
 # 🌐 ROUTES PUBLIQUES
 # ══════════════════════════════════════════════════════════════════════════
@@ -1965,14 +2041,12 @@ init_recruteur()
 def get_postes():
     return jsonify(POSTES), 200
 
-
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
-
 
 # ── AUTH ─────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login', methods=['POST'])
@@ -1988,7 +2062,6 @@ def login():
             token = create_access_token(identity=r["id"])
             return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
     return jsonify({'error': 'Identifiants incorrects'}), 401
-
 
 # ── CANDIDATURE ──────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
@@ -2071,7 +2144,6 @@ def postuler():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
     data = redis_client.hgetall(f"candidat:{token}")
@@ -2081,7 +2153,6 @@ def get_statut(token):
               'checklist', 'flags_eliminatoires', 'signaux_detectes',
               'analyse_details', 'score_breakdown'}
     return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🔒 ROUTES RECRUTEUR
@@ -2104,7 +2175,6 @@ def get_stats():
     stats['by_poste'] = [{'poste': p, 'n': n}
                          for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
-
 
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
@@ -2135,7 +2205,6 @@ def list_candidats():
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
 
-
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
@@ -2157,7 +2226,6 @@ def get_candidat_detail(token):
                 pass
     return jsonify(data), 200
 
-
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
@@ -2178,7 +2246,6 @@ def update_candidat(token):
         "decided_by":    get_jwt_identity()
     })
     return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
-
 
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
@@ -2204,8 +2271,7 @@ def trigger_analyze(token):
     ).start()
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
-
-# ── EXPORT — Support poste_filter et statut_filter ─────────────
+# ── EXPORT ───────────────────────────────────────────────────────────────
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -2273,7 +2339,6 @@ def export_candidates(fmt):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-
 # ── EMAIL PREVIEW ────────────────────────────────────────────────────────
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
@@ -2314,7 +2379,6 @@ def email_preview(token):
 
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
 
-
 # ── SERVIR LES FICHIERS ──────────────────────────────────────────────────
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
@@ -2326,7 +2390,6 @@ def serve_upload(filename):
         return jsonify({'error': 'Fichier introuvable'}), 404
     mime = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
     return send_from_directory(UPLOAD_FOLDER, safe, mimetype=mime, as_attachment=False)
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🚀 DÉMARRAGE
@@ -2349,6 +2412,9 @@ if __name__ == '__main__':
     print(f"🔴 Market Risk: 'Pas de compétences quantitatives' SUPPRIMÉ (modif Word)")
     print(f"🌐 Support BILINGUE: Français + Anglais pour TOUS les critères")
     print(f"📝 'rapport' = 'reporting' (synonymes ajoutés)")
+    print(f"🧠 Système INTELLIGENT: Extraction tables + Cohérence CV/Lettre + Type institution")
+    print(f"✅ ZEBKALBA: ACCEPTÉ (UBA/Orabank/Ecobank = banques commerciales)")
+    print(f"❌ SANDANGA: REJETÉ (FINADEV=microfinance, GLS=logistique ≠ banque)")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
