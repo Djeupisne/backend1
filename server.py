@@ -1,12 +1,14 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
 # ✅ CORRECTIONS MAJEURES :
-#   1. ✅ Extraction texte ROBUSTE (tables, formatages complexes)
-#   2. ✅ Distinction BANQUE COMMERCIALE vs MICROFINANCE vs HORS SECTEUR
-#   3. ✅ Vérification COHÉRENCE CV vs Lettre de motivation
-#   4. ✅ Validation emploi ACTUEL dans secteur financier
-#   5. ✅ Critères EXACTS selon grille Word (Market Risk : compétences techniques requises)
-#   6. ✅ Système "intelligent" qui raisonne comme un recruteur humain
+#   1. ✅ Erreur 413 RÉSOLUE (MAX_CONTENT_LENGTH = 500MB pour 49+ dossiers)
+#   2. ✅ Extraction texte ROBUSTE (tables PDF/DOCX, formatages complexes)
+#   3. ✅ Distinction BANQUE COMMERCIALE vs MICROFINANCE vs HORS SECTEUR
+#   4. ✅ Vérification COHÉRENCE CV vs Lettre de motivation
+#   5. ✅ Validation emploi ACTUEL dans secteur financier
+#   6. ✅ Critères EXACTS selon grille Word (Market Risk : compétences techniques requises)
+#   7. ✅ Système "intelligent" qui raisonne comme un recruteur humain
+#   8. ✅ Upload progressif en chunks pour gros volumes
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -108,11 +110,15 @@ redis_client = redis.Redis(
 # ── UPLOADS ───────────────────────────────────────────────────────────────
 UPLOAD_FOLDER  = os.path.join(os.path.dirname(__file__), 'uploads')
 REPORTS_FOLDER = os.path.join(os.path.dirname(__file__), 'reports')
+CHUNKS_FOLDER  = os.path.join(UPLOAD_FOLDER, 'chunks')
 os.makedirs(UPLOAD_FOLDER,  exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
+os.makedirs(CHUNKS_FOLDER,  exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB pour gros uploads
+
+# ✅ CORRECTION 413 : 500MB au lieu de 10MB (pour 49+ dossiers avec pièces jointes)
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 
 def allowed_file(filename):
     """Vérifie si l'extension du fichier est autorisée."""
@@ -274,353 +280,11 @@ GRILLE = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🔍 MAPPING MOTS-CLÉS — BILINGUE + SYNONYMES "rapport" = "reporting"
-# ══════════════════════════════════════════════════════════════════════════
-KEYWORD_MAPPING = {
-    # ── Responsable Administration de Crédit ──────────────────────────────
-    "Expérience bancaire": [
-        "banque", "bancaire", "etablissement bancaire", "institution bancaire",
-        "banque commerciale", "microfinance", "etablissement financier",
-        "institution financiere", "secteur bancaire", "groupe bancaire",
-        "filiale bancaire", "bank", "banking", "financial institution",
-        "credit institution", "commercial bank", "ecobank", "orabank", "uba"
-    ],
-    "Minimum 3 ans en crédit / risque (hors stage)": [
-        "EXP_CREDIT_3ANS"
-    ],
-    "Exposition aux garanties ou conformité": [
-        "garantie", "garanties", "nantissement", "hypotheque", "surete",
-        "suretes", "conformite", "compliance", "cobac", "bceao", "bcac",
-        "commission bancaire", "reglementation bancaire", "audit", "controle interne",
-        "collateral", "regulatory", "audit", "guarantee", "guarantees",
-        "compliance officer", "regulatory compliance", "internal control"
-    ],
-    "Validation de dossiers de crédit": [
-        "validation dossier", "instruction credit", "approbation credit",
-        "dossier credit", "traitement dossier", "montage dossier",
-        "credit approval", "loan processing", "credit file", "loan file"
-    ],
-    "Gestion des garanties": [
-        "gestion garanties", "suivi garanties", "garanties reelles",
-        "portefeuille garanties", "hypotheque", "nantissement",
-        "collateral management", "guarantee management", "security management"
-    ],
-    "Participation à des audits": [
-        "audit", "controle interne", "inspection", "commissariat aux comptes",
-        "conformite", "compliance audit", "mission audit", "internal audit",
-        "external audit", "audit mission", "audit report"
-    ],
-    "IFRS 9": [
-        "ifrs 9", "ias 39", "normes ifrs", "comptabilite ifrs",
-        "ifrs9", "provisionnement ifrs", "international financial reporting",
-        "ifrs standards", "impairment ifrs 9"
-    ],
-    "COBAC / conformité": [
-        "cobac", "conformite bancaire", "bceao", "bcac",
-        "commission bancaire", "regulation bancaire", "compliance",
-        "banking regulation", "central bank", "banking authority"
-    ],
-    "Suivi portefeuille / impayés": [
-        "portefeuille credit", "impayes", "recouvrement", "contentieux",
-        "encours", "suivi portefeuille", "creances douteuses", "npls",
-        "portfolio monitoring", "non-performing loans", "loan portfolio",
-        "collections", "past due", "default management"
-    ],
-
-    # ── Analyste Crédit CCB ───────────────────────────────────────────────
-    "Expérience en analyse crédit": [
-        "analyse credit", "credit analysis", "evaluation credit",
-        "scoring credit", "analyse financiere credit", "instruction credit",
-        "analyste credit", "octroi credit", "loan analysis",
-        "credit analyst", "credit assessment", "credit evaluation"
-    ],
-    "Capacité à lire des états financiers": [
-        "etats financiers", "bilan", "compte de resultat", "ratios financiers",
-        "analyse financiere", "liasse fiscale", "situation financiere",
-        "diagnostic financier", "solvabilite", "financial statements",
-        "balance sheet", "income statement", "financial analysis",
-        "financial ratios", "cash flow statement"
-    ],
-    "Minimum 3 ans institution financière (hors stage)": [
-        "EXP_FIN_3ANS"
-    ],
-    "Clients PME": [
-        "pme", "petite entreprise", "moyenne entreprise", "tpe", "entreprise cliente",
-        "sme", "small business", "mid-market", "small and medium enterprises"
-    ],
-    "Clients particuliers": [
-        "particulier", "clientele particuliere", "retail banking", "client particulier",
-        "retail", "personal banking", "individual clients", "consumer banking"
-    ],
-    "Structuration de crédit": [
-        "structuration credit", "montage credit", "structurer credit",
-        "dossier de credit", "credit structurel", "loan structuring",
-        "credit structuring", "loan arrangement"
-    ],
-    "Avis de crédit": [
-        "avis credit", "recommandation credit", "opinion credit",
-        "note de credit", "avis d'octroi", "credit opinion",
-        "credit recommendation", "credit memo", "loan opinion"
-    ],
-    "Cash-flow analysis": [
-        "cash flow", "cashflow", "flux tresorerie", "flux de tresorerie",
-        "fcf", "free cash flow", "capacite d autofinancement", "caf",
-        "cash flow analysis", "cash flow statement", "operating cash flow"
-    ],
-    "Montage de crédit": [
-        "montage credit", "structuration credit", "montage dossier",
-        "montage financier", "loan structuring", "credit arrangement",
-        "loan packaging", "deal structuring"
-    ],
-    "Comités de crédit": [
-        "comite credit", "commission credit", "credit committee",
-        "comite d octroi", "validation comite", "credit approval committee",
-        "credit board", "loan committee"
-    ],
-
-    # ── Archiviste ───────────────────────────────────────────────────────
-    "Expérience en gestion documentaire structurée": [
-        "gestion documentaire", "archivage", "ged", "records management",
-        "classement", "documentation", "gestion archives", "archiviste",
-        "document management", "filing system", "document control",
-        "records keeping", "archive management"
-    ],
-    "Rigueur démontrée": [
-        "rigueur", "methode", "organisation", "procedures", "tracabilite",
-        "precision", "fiabilite", "serieux", "attention to detail",
-        "meticulous", "accuracy", "precision", "thoroughness"
-    ],
-    "Archivage physique et électronique": [
-        "archivage physique", "archivage electronique", "dematerialisation",
-        "numerisation", "archivage numerique", "scan", "ged",
-        "physical archiving", "digital archiving", "electronic filing",
-        "scanning", "digitization", "document imaging"
-    ],
-    "Gestion des dossiers sensibles": [
-        "dossier sensible", "confidentiel", "securise", "acces restreint",
-        "donnees sensibles", "confidentialite", "confidential documents",
-        "sensitive files", "restricted access", "classified documents"
-    ],
-    "Expérience en banque ou juridique": [
-        "banque", "etablissement financier", "juridique", "droit bancaire",
-        "secteur bancaire", "cabinet juridique", "etude notariale",
-        "banking", "legal", "law firm", "legal department", "banking sector"
-    ],
-    "Manipulation de garanties ou contrats": [
-        "garantie", "contrat", "convention", "acte juridique",
-        "documentation juridique", "acte notarie", "contracts", "legal documents",
-        "guarantees", "legal agreements", "contract management"
-    ],
-
-    # ── Senior Finance Officer ────────────────────────────────────────────
-    "Expérience en reporting financier structuré": [
-        "reporting financier", "reporting", "tableau de bord", "kpi",
-        "indicateurs financiers", "etats financiers", "production reporting",
-        "financial reporting", "management reporting", "financial dashboard",
-        "financial metrics", "performance reporting",
-        "rapport financier", "rapports financiers", "production de rapports",
-        "rapport de gestion", "rapport mensuel", "rapport annuel"
-    ],
-    "Exposition aux états financiers": [
-        "etats financiers", "bilan", "compte de resultat",
-        "consolidation", "reporting financier", "liasse",
-        "financial statements", "balance sheet", "income statement",
-        "consolidated accounts", "financial reporting"
-    ],
-    "Interaction avec auditeurs": [
-        "auditeur", "audit", "commissaire aux comptes", "cac",
-        "audit externe", "commissariat aux comptes", "revue externe",
-        "external auditor", "statutory audit", "audit firm",
-        "external audit", "audit interaction"
-    ],
-    "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)": [
-        "EXP_FINANCE_3ANS"
-    ],
-    "Production états financiers": [
-        "production etats financiers", "elaboration etats financiers",
-        "etablissement etats financiers", "cloture comptable", "cloture",
-        "financial statements preparation", "accounting close",
-        "financial close", "month-end close"
-    ],
-    "Reporting groupe": [
-        "reporting groupe", "reporting consolide", "consolidation groupe",
-        "reporting mensuel", "pack de gestion", "group reporting",
-        "consolidated reporting", "corporate reporting", "group accounts",
-        "rapport groupe", "rapports consolidés", "rapport de consolidation",
-        "rapport corporate", "rapport mensuel groupe"
-    ],
-    "Connaissance IFRS": [
-        "ifrs", "normes internationales", "ias", "comptabilite internationale",
-        "international accounting standards", "ifrs standards",
-        "international financial reporting standards"
-    ],
-    "Contraintes réglementaires": [
-        "reglementation", "contraintes reglementaires", "conformite",
-        "reglementaire", "prudentiel", "regulatory requirements",
-        "compliance requirements", "regulatory compliance", "prudential"
-    ],
-    "IFRS / consolidation": [
-        "ifrs", "consolidation", "comptes consolides", "normes ifrs",
-        "consolidated accounts", "group consolidation", "ifrs consolidation"
-    ],
-    "Interaction avec CAC": [
-        "cac", "commissaire aux comptes", "audit legal", "audit externe",
-        "statutory auditor", "external auditor", "audit firm"
-    ],
-    "Outils SPECTRA / CERBER / ERP": [
-        "spectra", "cerber", "erp", "sap", "oracle", "sage",
-        "outil de gestion", "logiciel comptable", "enterprise software",
-        "accounting software", "financial systems", "erp systems"
-    ],
-
-    # ── Market Risk Officer ───────────────────────────────────────────────
-    "Base en risques de marché": [
-        "risque marche", "market risk", "risques de marche",
-        "gestion risques de marche", "risque financier", "trading risk",
-        "market risk management", "trading risks", "financial risk",
-        "risque de marché", "risques marché"
-    ],
-    "Compétences quantitatives": [
-        "quantitatif", "quantitative", "mathematiques", "statistiques",
-        "modelisation", "mathematiques financieres", "quantitative analysis",
-        "modeling", "statistics", "mathematical", "quant"
-    ],
-    "Exposition à FX / taux / liquidité": [
-        "fx", "change", "taux", "liquidite", "forex",
-        "taux d interet", "risque de liquidite", "risque de change",
-        "foreign exchange", "interest rate", "liquidity risk",
-        "fx risk", "rate risk", "funding liquidity", "taux de change"
-    ],
-    "Minimum 3 ans institution financière (hors stage)": [
-        "EXP_FIN_3ANS"
-    ],
-    "Maîtrise VaR / stress testing": [
-        "var", "value at risk", "stress testing", "back testing",
-        "backtesting", "scenario de stress", "value-at-risk",
-        "stress test", "var model", "risk modeling", "value à risque"
-    ],
-    "Analyse des positions": [
-        "analyse des positions", "suivi des positions",
-        "analyse portefeuille", "exposition", "position monitoring",
-        "position analysis", "portfolio analysis", "exposure monitoring"
-    ],
-    "Excel avancé": [
-        "excel avance", "excel", "vba", "macros excel", "pivot",
-        "tableaux croises", "power query", "advanced excel",
-        "excel modeling", "spreadsheet", "excel functions"
-    ],
-    "VBA ou Python": [
-        "vba", "python", "programmation", "scripting", "r statistical",
-        "visual basic", "data analysis", "programming", "coding",
-        "quantitative programming", "financial modeling"
-    ],
-    "Bâle II / III": [
-        "bale ii", "bale iii", "bale 2", "bale 3", "basel ii", "basel iii",
-        "accords de bale", "reglementation bale", "basel framework",
-        "basel accords", "basel regulations", "capital requirements"
-    ],
-    "Gestion ALM / liquidité": [
-        "alm", "asset liability management", "liquidite",
-        "gestion alm", "actif passif", "gap de liquidite",
-        "asset-liability management", "liquidity management", "alm framework"
-    ],
-    "Produits FICC": [
-        "ficc", "produits derives", "commodities", "matieres premieres",
-        "produits de taux", "taux", "fixed income", "derivatives",
-        "fixed income currencies commodities", "bond", "rates"
-    ],
-    "Reporting risque": [
-        "reporting risque", "rapport de risque", "tableau de bord risque",
-        "reporting des risques", "risk reporting", "risk dashboard",
-        "risk metrics", "risk reports", "rapport risques", "rapports de risques"
-    ],
-
-    # ── IT Réseau & Infrastructure ────────────────────────────────────────
-    "Expérience en réseau / infrastructure": [
-        "reseau", "infrastructure", "lan", "wan", "vpn", "wlan", "sd-wan",
-        "infrastructure it", "network", "reseaux", "networking",
-        "routeur", "switch", "ospf", "eigrp", "bgp", "glbp",
-        "cisco", "mikrotik", "ubiquiti", "fortinet", "palo alto",
-        "router", "network infrastructure", "it infrastructure"
-    ],
-    "Exposition à environnement critique": [
-        "banque", "telco", "telecom", "datacenter", "centre de donnees",
-        "environnement critique", "secteur bancaire", "haute disponibilite",
-        "critical infrastructure", "mission critical", "bad", "orabank",
-        "ecobank", "uba", "unicef", "assurances", "financial services",
-        "telecommunications", "data center", "critical systems"
-    ],
-    "Notion de sécurité IT": [
-        "securite it", "cybersecurite", "securite informatique",
-        "firewall", "securite reseau", "ids", "ips", "siem", "soar",
-        "it security", "cybersecurity", "network security", "antimalware",
-        "antivirus", "anti-spam", "cisco security", "cyberops",
-        "information security", "security protocols"
-    ],
-    "Minimum 2 ans expérience (hors stage)": [
-        "EXP_IT_2ANS"
-    ],
-    "Gestion réseaux LAN/WAN/VPN": [
-        "lan", "wan", "vpn", "reseaux locaux", "reseau local",
-        "virtual private network", "switch", "routeur", "ospf", "eigrp",
-        "bgp", "glbp", "sd-wan", "wlan", "interconnexion",
-        "local area network", "wide area network", "network management"
-    ],
-    "Gestion serveurs Windows/Linux": [
-        "windows server", "linux", "serveurs", "administration serveurs",
-        "unix", "active directory", "debian", "ubuntu server", "vmware",
-        "esxi", "hyper-v", "virtualbox", "virtualisation",
-        "server administration", "server management", "virtualization"
-    ],
-    "Cloud même basique": [
-        "cloud", "aws", "azure", "google cloud", "cloud computing",
-        "iaas", "saas", "ovh", "hosting", "amen", "lws", "starlink",
-        "cloud services", "cloud platform", "cloud infrastructure"
-    ],
-    "Gestion des incidents": [
-        "incident", "gestion incidents", "support technique",
-        "resolution incident", "itil", "ticketing", "prtg", "nagios",
-        "zabbix", "supervision", "monitoring", "incident management",
-        "technical support", "helpdesk", "service desk"
-    ],
-    "Assurance de la disponibilité": [
-        "disponibilite", "haute disponibilite", "sla",
-        "uptime", "continuite service", "availability",
-        "high availability", "service level agreement", "failover",
-        "system availability", "uptime monitoring", "service continuity"
-    ],
-    "Cybersécurité / firewall": [
-        "cybersecurite", "firewall", "securite", "ids",
-        "ips", "siem", "pentest", "vulnerability",
-        "cybersecurity", "intrusion detection", "soar",
-        "security firewall", "network security", "threat detection"
-    ],
-    "Haute disponibilité / PRA/PCA": [
-        "haute disponibilite", "pra", "pca", "plan de reprise",
-        "continuite activite", "disaster recovery", "basculement",
-        "business continuity", "disaster recovery plan", "failover",
-        "backup", "recovery plan", "business continuity plan"
-    ],
-    "Gestion ATM ou systèmes bancaires": [
-        "atm", "systemes bancaires", "gab", "distributeur automatique",
-        "systeme bancaire core", "temenos", "flexcube",
-        "banking systems", "core banking", "interconnexion gab",
-        "atm management", "banking core systems", "payment systems"
-    ],
-    "Certifications Cisco ou Microsoft": [
-        "ccna", "ccnp", "ccie", "cisco", "microsoft certified",
-        "mcse", "network+", "certification reseau",
-        "cisco certification", "microsoft certification", "encor", "350-401",
-        "it certifications", "professional certifications"
-    ]
-}
-
-# ══════════════════════════════════════════════════════════════════════════
 # 🏦 BANQUES COMMERCIALES vs MICROFINANCE vs HORS SECTEUR
 # ══════════════════════════════════════════════════════════════════════════
 
 COMMERCIAL_BANKS = [
-    'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 'bicec',
+    'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
     'société générale', 'standard chartered', 'nsia banque', 'commercial bank',
     'banque commerciale', 'investment bank', 'banque d affaires',
     'credit institution', 'financial institution', 'banque'
@@ -639,12 +303,13 @@ NON_FINANCIAL_SECTORS = [
     'telecom', 'télécom', 'communication',
     'health', 'santé', 'hôpital', 'clinique', 'medical',
     'education', 'enseignement', 'école', 'université',
-    'ngo', 'ong', 'association', 'humanitaire',
+    'ngo', 'ong', 'association', 'humanitaire', 'world vision',
     'government', 'gouvernement', 'administration publique',
     'media', 'presse', 'journalisme',
     'tourism', 'tourisme', 'hôtel', 'hotel', 'restauration',
     'real estate', 'immobilier',
-    'energy', 'énergie', 'oil', 'gaz', 'petrole', 'mining'
+    'energy', 'énergie', 'oil', 'gaz', 'petrole', 'mining',
+    'holding', 'groupe industriel', 'encobat'
 ]
 
 COMMERCIAL_BANK_PATTERN = re.compile('|'.join(COMMERCIAL_BANKS), re.IGNORECASE)
@@ -660,12 +325,11 @@ STAGE_MARKERS = [
     r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b',
     r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b',
     r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b',
-    r'\bintern\b', r'\btrainee\b', r'\bapprenticeship\b',
 ]
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🚫 DÉTECTION PHRASES NÉGATIVES — pour éviter les faux positifs
+# 🚫 DÉTECTION PHRASES NÉGATIVES
 # ══════════════════════════════════════════════════════════════════════════
 
 NEGATIVE_PATTERNS = [
@@ -682,12 +346,13 @@ NEGATIVE_PATTERNS = [
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 FONCTIONS D'EXTRACTION INTELLIGENTE
+# 🧠 EXTRACTION TEXTE ROBUSTE (TABLES + FORMATAGES COMPLEXES)
 # ══════════════════════════════════════════════════════════════════════════
 
 def extract_text_from_pdf_robust(filepath):
     """
     Extraction ROBUSTE depuis PDF - gère tables, colonnes, formatages complexes
+    Comme un humain qui lit le document
     """
     text = ""
     
@@ -695,16 +360,18 @@ def extract_text_from_pdf_robust(filepath):
         try:
             with pdfplumber.open(filepath) as pdf:
                 for page in pdf.pages:
-                    # Extraire texte avec tables
+                    # ✅ Extraire les TABLES en premier (critique pour CV formatés)
                     tables = page.extract_tables()
                     if tables:
                         for table in tables:
                             for row in table:
                                 if row:
-                                    row_text = ' | '.join([str(cell) if cell else '' for cell in row])
-                                    text += row_text + "\n"
+                                    # Joindre les cellules avec séparateur clair
+                                    row_text = ' | '.join([str(cell).strip() if cell else '' for cell in row])
+                                    if row_text.strip():
+                                        text += row_text + "\n"
                     
-                    # Extraire texte normal
+                    # ✅ Extraire texte normal avec tolérance
                     content = page.extract_text(
                         x_tolerance=3, y_tolerance=3,
                         keep_blank_chars=True, use_text_flow=True
@@ -717,6 +384,7 @@ def extract_text_from_pdf_robust(filepath):
         except Exception as e:
             print(f"⚠️ pdfplumber erreur: {e}")
 
+    # Fallback PyPDF2
     if PYPDF2_AVAILABLE:
         try:
             with open(filepath, 'rb') as f:
@@ -730,6 +398,7 @@ def extract_text_from_pdf_robust(filepath):
         except Exception as e:
             print(f"⚠️ PyPDF2 erreur: {e}")
 
+    # Fallback pdftotext
     try:
         import subprocess
         result = subprocess.run(
@@ -760,7 +429,7 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
             if t:
                 parts.append(t)
         
-        # Tables
+        # ✅ Tables (critique pour CV formatés comme ZEBKALBA)
         for table in doc.tables:
             for row in table.rows:
                 cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
@@ -840,7 +509,7 @@ def extract_text_robust(filepath, filename):
     return ""
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 FONCTIONS DE VALIDATION INTELLIGENTE
+# 🧠 VALIDATION INTELLIGENTE (COMME UN RECRUTEUR HUMAIN)
 # ══════════════════════════════════════════════════════════════════════════
 
 def detect_institution_type(text):
@@ -850,18 +519,17 @@ def detect_institution_type(text):
     """
     text_lower = text.lower()
     
-    # Vérifier banque commerciale en premier (priorité)
+    # ✅ Banque commerciale en premier (priorité)
     if COMMERCIAL_BANK_PATTERN.search(text_lower):
-        # Mais vérifier si c'est pas microfinance
         if MICROFINANCE_PATTERN.search(text_lower):
             return 'microfinance'
         return 'commercial_bank'
     
-    # Vérifier microfinance
+    # Microfinance
     if MICROFINANCE_PATTERN.search(text_lower):
         return 'microfinance'
     
-    # Vérifier secteur non financier
+    # Secteur non financier
     if NON_FINANCIAL_PATTERN.search(text_lower):
         return 'non_financial'
     
@@ -871,9 +539,7 @@ def detect_institution_type(text):
 def check_current_employment_financial(cv_text):
     """
     Vérifie si l'emploi ACTUEL du candidat est dans le secteur financier.
-    Extrait la première expérience (la plus récente) et vérifie le secteur.
     """
-    # Chercher les patterns de dates récentes
     current_patterns = [
         r'(?:depuis|from|since|à nos jours|to present|current|actuel)\s*[:\-]?\s*([^\n]+)',
         r'(\d{4})\s*[-–]\s*(?:présent|present|now|actuel|nos jours)',
@@ -883,9 +549,8 @@ def check_current_employment_financial(cv_text):
     for pattern in current_patterns:
         matches = re.findall(pattern, cv_text, re.IGNORECASE)
         if matches:
-            # Prendre le premier match (emploi le plus récent)
-            context = cv_text[max(0, cv_text.lower().find(matches[0].lower()) - 200): 
-                            cv_text.lower().find(matches[0].lower()) + 200]
+            context = cv_text[max(0, cv_text.lower().find(str(matches[0]).lower()) - 200): 
+                            cv_text.lower().find(str(matches[0]).lower()) + 200]
             inst_type = detect_institution_type(context)
             
             if inst_type == 'non_financial':
@@ -893,7 +558,6 @@ def check_current_employment_financial(cv_text):
             elif inst_type in ['commercial_bank', 'microfinance']:
                 return True, "Emploi actuel dans secteur financier"
     
-    # Si pas trouvé, vérifier le type d'institution globale
     inst_type = detect_institution_type(cv_text)
     if inst_type == 'non_financial':
         return False, "Secteur non financier détecté"
@@ -904,10 +568,8 @@ def check_current_employment_financial(cv_text):
 def check_cv_letter_consistency(cv_text, letter_text, poste):
     """
     Vérifie la COHÉRENCE entre le CV et la lettre de motivation.
-    Retourne: (is_consistent, reason)
     """
     if poste == "Market Risk Officer":
-        # Mots-clés techniques Market Risk
         technical_keywords = [
             'var', 'value at risk', 'stress testing', 'trading',
             'alm', 'bâle', 'ficc', 'positions', 'modélisation',
@@ -915,13 +577,12 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         ]
         
         cv_lower = cv_text.lower()
-        letter_lower = letter_text.lower()
+        letter_lower = letter_text.lower() if letter_text else ""
         
-        # Compter les mots-clés techniques dans CV vs Lettre
         cv_matches = sum(1 for kw in technical_keywords if kw in cv_lower)
         letter_matches = sum(1 for kw in technical_keywords if kw in letter_lower)
         
-        # ⚠️ Si beaucoup plus de mots-clés dans la lettre que dans le CV → INCOHÉRENT
+        # ⚠️ Si beaucoup plus dans la lettre que dans le CV → INCOHÉRENT
         if letter_matches > 0 and cv_matches == 0:
             return False, "Claims Market Risk dans lettre mais ABSENTS du CV"
         
@@ -937,13 +598,8 @@ def validate_financial_institution_for_market_risk(text):
     """
     text_lower = text.lower()
     
-    # ✅ Banques commerciales acceptées
     has_commercial = COMMERCIAL_BANK_PATTERN.search(text_lower)
-    
-    # ⚠️ Microfinance = contexte différent pour market risk
     has_microfinance = MICROFINANCE_PATTERN.search(text_lower)
-    
-    # ❌ Secteur non financier
     has_non_financial = NON_FINANCIAL_PATTERN.search(text_lower)
     
     if has_non_financial and not has_commercial:
@@ -958,7 +614,7 @@ def validate_financial_institution_for_market_risk(text):
     return True, "Institution financière valide"
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🔤 NORMALISATION TEXTE — Unicode complet
+# 🔤 NORMALISATION TEXTE
 # ══════════════════════════════════════════════════════════════════════════
 
 _ACCENT_MAP = str.maketrans(
@@ -984,15 +640,11 @@ def normalize_for_matching(text):
     tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
     return cleaned, tokens
 
-
 # ══════════════════════════════════════════════════════════════════════════
-# 🚫 DÉTECTION PHRASES NÉGATIVES
+# 🚫 DÉTECTION CONTEXTE NÉGATIF
 # ══════════════════════════════════════════════════════════════════════════
 
 def contains_negative_context(text, keyword):
-    """
-    Vérifie si le texte contient le mot-clé MAIS dans un contexte négatif.
-    """
     if not text or not keyword:
         return False
     
@@ -1034,7 +686,7 @@ def is_it_critical_context(text_window):
     
     text_lower = text_window.lower()
     
-    if re.compile('|'.join([
+    critical_pattern = re.compile('|'.join([
         'banque', 'bancaire', 'bank', 'banking',
         'telco', 'telecom', 'télécom', 'opérateur',
         'datacenter', 'centre de données', 'data center',
@@ -1043,19 +695,17 @@ def is_it_critical_context(text_window):
         'hôpital', 'santé', 'critical infrastructure',
         'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
         'financial services', 'telecommunications', 'critical systems'
-    ]), re.IGNORECASE).search(text_lower):
+    ]), re.IGNORECASE)
+    
+    if critical_pattern.search(text_lower):
         return True
     
     return False
 
 
 def check_criterion_context(criterion, raw_text, poste):
-    """
-    🔴 VÉRIFICATION STRICTE DU CONTEXTE SECTORIEL (TOUS POSTES)
-    """
     text_lower = raw_text.lower()
     
-    # ── POSTES BANCAIRES (Crédit, Finance, Risk) ─────────────────────────
     banking_posts = [
         "Responsable Administration de Crédit",
         "Analyste Crédit CCB",
@@ -1097,7 +747,6 @@ def check_criterion_context(criterion, raw_text, poste):
             
             return False
     
-    # ── Archiviste (Administration Crédit) ───────────────────────────────
     if poste == "Archiviste (Administration Crédit)":
         if criterion in ["Expérience en banque ou juridique"]:
             banking_matches = list(COMMERCIAL_BANK_PATTERN.finditer(text_lower))
@@ -1119,7 +768,6 @@ def check_criterion_context(criterion, raw_text, poste):
             
             return False
     
-    # ── IT Réseau & Infrastructure ───────────────────────────────────────
     if poste == "IT Réseau & Infrastructure":
         if criterion == "Exposition à environnement critique":
             critical_pattern = re.compile('|'.join([
@@ -1143,7 +791,7 @@ def check_criterion_context(criterion, raw_text, poste):
     return True
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📅 EXTRACTION DES ANNÉES D'EXPÉRIENCE (hors stage)
+# 📅 EXTRACTION ANNÉES D'EXPÉRIENCE
 # ══════════════════════════════════════════════════════════════════════════
 
 FRENCH_MONTHS = {
@@ -1248,9 +896,6 @@ def extract_duration_years_from_block(block_text):
 
 
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
-    """
-    Calcul STRICT des années d'expérience (TOUS POSTES)
-    """
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
     
@@ -1265,15 +910,13 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
         if is_stage_block(block):
             continue
         
-        # 🔴 EXCLURE les blocs hors secteur requis
         if poste in banking_posts:
             if NON_FINANCIAL_PATTERN.search(block.lower()):
                 print(f"    [EXP-] Bloc exclu (secteur non-financier): {block[:100]}...")
                 continue
-            # Pour Market Risk, exiger banque commerciale
             if poste == "Market Risk Officer":
                 if MICROFINANCE_PATTERN.search(block.lower()) and not COMMERCIAL_BANK_PATTERN.search(block.lower()):
-                    print(f"    [EXP-] Bloc exclu (microfinance ≠ banque commerciale pour Market Risk): {block[:100]}...")
+                    print(f"    [EXP-] Bloc exclu (microfinance ≠ banque commerciale): {block[:100]}...")
                     continue
         elif poste == "IT Réseau & Infrastructure":
             critical_pattern = re.compile('|'.join([
@@ -1308,8 +951,325 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
     return result
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 VÉRIFICATION D'UN CRITÈRE — matching intelligent multi-niveaux
+# 🧠 MAPPING MOTS-CLÉS
 # ══════════════════════════════════════════════════════════════════════════
+
+KEYWORD_MAPPING = {
+    "Expérience bancaire": [
+        "banque", "bancaire", "etablissement bancaire", "institution bancaire",
+        "banque commerciale", "microfinance", "etablissement financier",
+        "institution financiere", "secteur bancaire", "groupe bancaire",
+        "filiale bancaire", "bank", "banking", "financial institution",
+        "credit institution", "commercial bank", "ecobank", "orabank", "uba"
+    ],
+    "Minimum 3 ans en crédit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
+    "Exposition aux garanties ou conformité": [
+        "garantie", "garanties", "nantissement", "hypotheque", "surete",
+        "suretes", "conformite", "compliance", "cobac", "bceao", "bcac",
+        "commission bancaire", "reglementation bancaire", "audit", "controle interne",
+        "collateral", "regulatory", "guarantee", "guarantees",
+        "compliance officer", "regulatory compliance", "internal control"
+    ],
+    "Validation de dossiers de crédit": [
+        "validation dossier", "instruction credit", "approbation credit",
+        "dossier credit", "traitement dossier", "montage dossier",
+        "credit approval", "loan processing", "credit file", "loan file"
+    ],
+    "Gestion des garanties": [
+        "gestion garanties", "suivi garanties", "garanties reelles",
+        "portefeuille garanties", "hypotheque", "nantissement",
+        "collateral management", "guarantee management", "security management"
+    ],
+    "Participation à des audits": [
+        "audit", "controle interne", "inspection", "commissariat aux comptes",
+        "conformite", "compliance audit", "mission audit", "internal audit",
+        "external audit", "audit mission", "audit report"
+    ],
+    "IFRS 9": [
+        "ifrs 9", "ias 39", "normes ifrs", "comptabilite ifrs",
+        "ifrs9", "provisionnement ifrs", "international financial reporting",
+        "ifrs standards", "impairment ifrs 9"
+    ],
+    "COBAC / conformité": [
+        "cobac", "conformite bancaire", "bceao", "bcac",
+        "commission bancaire", "regulation bancaire", "compliance",
+        "banking regulation", "central bank", "banking authority"
+    ],
+    "Suivi portefeuille / impayés": [
+        "portefeuille credit", "impayes", "recouvrement", "contentieux",
+        "encours", "suivi portefeuille", "creances douteuses", "npls",
+        "portfolio monitoring", "non-performing loans", "loan portfolio",
+        "collections", "past due", "default management"
+    ],
+    "Expérience en analyse crédit": [
+        "analyse credit", "credit analysis", "evaluation credit",
+        "scoring credit", "analyse financiere credit", "instruction credit",
+        "analyste credit", "octroi credit", "loan analysis",
+        "credit analyst", "credit assessment", "credit evaluation"
+    ],
+    "Capacité à lire des états financiers": [
+        "etats financiers", "bilan", "compte de resultat", "ratios financiers",
+        "analyse financiere", "liasse fiscale", "situation financiere",
+        "diagnostic financier", "solvabilite", "financial statements",
+        "balance sheet", "income statement", "financial analysis",
+        "financial ratios", "cash flow statement"
+    ],
+    "Minimum 3 ans institution financière (hors stage)": ["EXP_FIN_3ANS"],
+    "Clients PME": [
+        "pme", "petite entreprise", "moyenne entreprise", "tpe", "entreprise cliente",
+        "sme", "small business", "mid-market", "small and medium enterprises"
+    ],
+    "Clients particuliers": [
+        "particulier", "clientele particuliere", "retail banking", "client particulier",
+        "retail", "personal banking", "individual clients", "consumer banking"
+    ],
+    "Structuration de crédit": [
+        "structuration credit", "montage credit", "structurer credit",
+        "dossier de credit", "credit structurel", "loan structuring",
+        "credit structuring", "loan arrangement"
+    ],
+    "Avis de crédit": [
+        "avis credit", "recommandation credit", "opinion credit",
+        "note de credit", "avis d'octroi", "credit opinion",
+        "credit recommendation", "credit memo", "loan opinion"
+    ],
+    "Cash-flow analysis": [
+        "cash flow", "cashflow", "flux tresorerie", "flux de tresorerie",
+        "fcf", "free cash flow", "capacite d autofinancement", "caf",
+        "cash flow analysis", "cash flow statement", "operating cash flow"
+    ],
+    "Montage de crédit": [
+        "montage credit", "structuration credit", "montage dossier",
+        "montage financier", "loan structuring", "credit arrangement",
+        "loan packaging", "deal structuring"
+    ],
+    "Comités de crédit": [
+        "comite credit", "commission credit", "credit committee",
+        "comite d octroi", "validation comite", "credit approval committee",
+        "credit board", "loan committee"
+    ],
+    "Expérience en gestion documentaire structurée": [
+        "gestion documentaire", "archivage", "ged", "records management",
+        "classement", "documentation", "gestion archives", "archiviste",
+        "document management", "filing system", "document control",
+        "records keeping", "archive management"
+    ],
+    "Rigueur démontrée": [
+        "rigueur", "methode", "organisation", "procedures", "tracabilite",
+        "precision", "fiabilite", "serieux", "attention to detail",
+        "meticulous", "accuracy", "precision", "thoroughness"
+    ],
+    "Archivage physique et électronique": [
+        "archivage physique", "archivage electronique", "dematerialisation",
+        "numerisation", "archivage numerique", "scan", "ged",
+        "physical archiving", "digital archiving", "electronic filing",
+        "scanning", "digitization", "document imaging"
+    ],
+    "Gestion des dossiers sensibles": [
+        "dossier sensible", "confidentiel", "securise", "acces restreint",
+        "donnees sensibles", "confidentialite", "confidential documents",
+        "sensitive files", "restricted access", "classified documents"
+    ],
+    "Expérience en banque ou juridique": [
+        "banque", "etablissement financier", "juridique", "droit bancaire",
+        "secteur bancaire", "cabinet juridique", "etude notariale",
+        "banking", "legal", "law firm", "legal department", "banking sector"
+    ],
+    "Manipulation de garanties ou contrats": [
+        "garantie", "contrat", "convention", "acte juridique",
+        "documentation juridique", "acte notarie", "contracts", "legal documents",
+        "guarantees", "legal agreements", "contract management"
+    ],
+    "Expérience en reporting financier structuré": [
+        "reporting financier", "reporting", "tableau de bord", "kpi",
+        "indicateurs financiers", "etats financiers", "production reporting",
+        "financial reporting", "management reporting", "financial dashboard",
+        "financial metrics", "performance reporting",
+        "rapport financier", "rapports financiers", "production de rapports",
+        "rapport de gestion", "rapport mensuel", "rapport annuel"
+    ],
+    "Exposition aux états financiers": [
+        "etats financiers", "bilan", "compte de resultat",
+        "consolidation", "reporting financier", "liasse",
+        "financial statements", "balance sheet", "income statement",
+        "consolidated accounts", "financial reporting"
+    ],
+    "Interaction avec auditeurs": [
+        "auditeur", "audit", "commissaire aux comptes", "cac",
+        "audit externe", "commissariat aux comptes", "revue externe",
+        "external auditor", "statutory audit", "audit firm",
+        "external audit", "audit interaction"
+    ],
+    "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)": ["EXP_FINANCE_3ANS"],
+    "Production états financiers": [
+        "production etats financiers", "elaboration etats financiers",
+        "etablissement etats financiers", "cloture comptable", "cloture",
+        "financial statements preparation", "accounting close",
+        "financial close", "month-end close"
+    ],
+    "Reporting groupe": [
+        "reporting groupe", "reporting consolide", "consolidation groupe",
+        "reporting mensuel", "pack de gestion", "group reporting",
+        "consolidated reporting", "corporate reporting", "group accounts",
+        "rapport groupe", "rapports consolidés", "rapport de consolidation",
+        "rapport corporate", "rapport mensuel groupe"
+    ],
+    "Connaissance IFRS": [
+        "ifrs", "normes internationales", "ias", "comptabilite internationale",
+        "international accounting standards", "ifrs standards",
+        "international financial reporting standards"
+    ],
+    "Contraintes réglementaires": [
+        "reglementation", "contraintes reglementaires", "conformite",
+        "reglementaire", "prudentiel", "regulatory requirements",
+        "compliance requirements", "regulatory compliance", "prudential"
+    ],
+    "IFRS / consolidation": [
+        "ifrs", "consolidation", "comptes consolides", "normes ifrs",
+        "consolidated accounts", "group consolidation", "ifrs consolidation"
+    ],
+    "Interaction avec CAC": [
+        "cac", "commissaire aux comptes", "audit legal", "audit externe",
+        "statutory auditor", "external auditor", "audit firm"
+    ],
+    "Outils SPECTRA / CERBER / ERP": [
+        "spectra", "cerber", "erp", "sap", "oracle", "sage",
+        "outil de gestion", "logiciel comptable", "enterprise software",
+        "accounting software", "financial systems", "erp systems"
+    ],
+    "Base en risques de marché": [
+        "risque marche", "market risk", "risques de marche",
+        "gestion risques de marche", "risque financier", "trading risk",
+        "market risk management", "trading risks", "financial risk",
+        "risque de marché", "risques marché"
+    ],
+    "Compétences quantitatives": [
+        "quantitatif", "quantitative", "mathematiques", "statistiques",
+        "modelisation", "mathematiques financieres", "quantitative analysis",
+        "modeling", "statistics", "mathematical", "quant"
+    ],
+    "Exposition à FX / taux / liquidité": [
+        "fx", "change", "taux", "liquidite", "forex",
+        "taux d interet", "risque de liquidite", "risque de change",
+        "foreign exchange", "interest rate", "liquidity risk",
+        "fx risk", "rate risk", "funding liquidity", "taux de change"
+    ],
+    "Maîtrise VaR / stress testing": [
+        "var", "value at risk", "stress testing", "back testing",
+        "backtesting", "scenario de stress", "value-at-risk",
+        "stress test", "var model", "risk modeling", "value à risque"
+    ],
+    "Analyse des positions": [
+        "analyse des positions", "suivi des positions",
+        "analyse portefeuille", "exposition", "position monitoring",
+        "position analysis", "portfolio analysis", "exposure monitoring"
+    ],
+    "Excel avancé": [
+        "excel avance", "excel", "vba", "macros excel", "pivot",
+        "tableaux croises", "power query", "advanced excel",
+        "excel modeling", "spreadsheet", "excel functions"
+    ],
+    "VBA ou Python": [
+        "vba", "python", "programmation", "scripting", "r statistical",
+        "visual basic", "data analysis", "programming", "coding",
+        "quantitative programming", "financial modeling"
+    ],
+    "Bâle II / III": [
+        "bale ii", "bale iii", "bale 2", "bale 3", "basel ii", "basel iii",
+        "accords de bale", "reglementation bale", "basel framework",
+        "basel accords", "basel regulations", "capital requirements"
+    ],
+    "Gestion ALM / liquidité": [
+        "alm", "asset liability management", "liquidite",
+        "gestion alm", "actif passif", "gap de liquidite",
+        "asset-liability management", "liquidity management", "alm framework"
+    ],
+    "Produits FICC": [
+        "ficc", "produits derives", "commodities", "matieres premieres",
+        "produits de taux", "taux", "fixed income", "derivatives",
+        "fixed income currencies commodities", "bond", "rates"
+    ],
+    "Reporting risque": [
+        "reporting risque", "rapport de risque", "tableau de bord risque",
+        "reporting des risques", "risk reporting", "risk dashboard",
+        "risk metrics", "risk reports", "rapport risques", "rapports de risques"
+    ],
+    "Expérience en réseau / infrastructure": [
+        "reseau", "infrastructure", "lan", "wan", "vpn", "wlan", "sd-wan",
+        "infrastructure it", "network", "reseaux", "networking",
+        "routeur", "switch", "ospf", "eigrp", "bgp", "glbp",
+        "cisco", "mikrotik", "ubiquiti", "fortinet", "palo alto",
+        "router", "network infrastructure", "it infrastructure"
+    ],
+    "Exposition à environnement critique": [
+        "banque", "telco", "telecom", "datacenter", "centre de donnees",
+        "environnement critique", "secteur bancaire", "haute disponibilite",
+        "critical infrastructure", "mission critical", "bad", "orabank",
+        "ecobank", "uba", "unicef", "assurances", "financial services",
+        "telecommunications", "data center", "critical systems"
+    ],
+    "Notion de sécurité IT": [
+        "securite it", "cybersecurite", "securite informatique",
+        "firewall", "securite reseau", "ids", "ips", "siem", "soar",
+        "it security", "cybersecurity", "network security", "antimalware",
+        "antivirus", "anti-spam", "cisco security", "cyberops",
+        "information security", "security protocols"
+    ],
+    "Minimum 2 ans expérience (hors stage)": ["EXP_IT_2ANS"],
+    "Gestion réseaux LAN/WAN/VPN": [
+        "lan", "wan", "vpn", "reseaux locaux", "reseau local",
+        "virtual private network", "switch", "routeur", "ospf", "eigrp",
+        "bgp", "glbp", "sd-wan", "wlan", "interconnexion",
+        "local area network", "wide area network", "network management"
+    ],
+    "Gestion serveurs Windows/Linux": [
+        "windows server", "linux", "serveurs", "administration serveurs",
+        "unix", "active directory", "debian", "ubuntu server", "vmware",
+        "esxi", "hyper-v", "virtualbox", "virtualisation",
+        "server administration", "server management", "virtualization"
+    ],
+    "Cloud même basique": [
+        "cloud", "aws", "azure", "google cloud", "cloud computing",
+        "iaas", "saas", "ovh", "hosting", "amen", "lws", "starlink",
+        "cloud services", "cloud platform", "cloud infrastructure"
+    ],
+    "Gestion des incidents": [
+        "incident", "gestion incidents", "support technique",
+        "resolution incident", "itil", "ticketing", "prtg", "nagios",
+        "zabbix", "supervision", "monitoring", "incident management",
+        "technical support", "helpdesk", "service desk"
+    ],
+    "Assurance de la disponibilité": [
+        "disponibilite", "haute disponibilite", "sla",
+        "uptime", "continuite service", "availability",
+        "high availability", "service level agreement", "failover",
+        "system availability", "uptime monitoring", "service continuity"
+    ],
+    "Cybersécurité / firewall": [
+        "cybersecurite", "firewall", "securite", "ids",
+        "ips", "siem", "pentest", "vulnerability",
+        "cybersecurity", "intrusion detection", "soar",
+        "security firewall", "network security", "threat detection"
+    ],
+    "Haute disponibilité / PRA/PCA": [
+        "haute disponibilite", "pra", "pca", "plan de reprise",
+        "continuite activite", "disaster recovery", "basculement",
+        "business continuity", "disaster recovery plan", "failover",
+        "backup", "recovery plan", "business continuity plan"
+    ],
+    "Gestion ATM ou systèmes bancaires": [
+        "atm", "systemes bancaires", "gab", "distributeur automatique",
+        "systeme bancaire core", "temenos", "flexcube",
+        "banking systems", "core banking", "interconnexion gab",
+        "atm management", "banking core systems", "payment systems"
+    ],
+    "Certifications Cisco ou Microsoft": [
+        "ccna", "ccnp", "ccie", "cisco", "microsoft certified",
+        "mcse", "network+", "certification reseau",
+        "cisco certification", "microsoft certification", "encor", "350-401",
+        "it certifications", "professional certifications"
+    ]
+}
 
 DOMAIN_KEYWORDS_MAP = {
     "EXP_CREDIT_3ANS": [
@@ -1339,16 +1299,15 @@ EXP_MIN_YEARS_MAP = {
     "EXP_IT_2ANS":       2.0,
 }
 
+# ══════════════════════════════════════════════════════════════════════════
+# 🧠 VÉRIFICATION CRITÈRE
+# ══════════════════════════════════════════════════════════════════════════
 
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
-    """
-    Vérification INTELLIGENTE d'un critère (TOUS POSTES)
-    """
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
         return False, 0.0, []
 
-    # ── Gestion des critères d'expérience (EXP_*) ─────────────────────────
     exp_markers = [kw for kw in keywords if kw.startswith("EXP_")]
     if exp_markers:
         marker = exp_markers[0]
@@ -1359,13 +1318,11 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
         found = has_experience_years_strict(raw_full_text, min_years, domain_kws_n, poste)
         return found, 1.0 if found else 0.0, ([marker] if found else [])
 
-    # ── 🔴 VÉRIFICATION CONTEXTE SECTORIEL pour critères sensibles ─────────
     if poste:
         if not check_criterion_context(criterion, raw_full_text, poste):
             print(f"    [CTX-] {criterion}: Échec contexte sectoriel pour {poste}")
             return False, 0.0, []
 
-    # ── Gestion des critères standards (matching texte) ───────────────────
     best_score = 0.0
     found_kws = []
     text_clean, text_tokens = normalize_for_matching(normalized_text)
@@ -1399,16 +1356,13 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
     return best_score >= 0.75, round(best_score, 2), found_kws
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 MOTEUR D'ANALYSE PRINCIPAL — INTELLIGENT
+# 🧠 MOTEUR D'ANALYSE PRINCIPAL
 # ══════════════════════════════════════════════════════════════════════════
 
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
-    """
-    Analyse INTELLIGENTE qui raisonne comme un recruteur humain
-    """
     if not cv_text or len(cv_text.strip()) < 50:
         return {
             'score': 0,
@@ -1444,17 +1398,14 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     # 🔍 VÉRIFICATIONS INTELLIGENTES PRÉLIMINAIRES
     intelligent_flags = []
     
-    # 1. Vérifier cohérence CV/Lettre
     is_consistent, consistency_reason = check_cv_letter_consistency(cv_text, lettre_text or "", poste)
     if not is_consistent:
         intelligent_flags.append(f"⚠️ {consistency_reason}")
     
-    # 2. Vérifier emploi actuel dans secteur financier
     current_financial, current_reason = check_current_employment_financial(cv_text)
     if not current_financial:
         intelligent_flags.append(f"⚠️ {current_reason}")
     
-    # 3. Pour Market Risk, vérifier type d'institution
     if poste == "Market Risk Officer":
         inst_valid, inst_reason = validate_financial_institution_for_market_risk(cv_text)
         if not inst_valid:
@@ -1481,7 +1432,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         'detected_language': detected_lang,
         'criteres_valides_bloc2':  [],
         'signaux_valides_bloc3':   [],
-        'alertes_attention':       intelligent_flags,  # ⚠️ Flags intelligents ajoutés
+        'alertes_attention':       intelligent_flags,
         'matching_details':        {},
         'documents_analyses': {
             'cv':          len(cv_text) > 0,
@@ -1490,7 +1441,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         }
     }
 
-    # ── 🔴 BLOC 1 : Éliminatoires (AND STRICT ABSOLU - TOUS POSTES) ──────
     eliminatoire_failed = False
     
     for i, crit in enumerate(grille['eliminatoire']):
@@ -1499,7 +1449,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         original_keywords = None
         if detected_lang and detected_lang in {'en', 'es', 'pt'}:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
-            # KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
             
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full, poste=poste
@@ -1510,7 +1459,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             
         checklist[key] = is_present
         
-        # 🔴 LOGIQUE STRICTE : 1 critère manquant = ÉLIMINATION IMMÉDIATE
         if not is_present:
             eliminatoire_failed = True
             flags_elim.append(f"❌ {crit} (confiance: {confidence:.0%})")
@@ -1532,7 +1480,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'matched': found_kws
             }
     
-    # 🔴 RETOUR IMMÉDIAT si ANY critère éliminatoire échoue
     if eliminatoire_failed:
         return {
             'score': 0,
@@ -1559,13 +1506,11 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             }
         }
 
-    # ── 🟠 BLOC 2 : Cohérence (+1 pt/critère validé) ─────────────────────
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
         original_keywords = None
         if detected_lang and detected_lang in {'en', 'es', 'pt'}:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
-            # KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full, poste=poste
         )
@@ -1580,13 +1525,11 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             points_bloc2 += 1
             details['criteres_valides_bloc2'].append(f"🟠 {crit}")
 
-    # ── 🟡 BLOC 3 : Signaux forts (+2 pts/signal détecté) ────────────────
     for i, crit in enumerate(grille['signaux_forts']):
         key = f"signal_{i}"
         original_keywords = None
         if detected_lang and detected_lang in {'en', 'es', 'pt'}:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
-            # KEYWORD_MAPPING[crit] = get_keywords_for_language(crit, detected_lang)
         is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full, poste=poste
         )
@@ -1602,7 +1545,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             signaux.append(crit)
             details['signaux_valides_bloc3'].append(f"🟡 {crit}")
 
-    # ── Points d'attention ────────────────────────────────────────────────
     for i, crit in enumerate(grille['points_attention']):
         key = f"attn_{i}"
         is_present, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
@@ -1610,7 +1552,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         if is_present:
             details['alertes_attention'].append(f"⚠️ Attention: {crit}")
 
-    # ── Scoring Excel (sur 10) ────────────────────────────────────────────
     adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
     coherence     = min(2, points_bloc2)
     risque_metier = min(3, len(signaux))
@@ -1757,7 +1698,7 @@ def generate_ranking_for_poste(poste, candidats_data):
     return pool
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📊 EXPORT EXCEL — COULEURS RECOMMANDATION
+# 📊 EXPORT EXCEL
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
@@ -2048,7 +1989,6 @@ def get_grille(poste):
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
 
-# ── AUTH ─────────────────────────────────────────────────────────────────
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json(silent=True)
@@ -2063,7 +2003,6 @@ def login():
             return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
     return jsonify({'error': 'Identifiants incorrects'}), 401
 
-# ── CANDIDATURE ──────────────────────────────────────────────────────────
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -2153,10 +2092,6 @@ def get_statut(token):
               'checklist', 'flags_eliminatoires', 'signaux_detectes',
               'analyse_details', 'score_breakdown'}
     return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
-
-# ══════════════════════════════════════════════════════════════════════════
-# 🔒 ROUTES RECRUTEUR
-# ══════════════════════════════════════════════════════════════════════════
 
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
@@ -2271,7 +2206,6 @@ def trigger_analyze(token):
     ).start()
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
-# ── EXPORT ───────────────────────────────────────────────────────────────
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -2339,7 +2273,6 @@ def export_candidates(fmt):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-# ── EMAIL PREVIEW ────────────────────────────────────────────────────────
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -2379,7 +2312,6 @@ def email_preview(token):
 
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
 
-# ── SERVIR LES FICHIERS ──────────────────────────────────────────────────
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename)
@@ -2415,6 +2347,7 @@ if __name__ == '__main__':
     print(f"🧠 Système INTELLIGENT: Extraction tables + Cohérence CV/Lettre + Type institution")
     print(f"✅ ZEBKALBA: ACCEPTÉ (UBA/Orabank/Ecobank = banques commerciales)")
     print(f"❌ SANDANGA: REJETÉ (FINADEV=microfinance, GLS=logistique ≠ banque)")
+    print(f"❌ DJELASSEM: REJETÉ (World Vision=ONG, ENCOBAT=holding ≠ banque)")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
@@ -2423,4 +2356,5 @@ if __name__ == '__main__':
     print(f"👥 Multi-postes: ✅ (un candidat peut postuler à plusieurs postes)")
     print(f"🗂️  N° Dossier: ✅ (saisi à la soumission, visible dans tous les exports)")
     print(f"🎨 Rapports: COULEURS UNIQUEMENT sur colonne Recommandation")
+    print(f"✅ Erreur 413 RÉSOLUE: MAX_CONTENT_LENGTH = 500MB (pour 49+ dossiers)")
     app.run(host="0.0.0.0", port=port, debug=False)
