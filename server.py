@@ -1,13 +1,13 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique STRICTE
 # ============================================================================
 # ✅ CORRECTIONS APPLIQUÉES :
-#   1. ✅ Excel GLOBAL fonctionne maintenant (tous les postes)
-#   2. ✅ CSV affichage correct (colonnes ajustées, UTF-8 BOM)
-#   3. ✅ PDF generation optimale
-#   4. ✅ Gestion des erreurs améliorée
-#   5. ✅ Noms de fichiers propres et explicites
-#   6. ✅ COULEURS dans colonne Recommandation (Vert/Jaune/Rouge)
-#   7. ✅ Senior Finance Officer: "ou en cabinet d'audit" ajouté
+#   1. ✅ Market Risk: "Pas de compétences quantitatives" SUPPRIMÉ (modif Word)
+#   2. ✅ Support BILINGUE Français/Anglais pour TOUS les critères
+#   3. ✅ Excel GLOBAL fonctionne (tous les postes)
+#   4. ✅ CSV affichage correct (UTF-8 BOM + colonnes ajustées)
+#   5. ✅ COULEURS dans colonne Recommandation uniquement (Vert/Jaune/Rouge)
+#   6. ✅ Senior Finance Officer: "ou en cabinet d'audit" inclus
+#   7. ✅ "rapport" = "reporting" (synonymes ajoutés)
 #   8. ✅ Toutes fonctionnalités strictes conservées
 # ============================================================================
 
@@ -132,6 +132,7 @@ POSTES = [
 
 # ══════════════════════════════════════════════════════════════════════════
 # 📋 GRILLE DE PRÉSÉLECTION — fidèle au document Word (TOUS POSTES)
+# ✅ Market Risk: "Pas de compétences quantitatives" SUPPRIMÉ (modif Word)
 # ══════════════════════════════════════════════════════════════════════════
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -225,7 +226,6 @@ GRILLE = {
     "Market Risk Officer": {
         "eliminatoire": [
             "Base en risques de marché",
-            "Compétences quantitatives",
             "Exposition à FX / taux / liquidité",
             "Minimum 3 ans institution financière (hors stage)"
         ],
@@ -276,7 +276,7 @@ GRILLE = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🔍 MAPPING MOTS-CLÉS — matching large mais pertinent (TOUS POSTES)
+# 🔍 MAPPING MOTS-CLÉS — BILINGUE FRANÇAIS/ANGLAIS + "rapport" = "reporting"
 # ══════════════════════════════════════════════════════════════════════════
 KEYWORD_MAPPING = {
     # ── Responsable Administration de Crédit ──────────────────────────────
@@ -284,7 +284,8 @@ KEYWORD_MAPPING = {
         "banque", "bancaire", "etablissement bancaire", "institution bancaire",
         "banque commerciale", "microfinance", "etablissement financier",
         "institution financiere", "secteur bancaire", "groupe bancaire",
-        "filiale bancaire", "bank", "banking", "financial institution"
+        "filiale bancaire", "bank", "banking", "financial institution",
+        "credit institution", "commercial bank"
     ],
     "Minimum 3 ans en crédit / risque (hors stage)": [
         "EXP_CREDIT_3ANS"
@@ -293,125 +294,147 @@ KEYWORD_MAPPING = {
         "garantie", "garanties", "nantissement", "hypotheque", "surete",
         "suretes", "conformite", "compliance", "cobac", "bceao", "bcac",
         "commission bancaire", "reglementation bancaire", "audit", "controle interne",
-        "collateral", "regulatory", "audit"
+        "collateral", "regulatory", "audit", "guarantee", "guarantees",
+        "compliance officer", "regulatory compliance", "internal control"
     ],
     "Validation de dossiers de crédit": [
         "validation dossier", "instruction credit", "approbation credit",
         "dossier credit", "traitement dossier", "montage dossier",
-        "credit approval", "loan processing"
+        "credit approval", "loan processing", "credit file", "loan file"
     ],
     "Gestion des garanties": [
         "gestion garanties", "suivi garanties", "garanties reelles",
         "portefeuille garanties", "hypotheque", "nantissement",
-        "collateral management"
+        "collateral management", "guarantee management", "security management"
     ],
     "Participation à des audits": [
         "audit", "controle interne", "inspection", "commissariat aux comptes",
-        "conformite", "compliance audit", "mission audit", "internal audit"
+        "conformite", "compliance audit", "mission audit", "internal audit",
+        "external audit", "audit mission", "audit report"
     ],
     "IFRS 9": [
         "ifrs 9", "ias 39", "normes ifrs", "comptabilite ifrs",
-        "ifrs9", "provisionnement ifrs", "international financial reporting"
+        "ifrs9", "provisionnement ifrs", "international financial reporting",
+        "ifrs standards", "impairment ifrs 9"
     ],
     "COBAC / conformité": [
         "cobac", "conformite bancaire", "bceao", "bcac",
         "commission bancaire", "regulation bancaire", "compliance",
-        "banking regulation"
+        "banking regulation", "central bank", "banking authority"
     ],
     "Suivi portefeuille / impayés": [
         "portefeuille credit", "impayes", "recouvrement", "contentieux",
         "encours", "suivi portefeuille", "creances douteuses", "npls",
-        "portfolio monitoring", "non-performing loans"
+        "portfolio monitoring", "non-performing loans", "loan portfolio",
+        "collections", "past due", "default management"
     ],
 
     # ── Analyste Crédit CCB ───────────────────────────────────────────────
     "Expérience en analyse crédit": [
         "analyse credit", "credit analysis", "evaluation credit",
         "scoring credit", "analyse financiere credit", "instruction credit",
-        "analyste credit", "octroi credit", "loan analysis"
+        "analyste credit", "octroi credit", "loan analysis",
+        "credit analyst", "credit assessment", "credit evaluation"
     ],
     "Capacité à lire des états financiers": [
         "etats financiers", "bilan", "compte de resultat", "ratios financiers",
         "analyse financiere", "liasse fiscale", "situation financiere",
-        "diagnostic financier", "solvabilite", "financial statements"
+        "diagnostic financier", "solvabilite", "financial statements",
+        "balance sheet", "income statement", "financial analysis",
+        "financial ratios", "cash flow statement"
     ],
     "Minimum 3 ans institution financière (hors stage)": [
         "EXP_FIN_3ANS"
     ],
     "Clients PME": [
         "pme", "petite entreprise", "moyenne entreprise", "tpe", "entreprise cliente",
-        "sme", "small business", "mid-market"
+        "sme", "small business", "mid-market", "small and medium enterprises"
     ],
     "Clients particuliers": [
         "particulier", "clientele particuliere", "retail banking", "client particulier",
-        "retail", "personal banking"
+        "retail", "personal banking", "individual clients", "consumer banking"
     ],
     "Structuration de crédit": [
         "structuration credit", "montage credit", "structurer credit",
-        "dossier de credit", "credit structurel", "loan structuring"
+        "dossier de credit", "credit structurel", "loan structuring",
+        "credit structuring", "loan arrangement"
     ],
     "Avis de crédit": [
         "avis credit", "recommandation credit", "opinion credit",
-        "note de credit", "avis d'octroi", "credit opinion"
+        "note de credit", "avis d'octroi", "credit opinion",
+        "credit recommendation", "credit memo", "loan opinion"
     ],
     "Cash-flow analysis": [
         "cash flow", "cashflow", "flux tresorerie", "flux de tresorerie",
         "fcf", "free cash flow", "capacite d autofinancement", "caf",
-        "cash flow analysis"
+        "cash flow analysis", "cash flow statement", "operating cash flow"
     ],
     "Montage de crédit": [
         "montage credit", "structuration credit", "montage dossier",
-        "montage financier", "loan structuring"
+        "montage financier", "loan structuring", "credit arrangement",
+        "loan packaging", "deal structuring"
     ],
     "Comités de crédit": [
         "comite credit", "commission credit", "credit committee",
-        "comite d octroi", "validation comite", "credit approval committee"
+        "comite d octroi", "validation comite", "credit approval committee",
+        "credit board", "loan committee"
     ],
 
     # ── Archiviste ───────────────────────────────────────────────────────
     "Expérience en gestion documentaire structurée": [
         "gestion documentaire", "archivage", "ged", "records management",
         "classement", "documentation", "gestion archives", "archiviste",
-        "document management"
+        "document management", "filing system", "document control",
+        "records keeping", "archive management"
     ],
     "Rigueur démontrée": [
         "rigueur", "methode", "organisation", "procedures", "tracabilite",
-        "precision", "fiabilite", "serieux", "attention to detail"
+        "precision", "fiabilite", "serieux", "attention to detail",
+        "meticulous", "accuracy", "precision", "thoroughness"
     ],
     "Archivage physique et électronique": [
         "archivage physique", "archivage electronique", "dematerialisation",
         "numerisation", "archivage numerique", "scan", "ged",
-        "physical archiving", "digital archiving"
+        "physical archiving", "digital archiving", "electronic filing",
+        "scanning", "digitization", "document imaging"
     ],
     "Gestion des dossiers sensibles": [
         "dossier sensible", "confidentiel", "securise", "acces restreint",
-        "donnees sensibles", "confidentialite", "confidential documents"
+        "donnees sensibles", "confidentialite", "confidential documents",
+        "sensitive files", "restricted access", "classified documents"
     ],
     "Expérience en banque ou juridique": [
         "banque", "etablissement financier", "juridique", "droit bancaire",
         "secteur bancaire", "cabinet juridique", "etude notariale",
-        "banking", "legal", "law firm"
+        "banking", "legal", "law firm", "legal department", "banking sector"
     ],
     "Manipulation de garanties ou contrats": [
         "garantie", "contrat", "convention", "acte juridique",
-        "documentation juridique", "acte notarie", "contracts", "legal documents"
+        "documentation juridique", "acte notarie", "contracts", "legal documents",
+        "guarantees", "legal agreements", "contract management"
     ],
 
     # ── Senior Finance Officer ────────────────────────────────────────────
     "Expérience en reporting financier structuré": [
         "reporting financier", "reporting", "tableau de bord", "kpi",
         "indicateurs financiers", "etats financiers", "production reporting",
-        "financial reporting", "management reporting"
+        "financial reporting", "management reporting", "financial dashboard",
+        "financial metrics", "performance reporting",
+        # ✅ AJOUT: "rapport" = "reporting"
+        "rapport financier", "rapports financiers", "production de rapports",
+        "rapport de gestion", "rapport mensuel", "rapport annuel"
     ],
     "Exposition aux états financiers": [
         "etats financiers", "bilan", "compte de resultat",
         "consolidation", "reporting financier", "liasse",
-        "financial statements", "balance sheet", "income statement"
+        "financial statements", "balance sheet", "income statement",
+        "consolidated accounts", "financial reporting"
     ],
     "Interaction avec auditeurs": [
         "auditeur", "audit", "commissaire aux comptes", "cac",
         "audit externe", "commissariat aux comptes", "revue externe",
-        "external auditor", "statutory audit"
+        "external auditor", "statutory audit", "audit firm",
+        "external audit", "audit interaction"
     ],
     "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)": [
         "EXP_FINANCE_3ANS"
@@ -419,79 +442,98 @@ KEYWORD_MAPPING = {
     "Production états financiers": [
         "production etats financiers", "elaboration etats financiers",
         "etablissement etats financiers", "cloture comptable", "cloture",
-        "financial statements preparation"
+        "financial statements preparation", "accounting close",
+        "financial close", "month-end close"
     ],
     "Reporting groupe": [
         "reporting groupe", "reporting consolide", "consolidation groupe",
-        "reporting mensuel", "pack de gestion", "group reporting"
+        "reporting mensuel", "pack de gestion", "group reporting",
+        "consolidated reporting", "corporate reporting", "group accounts",
+        # ✅ AJOUT: "rapport" = "reporting"
+        "rapport groupe", "rapports consolidés", "rapport de consolidation",
+        "rapport corporate", "rapport mensuel groupe"
     ],
     "Connaissance IFRS": [
         "ifrs", "normes internationales", "ias", "comptabilite internationale",
-        "international accounting standards"
+        "international accounting standards", "ifrs standards",
+        "international financial reporting standards"
     ],
     "Contraintes réglementaires": [
         "reglementation", "contraintes reglementaires", "conformite",
-        "reglementaire", "prudentiel", "regulatory requirements"
+        "reglementaire", "prudentiel", "regulatory requirements",
+        "compliance requirements", "regulatory compliance", "prudential"
     ],
     "IFRS / consolidation": [
         "ifrs", "consolidation", "comptes consolides", "normes ifrs",
-        "consolidated accounts"
+        "consolidated accounts", "group consolidation", "ifrs consolidation"
     ],
     "Interaction avec CAC": [
         "cac", "commissaire aux comptes", "audit legal", "audit externe",
-        "statutory auditor"
+        "statutory auditor", "external auditor", "audit firm"
     ],
     "Outils SPECTRA / CERBER / ERP": [
         "spectra", "cerber", "erp", "sap", "oracle", "sage",
-        "outil de gestion", "logiciel comptable", "enterprise software"
+        "outil de gestion", "logiciel comptable", "enterprise software",
+        "accounting software", "financial systems", "erp systems"
     ],
 
     # ── Market Risk Officer ───────────────────────────────────────────────
     "Base en risques de marché": [
         "risque marche", "market risk", "risques de marche",
-        "gestion risques de marche", "risque financier", "trading risk"
-    ],
-    "Compétences quantitatives": [
-        "quantitatif", "quantitative", "mathematiques", "statistiques",
-        "modelisation", "mathematiques financieres", "quantitative analysis"
+        "gestion risques de marche", "risque financier", "trading risk",
+        "market risk management", "trading risks", "financial risk"
     ],
     "Exposition à FX / taux / liquidité": [
         "fx", "change", "taux", "liquidite", "forex",
         "taux d interet", "risque de liquidite", "risque de change",
-        "foreign exchange", "interest rate", "liquidity risk"
+        "foreign exchange", "interest rate", "liquidity risk",
+        "fx risk", "rate risk", "funding liquidity"
+    ],
+    "Minimum 3 ans institution financière (hors stage)": [
+        "EXP_FIN_3ANS"
     ],
     "Maîtrise VaR / stress testing": [
         "var", "value at risk", "stress testing", "back testing",
-        "backtesting", "scenario de stress", "value-at-risk"
+        "backtesting", "scenario de stress", "value-at-risk",
+        "stress test", "var model", "risk modeling"
     ],
     "Analyse des positions": [
         "analyse des positions", "suivi des positions",
-        "analyse portefeuille", "exposition", "position monitoring"
+        "analyse portefeuille", "exposition", "position monitoring",
+        "position analysis", "portfolio analysis", "exposure monitoring"
     ],
     "Excel avancé": [
         "excel avance", "excel", "vba", "macros excel", "pivot",
-        "tableaux croises", "power query", "advanced excel"
+        "tableaux croises", "power query", "advanced excel",
+        "excel modeling", "spreadsheet", "excel functions"
     ],
     "VBA ou Python": [
         "vba", "python", "programmation", "scripting", "r statistical",
-        "visual basic", "data analysis"
+        "visual basic", "data analysis", "programming", "coding",
+        "quantitative programming", "financial modeling"
     ],
     "Bâle II / III": [
         "bale ii", "bale iii", "bale 2", "bale 3", "basel ii", "basel iii",
-        "accords de bale", "reglementation bale", "basel framework"
+        "accords de bale", "reglementation bale", "basel framework",
+        "basel accords", "basel regulations", "capital requirements"
     ],
     "Gestion ALM / liquidité": [
         "alm", "asset liability management", "liquidite",
         "gestion alm", "actif passif", "gap de liquidite",
-        "asset-liability management"
+        "asset-liability management", "liquidity management", "alm framework"
     ],
     "Produits FICC": [
         "ficc", "produits derives", "commodities", "matieres premieres",
-        "produits de taux", "taux", "fixed income", "derivatives"
+        "produits de taux", "taux", "fixed income", "derivatives",
+        "fixed income currencies commodities", "bond", "rates"
     ],
     "Reporting risque": [
         "reporting risque", "rapport de risque", "tableau de bord risque",
-        "reporting des risques", "risk reporting"
+        "reporting des risques", "risk reporting", "risk dashboard",
+        "risk metrics", "risk reports",
+        # ✅ AJOUT: "rapport" = "reporting"
+        "rapport risques", "rapports de risques", "rapport risk",
+        "reporting des risques", "suivi des risques"
     ],
 
     # ── IT Réseau & Infrastructure ────────────────────────────────────────
@@ -499,19 +541,22 @@ KEYWORD_MAPPING = {
         "reseau", "infrastructure", "lan", "wan", "vpn", "wlan", "sd-wan",
         "infrastructure it", "network", "reseaux", "networking",
         "routeur", "switch", "ospf", "eigrp", "bgp", "glbp",
-        "cisco", "mikrotik", "ubiquiti", "fortinet", "palo alto"
+        "cisco", "mikrotik", "ubiquiti", "fortinet", "palo alto",
+        "router", "network infrastructure", "it infrastructure"
     ],
     "Exposition à environnement critique": [
         "banque", "telco", "telecom", "datacenter", "centre de donnees",
         "environnement critique", "secteur bancaire", "haute disponibilite",
         "critical infrastructure", "mission critical", "bad", "orabank",
-        "ecobank", "uba", "unicef", "assurances"
+        "ecobank", "uba", "unicef", "assurances", "financial services",
+        "telecommunications", "data center", "critical systems"
     ],
     "Notion de sécurité IT": [
         "securite it", "cybersecurite", "securite informatique",
         "firewall", "securite reseau", "ids", "ips", "siem", "soar",
         "it security", "cybersecurity", "network security", "antimalware",
-        "antivirus", "anti-spam", "cisco security", "cyberops"
+        "antivirus", "anti-spam", "cisco security", "cyberops",
+        "information security", "security protocols"
     ],
     "Minimum 2 ans expérience (hors stage)": [
         "EXP_IT_2ANS"
@@ -519,46 +564,55 @@ KEYWORD_MAPPING = {
     "Gestion réseaux LAN/WAN/VPN": [
         "lan", "wan", "vpn", "reseaux locaux", "reseau local",
         "virtual private network", "switch", "routeur", "ospf", "eigrp",
-        "bgp", "glbp", "sd-wan", "wlan", "interconnexion"
+        "bgp", "glbp", "sd-wan", "wlan", "interconnexion",
+        "local area network", "wide area network", "network management"
     ],
     "Gestion serveurs Windows/Linux": [
         "windows server", "linux", "serveurs", "administration serveurs",
         "unix", "active directory", "debian", "ubuntu server", "vmware",
-        "esxi", "hyper-v", "virtualbox", "virtualisation"
+        "esxi", "hyper-v", "virtualbox", "virtualisation",
+        "server administration", "server management", "virtualization"
     ],
     "Cloud même basique": [
         "cloud", "aws", "azure", "google cloud", "cloud computing",
-        "iaas", "saas", "ovh", "hosting", "amen", "lws", "starlink"
+        "iaas", "saas", "ovh", "hosting", "amen", "lws", "starlink",
+        "cloud services", "cloud platform", "cloud infrastructure"
     ],
     "Gestion des incidents": [
         "incident", "gestion incidents", "support technique",
         "resolution incident", "itil", "ticketing", "prtg", "nagios",
-        "zabbix", "supervision", "monitoring"
+        "zabbix", "supervision", "monitoring", "incident management",
+        "technical support", "helpdesk", "service desk"
     ],
     "Assurance de la disponibilité": [
         "disponibilite", "haute disponibilite", "sla",
         "uptime", "continuite service", "availability",
-        "high availability", "service level agreement", "failover"
+        "high availability", "service level agreement", "failover",
+        "system availability", "uptime monitoring", "service continuity"
     ],
     "Cybersécurité / firewall": [
         "cybersecurite", "firewall", "securite", "ids",
         "ips", "siem", "pentest", "vulnerability",
-        "cybersecurity", "intrusion detection", "soar"
+        "cybersecurity", "intrusion detection", "soar",
+        "security firewall", "network security", "threat detection"
     ],
     "Haute disponibilité / PRA/PCA": [
         "haute disponibilite", "pra", "pca", "plan de reprise",
         "continuite activite", "disaster recovery", "basculement",
-        "business continuity", "disaster recovery plan", "failover"
+        "business continuity", "disaster recovery plan", "failover",
+        "backup", "recovery plan", "business continuity plan"
     ],
     "Gestion ATM ou systèmes bancaires": [
         "atm", "systemes bancaires", "gab", "distributeur automatique",
         "systeme bancaire core", "temenos", "flexcube",
-        "banking systems", "core banking", "interconnexion gab"
+        "banking systems", "core banking", "interconnexion gab",
+        "atm management", "banking core systems", "payment systems"
     ],
     "Certifications Cisco ou Microsoft": [
         "ccna", "ccnp", "ccie", "cisco", "microsoft certified",
         "mcse", "network+", "certification reseau",
-        "cisco certification", "microsoft certification", "encor", "350-401"
+        "cisco certification", "microsoft certification", "encor", "350-401",
+        "it certifications", "professional certifications"
     ]
 }
 
@@ -588,6 +642,7 @@ NEGATIVE_PATTERNS = [
     r'\b(peu\s+d\')?expérience\b',
     r'\b(expérience\s+(?:limitée|insuffisante|faible|partielle))\b',
     r'\b(ne\s+connais\s+pas|ne\s+maîtrise\s+pas|ne\s+possède\s+pas)\b',
+    r'\b(no\s+experience|without\s+experience|lack\s+of\s+experience)\b',
 ]
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
 
@@ -631,7 +686,8 @@ BANKING_SECTORS = [
     'credit institution', 'financial institution',
     'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
     'bceao', 'cobac', 'banque centrale', 'banque des etats',
-    'core banking', 'banque commerciale', 'banque d affaires'
+    'core banking', 'banque commerciale', 'banque d affaires',
+    'financial services', 'investment bank', 'commercial bank'
 ]
 
 BANKING_PATTERN = re.compile('|'.join(BANKING_SECTORS), re.IGNORECASE)
@@ -647,7 +703,8 @@ IT_CRITICAL_SECTORS = [
     'hébergement', 'hosting', 'cloud provider',
     'faa', 'gouvernement', 'ministère', 'défense',
     'hôpital', 'santé', 'critical infrastructure',
-    'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam'
+    'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
+    'financial services', 'telecommunications', 'critical systems'
 ]
 
 IT_CRITICAL_PATTERN = re.compile('|'.join(IT_CRITICAL_SECTORS), re.IGNORECASE)
@@ -737,7 +794,6 @@ def check_criterion_context(criterion, raw_text, poste):
             "Expérience en analyse crédit",
             "Capacité à lire des états financiers",
             "Base en risques de marché",
-            "Compétences quantitatives",
             "Exposition à FX / taux / liquidité",
             "Expérience en reporting financier structuré",
             "Exposition aux états financiers"
@@ -1205,6 +1261,7 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
     - Les contextes négatifs sont exclus
     - 🔴 Les contextes hors secteur requis sont exclus
     - Pour les critères EXP_*, calcul d'années exact >= minimum requis
+    - ✅ Support BILINGUE FR/EN
     """
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1607,7 +1664,7 @@ def generate_ranking_for_poste(poste, candidats_data):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📊 EXPORT EXCEL — CORRIGÉ (GLOBAL + PAR POSTE + COULEURS RECOMMANDATION)
+# 📊 EXPORT EXCEL — GLOBAL + PAR POSTE + COULEURS RECOMMANDATION
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_excel_report(candidats_data, poste_filter=None):
@@ -1621,20 +1678,16 @@ def generate_excel_report(candidats_data, poste_filter=None):
         return None
 
     wb = Workbook()
-    # Supprimer l'onglet par défaut
     if 'Sheet' in wb.sheetnames:
         del wb['Sheet']
 
-    # Déterminer les postes à exporter
     if poste_filter and poste_filter in POSTES:
         postes_to_export = [poste_filter]
     else:
-        # Rapport global : TOUS les postes avec candidats
         postes_to_export = list(dict.fromkeys(
             c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES
         ))
     
-    # ✅ CORRECTION : Si aucun poste trouvé, créer un onglet vide avec message
     if not postes_to_export:
         ws = wb.create_sheet(title="Aucune donnée")
         ws['A1'] = "Aucune candidature trouvée"
@@ -1645,11 +1698,9 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 poste, [c for c in candidats_data if c.get('poste') == poste]
             )
             
-            # Nom d'onglet court (max 31 caractères pour Excel)
             sheet_name = poste[:28] if len(poste) > 31 else poste
             ws = wb.create_sheet(title=sheet_name)
 
-            # Style neutre : pas de couleurs (sauf recommandation)
             hfill  = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
             hfont  = Font(color="000000", bold=True, size=11)
             border = Border(
@@ -1657,7 +1708,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 top=Side(style='thin'), bottom=Side(style='thin')
             )
 
-            # Titre
             ws.merge_cells('A1:L1')
             c = ws['A1']
             c.value = f"CANDIDATURES - {poste}"
@@ -1666,7 +1716,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
             c.fill = hfill
             ws.row_dimensions[1].height = 30
 
-            # En-têtes
             headers = [
                 'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
                 'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
@@ -1679,7 +1728,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell.border = border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-            # Données
             for row_i, cand in enumerate(candidats_poste, 4):
                 sb = cand.get('score_breakdown_parsed', {})
                 elim = sb.get('bloc1_eliminatoire', False)
@@ -1709,14 +1757,13 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     if col == 12:
                         rec_color = get_recommandation_color(total)
                         cell.font = Font(bold=True, color="000000")
-                        if rec_color == "00FF00":  # Vert
+                        if rec_color == "00FF00":
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                        elif rec_color == "FFA500":  # Orange
+                        elif rec_color == "FFA500":
                             cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-                        else:  # Rouge
+                        else:
                             cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
-            # ✅ CORRECTION : Largeurs colonnes optimisées pour éviter ###
             col_widths = [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
             for col, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(col)].width = w
@@ -1730,20 +1777,16 @@ def generate_excel_report(candidats_data, poste_filter=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📄 EXPORT CSV — CORRIGÉ (ENCODAGE + AFFICHAGE)
+# 📄 EXPORT CSV — UTF-8 BOM + AFFICHAGE CORRECT
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_csv_report(candidats_data, poste_filter=None):
     """
     Génère un rapport CSV des candidats.
-    - Si poste_filter est défini : filtre sur ce poste
-    - Sinon : tous les postes mélangés avec colonne Poste
     """
     out = io.StringIO()
-    # ✅ CORRECTION : Utiliser utf-8-sig pour BOM (affichage correct dans Excel)
     w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL, quotechar='"')
 
-    # En-têtes avec colonne Poste pour rapport global
     headers = [
         'Rang', 'N° Dossier', 'Email', 'Nom', 'Prénom', 'Téléphone',
         'Poste', 'Date candidature', 'Score (/10)', 'Statut', 'Éliminatoire',
@@ -1751,20 +1794,17 @@ def generate_csv_report(candidats_data, poste_filter=None):
     ]
     w.writerow(headers)
     
-    # Filtrer les candidats
     if poste_filter and poste_filter in POSTES:
         candidats_filtered = [c for c in candidats_data if c.get('poste') == poste_filter]
     else:
         candidats_filtered = candidats_data
 
-    # Trier par poste puis par date
     candidats_filtered.sort(key=lambda x: (x.get('poste', ''), x.get('date_candidature', '')), reverse=True)
 
     for idx, c in enumerate(candidats_filtered, 1):
         sb = c.get('score_breakdown_parsed', {})
         score = int(c.get('score', 0))
         reco = get_recommandation_from_score(score)
-        # ✅ CORRECTION : Convertir toutes les valeurs en string pour éviter les erreurs
         w.writerow([
             str(idx),
             str(c.get('numero_dossier', '') or '–'),
@@ -1789,15 +1829,12 @@ def generate_csv_report(candidats_data, poste_filter=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# 📕 EXPORT PDF — SANS COULEURS (par poste OU global) + COULEUR RECOMMANDATION
+# 📕 EXPORT PDF — COULEURS RECOMMANDATION
 # ══════════════════════════════════════════════════════════════════════════
 
 def generate_pdf_report(candidats_data, poste_filter=None):
     """
     Génère un rapport PDF des candidats.
-    - Si poste_filter est défini : rapport pour un seul poste
-    - Sinon : rapport global avec section par poste
-    - ✅ COULEURS dans colonne Recommandation uniquement
     """
     if not REPORTLAB_AVAILABLE:
         return None
@@ -1809,7 +1846,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     els = []
     sty = getSampleStyleSheet()
     
-    # Titre principal
     if poste_filter:
         rapport_type = f"CANDIDATURES - {poste_filter}"
     else:
@@ -1828,7 +1864,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     ))
     els.append(Spacer(1, 0.8*cm))
 
-    # Déterminer les postes à inclure
     if poste_filter and poste_filter in POSTES:
         postes_to_export = [poste_filter]
     else:
@@ -1844,7 +1879,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
         if not candidats_poste:
             continue
             
-        # Titre du poste
         els.append(Paragraph(
             f"📋 {poste}",
             ParagraphStyle('P', parent=sty['Heading2'],
@@ -1852,7 +1886,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                            spaceAfter=10, alignment=TA_LEFT)
         ))
         
-        # Données du tableau
         data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
         for idx, c in enumerate(candidats_poste, 1):
             score = int(c.get('score', 0))
@@ -1869,10 +1902,8 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 reco
             ])
 
-        # Tableau avec COULEURS pour Recommandation uniquement
         tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
         
-        # Style de base
         tbl_style = [
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -1882,15 +1913,14 @@ def generate_pdf_report(candidats_data, poste_filter=None):
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]
         
-        # ✅ Ajouter des couleurs pour la colonne Recommandation (index 7)
         for row_idx in range(1, len(data)):
             score = int(candidats_poste[row_idx-1].get('score', 0)) if row_idx <= len(candidats_poste) else 0
             if score >= 8:
-                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))  # Vert clair
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
             elif score >= 6:
-                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))  # Jaune clair
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
             else:
-                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))  # Rouge clair
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
         
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
@@ -2175,21 +2205,11 @@ def trigger_analyze(token):
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
 
-# ── EXPORT — CORRIGÉ : Support poste_filter et statut_filter ─────────────
+# ── EXPORT — Support poste_filter et statut_filter ─────────────
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
-    """
-    Export des candidatures avec filtre optionnel par poste et/ou statut.
-    
-    Query params:
-    - poste: (optionnel) Nom du poste pour filtrer le rapport
-    - statut: (optionnel) Filtrer par statut (en_attente, retenu, rejete, entretien)
-    
-    Formats: csv, excel/xlsx, pdf
-    """
     try:
-        # Récupérer les paramètres de filtrage
         poste_filter = request.args.get('poste', '')
         statut_filter = request.args.get('statut', '')
         
@@ -2200,7 +2220,6 @@ def export_candidates(fmt):
             c = redis_client.hgetall(k)
             c['id'] = k.split(':', 1)[1]
             
-            # Appliquer les filtres
             if poste_filter and c.get('poste') != poste_filter:
                 continue
             if statut_filter and c.get('statut') != statut_filter:
@@ -2213,11 +2232,9 @@ def export_candidates(fmt):
                     pass
             result.append(c)
         
-        # Trier par date de candidature (plus récent en premier)
         result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Déterminer le nom de fichier
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else "_global"
         statut_suffix = f"_{statut_filter}" if statut_filter else ""
         filename_base = f"rapport{poste_suffix}{statut_suffix}_{ts}"
@@ -2329,6 +2346,9 @@ if __name__ == '__main__':
     print(f"✅ CSV affichage: CORRIGÉ (UTF-8 BOM + colonnes ajustées)")
     print(f"🎨 COULEURS Recommandation: VERT (8-10) / ORANGE (6-7) / ROUGE (<6)")
     print(f"📝 Senior Finance Officer: 'ou en cabinet d'audit' ajouté")
+    print(f"🔴 Market Risk: 'Pas de compétences quantitatives' SUPPRIMÉ (modif Word)")
+    print(f"🌐 Support BILINGUE: Français + Anglais pour TOUS les critères")
+    print(f"📝 'rapport' = 'reporting' (synonymes ajoutés)")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
