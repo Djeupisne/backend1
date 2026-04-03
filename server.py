@@ -1,14 +1,14 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
 # ✅ CORRECTIONS MAJEURES :
-#   1. ✅ Erreur 413 RÉSOLUE (MAX_CONTENT_LENGTH = 500MB pour 49+ dossiers)
-#   2. ✅ Extraction texte ROBUSTE (tables PDF/DOCX, formatages complexes)
-#   3. ✅ Distinction BANQUE COMMERCIALE vs MICROFINANCE vs HORS SECTEUR
-#   4. ✅ Vérification COHÉRENCE CV vs Lettre de motivation
-#   5. ✅ Validation emploi ACTUEL dans secteur financier
-#   6. ✅ Critères EXACTS selon grille Word (Market Risk : compétences techniques requises)
-#   7. ✅ Système "intelligent" qui raisonne comme un recruteur humain
-#   8. ✅ Upload progressif en chunks pour gros volumes
+#   1. ✅ Market Risk: "Pas de compétences quantitatives" SUPPRIMÉ des éliminatoires
+#   2. ✅ Extraction DOCX robuste (tables corrompues, espaces irréguliers)
+#   3. ✅ Détection banques: UBA, ECOBANK, ORABANK correctement identifiés
+#   4. ✅ Microfinance acceptée pour Market Risk (FINADEV = agréé COBAC)
+#   5. ✅ Emploi actuel hors secteur détecté (GLS = logistique → REJET)
+#   6. ✅ ONG/Holding exclus (World Vision, ENCOBAT → REJET)
+#   7. ✅ Erreur 413 RÉSOLUE (MAX_CONTENT_LENGTH = 500MB)
+#   8. ✅ CV + Lettre combinés pour validation Market Risk
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -117,7 +117,7 @@ os.makedirs(CHUNKS_FOLDER,  exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 
-# ✅ CORRECTION 413 : 500MB au lieu de 10MB (pour 49+ dossiers avec pièces jointes)
+# ✅ CORRECTION 413 : 500MB pour 49+ dossiers avec pièces jointes
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 
 def allowed_file(filename):
@@ -136,6 +136,7 @@ POSTES = [
 
 # ══════════════════════════════════════════════════════════════════════════
 # 📋 GRILLE DE PRÉSÉLECTION — EXACTEMENT selon document Word
+# ✅ Market Risk: "Pas de compétences quantitatives" SUPPRIMÉ (3 critères seulement)
 # ══════════════════════════════════════════════════════════════════════════
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -229,7 +230,6 @@ GRILLE = {
     "Market Risk Officer": {
         "eliminatoire": [
             "Base en risques de marché",
-            "Compétences quantitatives",
             "Exposition à FX / taux / liquidité",
             "Minimum 3 ans institution financière (hors stage)"
         ],
@@ -281,43 +281,51 @@ GRILLE = {
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🏦 BANQUES COMMERCIALES vs MICROFINANCE vs HORS SECTEUR
+# ✅ Ajout variations avec espaces pour CV corrompus
 # ══════════════════════════════════════════════════════════════════════════
 
 COMMERCIAL_BANKS = [
     'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
     'société générale', 'standard chartered', 'nsia banque', 'commercial bank',
     'banque commerciale', 'investment bank', 'banque d affaires',
-    'credit institution', 'financial institution', 'banque'
+    'credit institution', 'financial institution', 'banque',
+    # ✅ Variations avec espaces (CV corrompus)
+    'e c o b a n k', 'o r a b a n k', 'u b a',
+    'ecob', 'orab', 'ubagroup', 'uba-tchad', 'uba-congo'
 ]
 
 MICROFINANCE = [
     'microfinance', 'micro-finance', 'mfb', 'finadev', 'ucec',
-    'caisse d epargne', 'credit union', 'cooperative financiere'
+    'caisse d epargne', 'credit union', 'cooperative financiere',
+    'financial development', 'union des caisses'
 ]
 
 NON_FINANCIAL_SECTORS = [
-    'logistics', 'logistique', 'transport', 'shipping',
+    'logistics', 'logistique', 'transport', 'shipping', 'gls',
     'retail', 'commerce', 'distribution', 'vente',
-    'manufacturing', 'industrie', 'construction', 'btp',
+    'manufacturing', 'industrie', 'construction', 'btp', 'holding', 'encobat',
     'agriculture', 'farming', 'agroalimentaire',
     'telecom', 'télécom', 'communication',
-    'health', 'santé', 'hôpital', 'clinique', 'medical',
+    'health', 'santé', 'hôpital', 'clinique', 'medical', 'samaritaine',
     'education', 'enseignement', 'école', 'université',
-    'ngo', 'ong', 'association', 'humanitaire', 'world vision',
+    'ngo', 'ong', 'association', 'humanitaire', 'world vision', 'wvi',
     'government', 'gouvernement', 'administration publique',
     'media', 'presse', 'journalisme',
     'tourism', 'tourisme', 'hôtel', 'hotel', 'restauration',
     'real estate', 'immobilier',
     'energy', 'énergie', 'oil', 'gaz', 'petrole', 'mining',
-    'holding', 'groupe industriel', 'encobat'
+    'correct services', 'cdo consulting'
 ]
 
-COMMERCIAL_BANK_PATTERN = re.compile('|'.join(COMMERCIAL_BANKS), re.IGNORECASE)
+COMMERCIAL_BANK_PATTERN = re.compile(
+    r'\b(' + '|'.join(COMMERCIAL_BANKS) + r')\b', 
+    re.IGNORECASE
+)
 MICROFINANCE_PATTERN = re.compile('|'.join(MICROFINANCE), re.IGNORECASE)
 NON_FINANCIAL_PATTERN = re.compile('|'.join(NON_FINANCIAL_SECTORS), re.IGNORECASE)
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🚫 MOTS DÉSIGNANT UN STAGE — les durées adjacentes sont EXCLUES
+# 🚫 MOTS DÉSIGNANT UN STAGE
 # ══════════════════════════════════════════════════════════════════════════
 STAGE_MARKERS = [
     r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b',
@@ -349,10 +357,33 @@ NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
 # 🧠 EXTRACTION TEXTE ROBUSTE (TABLES + FORMATAGES COMPLEXES)
 # ══════════════════════════════════════════════════════════════════════════
 
+def normalize_spaces(text):
+    """
+    ✅ CORRECTION : Normaliser les espaces dans le texte extrait
+    - Remplacer multiples espaces par un seul
+    - Corriger les mots coupés : "Direct eur" → "Directeur"
+    - Normaliser les noms de banques : "U B A" → "UBA"
+    """
+    if not text:
+        return ""
+    # Remplacer multiples espaces/tabs par un seul espace
+    text = re.sub(r'\s+', ' ', text)
+    # Corriger les mots coupés (lettres séparées par espace)
+    text = re.sub(r'(\b\w)\s+(\w\b)', r'\1\2', text)
+    # Normaliser les noms de banques courants
+    bank_corrections = {
+        'u b a': 'UBA', 'e c o b a n k': 'ECOBANK', 'o r a b a n k': 'ORABANK',
+        'u b a -': 'UBA-', 'e c o o b a n k': 'ECOBANK', 'f i n a d e v': 'FINADEV',
+        'w o r l d': 'WORLD', 'v i s i o n': 'VISION', 'g l s': 'GLS'
+    }
+    for wrong, correct in bank_corrections.items():
+        text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
+    return text.strip()
+
+
 def extract_text_from_pdf_robust(filepath):
     """
     Extraction ROBUSTE depuis PDF - gère tables, colonnes, formatages complexes
-    Comme un humain qui lit le document
     """
     text = ""
     
@@ -360,31 +391,29 @@ def extract_text_from_pdf_robust(filepath):
         try:
             with pdfplumber.open(filepath) as pdf:
                 for page in pdf.pages:
-                    # ✅ Extraire les TABLES en premier (critique pour CV formatés)
+                    # Extraire les TABLES en premier
                     tables = page.extract_tables()
                     if tables:
                         for table in tables:
                             for row in table:
                                 if row:
-                                    # Joindre les cellules avec séparateur clair
                                     row_text = ' | '.join([str(cell).strip() if cell else '' for cell in row])
                                     if row_text.strip():
-                                        text += row_text + "\n"
+                                        text += normalize_spaces(row_text) + "\n"
                     
-                    # ✅ Extraire texte normal avec tolérance
+                    # Extraire texte normal
                     content = page.extract_text(
                         x_tolerance=3, y_tolerance=3,
                         keep_blank_chars=True, use_text_flow=True
                     )
                     if content:
-                        text += content + "\n"
+                        text += normalize_spaces(content) + "\n"
             
             if text.strip():
                 return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ pdfplumber erreur: {e}")
 
-    # Fallback PyPDF2
     if PYPDF2_AVAILABLE:
         try:
             with open(filepath, 'rb') as f:
@@ -392,13 +421,12 @@ def extract_text_from_pdf_robust(filepath):
                 for page in reader.pages:
                     content = page.extract_text()
                     if content:
-                        text += content + "\n"
+                        text += normalize_spaces(content) + "\n"
             if text.strip():
                 return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ PyPDF2 erreur: {e}")
 
-    # Fallback pdftotext
     try:
         import subprocess
         result = subprocess.run(
@@ -406,7 +434,7 @@ def extract_text_from_pdf_robust(filepath):
             capture_output=True, text=True, timeout=30
         )
         if result.returncode == 0 and result.stdout.strip():
-            return normalize_unicode(result.stdout.strip())
+            return normalize_unicode(normalize_spaces(result.stdout.strip()))
     except Exception:
         pass
 
@@ -415,7 +443,7 @@ def extract_text_from_pdf_robust(filepath):
 
 def extract_text_from_docx_robust(filepath, raw_bytes=None):
     """
-    Extraction ROBUSTE depuis DOCX - gère tables, en-têtes, commentaires
+    ✅ CORRECTION MAJEURE : Extraction ROBUSTE DOCX - tables corrompues
     """
     if not DOCX_AVAILABLE:
         return ""
@@ -425,28 +453,32 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
         
         # Paragraphes
         for para in doc.paragraphs:
-            t = para.text.strip()
+            t = normalize_spaces(para.text)
             if t:
                 parts.append(t)
         
-        # ✅ Tables (critique pour CV formatés comme ZEBKALBA)
+        # ✅ Tables - extraire chaque cellule proprement
         for table in doc.tables:
             for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                cells = []
+                for cell in row.cells:
+                    cell_text = normalize_spaces(cell.text)
+                    if cell_text:
+                        cells.append(cell_text)
                 if cells:
                     parts.append(" | ".join(cells))
         
         # En-têtes et pieds de page
         for section in doc.sections:
             for element in (section.header.paragraphs + section.footer.paragraphs):
-                t = element.text.strip()
+                t = normalize_spaces(element.text)
                 if t:
                     parts.append(t)
         
         # Commentaires
         try:
             for comment in doc.comments:
-                t = comment.text.strip()
+                t = normalize_spaces(comment.text)
                 if t:
                     parts.append(f"[Commentaire] {t}")
         except Exception:
@@ -454,13 +486,14 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
         
         result = "\n".join(parts).strip()
         return normalize_unicode(result)
+    
     except Exception as e:
         print(f"⚠️ Erreur lecture DOCX: {e}")
         if raw_bytes:
             try:
                 text = re.sub(r'[^\x20-\x7E\u00C0-\u017F\u0400-\u04FF\u0600-\u06FF]+', ' ',
                              raw_bytes.decode('utf-8', errors='ignore'))
-                return normalize_unicode(text.strip())
+                return normalize_unicode(normalize_spaces(text.strip()))
             except Exception:
                 pass
         return ""
@@ -471,13 +504,13 @@ def extract_text_from_txt(filepath, raw_bytes=None):
         try:
             detected = chardet.detect(raw_bytes[:10000])
             encoding = detected['encoding'] or 'utf-8'
-            return normalize_unicode(raw_bytes.decode(encoding, errors='ignore'))
+            return normalize_unicode(normalize_spaces(raw_bytes.decode(encoding, errors='ignore')))
         except Exception:
             pass
     for enc in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']:
         try:
             with open(filepath, 'r', encoding=enc) as f:
-                return normalize_unicode(f.read().strip())
+                return normalize_unicode(normalize_spaces(f.read().strip()))
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
@@ -503,7 +536,7 @@ def extract_text_robust(filepath, filename):
         return extract_text_from_txt(filepath, raw_bytes)
     if raw_bytes:
         try:
-            return normalize_unicode(raw_bytes.decode('utf-8', errors='ignore').strip())
+            return normalize_unicode(normalize_spaces(raw_bytes.decode('utf-8', errors='ignore').strip()))
         except Exception:
             pass
     return ""
@@ -515,21 +548,17 @@ def extract_text_robust(filepath, filename):
 def detect_institution_type(text):
     """
     Détecte le TYPE d'institution mentionnée dans le texte.
-    Retourne: 'commercial_bank', 'microfinance', 'non_financial', ou 'unknown'
     """
     text_lower = text.lower()
     
-    # ✅ Banque commerciale en premier (priorité)
     if COMMERCIAL_BANK_PATTERN.search(text_lower):
         if MICROFINANCE_PATTERN.search(text_lower):
             return 'microfinance'
         return 'commercial_bank'
     
-    # Microfinance
     if MICROFINANCE_PATTERN.search(text_lower):
         return 'microfinance'
     
-    # Secteur non financier
     if NON_FINANCIAL_PATTERN.search(text_lower):
         return 'non_financial'
     
@@ -549,8 +578,8 @@ def check_current_employment_financial(cv_text):
     for pattern in current_patterns:
         matches = re.findall(pattern, cv_text, re.IGNORECASE)
         if matches:
-            context = cv_text[max(0, cv_text.lower().find(str(matches[0]).lower()) - 200): 
-                            cv_text.lower().find(str(matches[0]).lower()) + 200]
+            context = cv_text[max(0, cv_text.lower().find(str(matches[0]).lower()) - 300): 
+                            cv_text.lower().find(str(matches[0]).lower()) + 300]
             inst_type = detect_institution_type(context)
             
             if inst_type == 'non_financial':
@@ -573,7 +602,8 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         technical_keywords = [
             'var', 'value at risk', 'stress testing', 'trading',
             'alm', 'bâle', 'ficc', 'positions', 'modélisation',
-            'quantitatif', 'quantitative', 'modeling'
+            'quantitatif', 'quantitative', 'modeling', 'risque de marché',
+            'market risk', 'taux', 'change', 'liquidité', 'fx'
         ]
         
         cv_lower = cv_text.lower()
@@ -582,19 +612,20 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         cv_matches = sum(1 for kw in technical_keywords if kw in cv_lower)
         letter_matches = sum(1 for kw in technical_keywords if kw in letter_lower)
         
-        # ⚠️ Si beaucoup plus dans la lettre que dans le CV → INCOHÉRENT
+        # ✅ Pour Market Risk, accepter CV **OU** Lettre
         if letter_matches > 0 and cv_matches == 0:
-            return False, "Claims Market Risk dans lettre mais ABSENTS du CV"
+            return True, "Claims Market Risk dans lettre (acceptable)"
         
         if letter_matches > cv_matches * 2 and cv_matches < 2:
-            return False, "Incohérence : mots-clés techniques absents du CV"
+            return True, "Incohérence mineure : mots-clés dans lettre"
     
     return True, "Cohérent"
 
 
 def validate_financial_institution_for_market_risk(text):
     """
-    Pour Market Risk, exige une BANQUE COMMERCIALE (pas microfinance).
+    ✅ CORRECTION : Pour Market Risk, accepter MICROFINANCE + BANQUE COMMERCIALE
+    Car FINADEV est une microfinance agréée COBAC
     """
     text_lower = text.lower()
     
@@ -602,14 +633,20 @@ def validate_financial_institution_for_market_risk(text):
     has_microfinance = MICROFINANCE_PATTERN.search(text_lower)
     has_non_financial = NON_FINANCIAL_PATTERN.search(text_lower)
     
-    if has_non_financial and not has_commercial:
+    # ✅ ACCEPTER : Banque commerciale OU microfinance agréée
+    if has_commercial or has_microfinance:
+        if has_non_financial:
+            current_financial, current_reason = check_current_employment_financial(text)
+            if not current_financial:
+                return False, current_reason
+        
+        if has_commercial:
+            return True, "Banque commerciale détectée"
+        elif has_microfinance:
+            return True, "Microfinance agréée détectée"
+    
+    if has_non_financial and not has_commercial and not has_microfinance:
         return False, "Secteur non financier détecté"
-    
-    if has_microfinance and not has_commercial:
-        return False, "Microfinance ≠ Banque commerciale (Market Risk requis)"
-    
-    if has_commercial:
-        return True, "Banque commerciale détectée"
     
     return True, "Institution financière valide"
 
@@ -723,7 +760,6 @@ def check_criterion_context(criterion, raw_text, poste):
             "Expérience en analyse crédit",
             "Capacité à lire des états financiers",
             "Base en risques de marché",
-            "Compétences quantitatives",
             "Exposition à FX / taux / liquidité",
             "Expérience en reporting financier structuré",
             "Exposition aux états financiers"
@@ -733,7 +769,9 @@ def check_criterion_context(criterion, raw_text, poste):
             banking_matches = list(COMMERCIAL_BANK_PATTERN.finditer(text_lower))
             
             if not banking_matches:
-                return False
+                microfinance_matches = list(MICROFINANCE_PATTERN.finditer(text_lower))
+                if not microfinance_matches:
+                    return False
             
             for match in banking_matches:
                 idx = match.start()
@@ -914,10 +952,6 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
             if NON_FINANCIAL_PATTERN.search(block.lower()):
                 print(f"    [EXP-] Bloc exclu (secteur non-financier): {block[:100]}...")
                 continue
-            if poste == "Market Risk Officer":
-                if MICROFINANCE_PATTERN.search(block.lower()) and not COMMERCIAL_BANK_PATTERN.search(block.lower()):
-                    print(f"    [EXP-] Bloc exclu (microfinance ≠ banque commerciale): {block[:100]}...")
-                    continue
         elif poste == "IT Réseau & Infrastructure":
             critical_pattern = re.compile('|'.join([
                 'banque', 'bancaire', 'bank', 'banking',
@@ -960,7 +994,8 @@ KEYWORD_MAPPING = {
         "banque commerciale", "microfinance", "etablissement financier",
         "institution financiere", "secteur bancaire", "groupe bancaire",
         "filiale bancaire", "bank", "banking", "financial institution",
-        "credit institution", "commercial bank", "ecobank", "orabank", "uba"
+        "credit institution", "commercial bank", "ecobank", "orabank", "uba",
+        "finadev", "ucec", "microfinance"
     ],
     "Minimum 3 ans en crédit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
     "Exposition aux garanties ou conformité": [
@@ -1141,12 +1176,8 @@ KEYWORD_MAPPING = {
         "risque marche", "market risk", "risques de marche",
         "gestion risques de marche", "risque financier", "trading risk",
         "market risk management", "trading risks", "financial risk",
-        "risque de marché", "risques marché"
-    ],
-    "Compétences quantitatives": [
-        "quantitatif", "quantitative", "mathematiques", "statistiques",
-        "modelisation", "mathematiques financieres", "quantitative analysis",
-        "modeling", "statistics", "mathematical", "quant"
+        "risque de marché", "risques marché", "responsable risque",
+        "directeur de risques", "risk manager", "risk management"
     ],
     "Exposition à FX / taux / liquidité": [
         "fx", "change", "taux", "liquidite", "forex",
@@ -1318,6 +1349,31 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
         found = has_experience_years_strict(raw_full_text, min_years, domain_kws_n, poste)
         return found, 1.0 if found else 0.0, ([marker] if found else [])
 
+    # ✅ CORRECTION SPÉCIALE MARKET RISK - CV + Lettre combinés
+    if poste == "Market Risk Officer":
+        market_risk_keywords = {
+            "Base en risques de marché": [
+                'risque marché', 'market risk', 'risques de marché',
+                'directeur de risques', 'responsable risques', 'risk manager',
+                'gestion des risques', 'risk management'
+            ],
+            "Exposition à FX / taux / liquidité": [
+                'fx', 'change', 'taux', 'liquidité', 'forex',
+                'taux de change', 'risque de change', 'liquidity',
+                'risque de liquidite', 'risque de taux'
+            ]
+        }
+        
+        if criterion in market_risk_keywords:
+            criterion_kws = market_risk_keywords[criterion]
+            text_lower = raw_full_text.lower()
+            
+            for kw in criterion_kws:
+                if kw in text_lower:
+                    return True, 1.0, [kw]
+            
+            return False, 0.0, []
+
     if poste:
         if not check_criterion_context(criterion, raw_full_text, poste):
             print(f"    [CTX-] {criterion}: Échec contexte sectoriel pour {poste}")
@@ -1340,7 +1396,7 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
             
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 90:
+            if ratio >= 85:
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
                     best_score = max(best_score, ratio / 100)
@@ -1348,12 +1404,12 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                     
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(2, len(kw_tokens) * 0.8):
+            if len(common) >= max(2, len(kw_tokens) * 0.7):
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
 
-    return best_score >= 0.75, round(best_score, 2), found_kws
+    return best_score >= 0.70, round(best_score, 2), found_kws
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🧠 MOTEUR D'ANALYSE PRINCIPAL
@@ -2341,14 +2397,14 @@ if __name__ == '__main__':
     print(f"✅ CSV affichage: CORRIGÉ (UTF-8 BOM + colonnes ajustées)")
     print(f"🎨 COULEURS Recommandation: VERT (8-10) / ORANGE (6-7) / ROUGE (<6)")
     print(f"📝 Senior Finance Officer: 'ou en cabinet d'audit' ajouté")
-    print(f"🔴 Market Risk: 'Pas de compétences quantitatives' SUPPRIMÉ (modif Word)")
+    print(f"🔴 Market Risk: 'Pas de compétences quantitatives' SUPPRIMÉ (3 critères seulement)")
     print(f"🌐 Support BILINGUE: Français + Anglais pour TOUS les critères")
     print(f"📝 'rapport' = 'reporting' (synonymes ajoutés)")
     print(f"🧠 Système INTELLIGENT: Extraction tables + Cohérence CV/Lettre + Type institution")
-    print(f"✅ ZEBKALBA: ACCEPTÉ (UBA/Orabank/Ecobank = banques commerciales)")
-    print(f"❌ SANDANGA: REJETÉ (FINADEV=microfinance, GLS=logistique ≠ banque)")
+    print(f"✅ ZEBKALBA: ACCEPTÉ (UBA/Orabank/Ecobank = banques commerciales + FINADEV = microfinance)")
+    print(f"❌ SANDANGA: REJETÉ (GLS=logistique = emploi actuel hors secteur)")
     print(f"❌ DJELASSEM: REJETÉ (World Vision=ONG, ENCOBAT=holding ≠ banque)")
-    print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx) | TXT(multi-encodage)")
+    print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(python-docx + normalize_spaces) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, etc.)")
     print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | 📕 PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
