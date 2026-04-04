@@ -665,8 +665,8 @@ def validate_financial_institution_for_market_risk(text):
 # ══════════════════════════════════════════════════════════════════════════
 
 _ACCENT_MAP = str.maketrans(
-    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÔÙÛÜÇŒÆáãõñÁÃÕÑ',
-    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'
+    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ',  # ← Ï restauré (40 chars)
+    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'   # 40 caractères
 )
 
 def normalize_unicode(text):
