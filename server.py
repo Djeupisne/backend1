@@ -292,16 +292,21 @@ MICROFINANCE = [
 
 NON_FINANCIAL_SECTORS = [
     'logistics', 'logistique', 'transport', 'shipping', 'gls', 'global logistics',
-    'retail', 'commerce', 'distribution', 'vente',
+    # ✅ FIX : "commerce" et "vente" seuls trop génériques (matchent rubriques CV)
+    # Remplacés par des expressions plus précises
+    'société commerciale', 'entreprise commerciale', 'retail store',
+    'grande distribution', 'distribution commerciale',
     'manufacturing', 'industrie', 'construction', 'btp', 'holding', 'encobat',
     'agriculture', 'farming', 'agroalimentaire',
-    'telecom', 'télécom', 'communication',
-    'health', 'santé', 'hôpital', 'clinique', 'medical', 'samaritaine',
-    'education', 'enseignement', 'école', 'université',
+    # ✅ "telecom" retiré car peut matcher environnement IT critique légitime
+    'communication agency', 'agence de communication',
+    'health', 'hôpital', 'clinique', 'samaritaine',
+    'education', 'enseignement', 'école',
+    # ✅ "université" retiré (formation académique ≠ employeur non-financier)
     'ngo', 'ong', 'association', 'humanitaire', 'world vision', 'wvi',
     'government', 'gouvernement', 'administration publique',
     'media', 'presse', 'journalisme',
-    'tourism', 'tourisme', 'hôtel', 'hotel', 'restauration',
+    'tourism', 'tourisme', 'restauration',
     'real estate', 'immobilier',
     'energy', 'énergie', 'oil', 'gaz', 'petrole', 'mining',
     'correct services', 'cdo consulting'
@@ -980,45 +985,35 @@ def extract_duration_years_from_block(block_text):
 
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     """
-    ✅ FIX v5 : Détection ULTRA-assouplie des durées - ZEBKALBA
+    ✅ FIX v6 :
+      FIX 1 : Bloc conservé si banque présente même avec mots "commerce/vente" (compétences CV)
+      FIX 2 : "(7) années" / "sept (7) années" désormais reconnus
     """
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
-    
-    # ✅ NOUVEAUX PATTERNS v5 - Plus permissifs
+
+    # ✅ FIX 2 : Patterns enrichis pour "(7) années" et "sept (7) années"
     years_patterns = [
-        r'(\d+)\s*(?:années?|ans?)',  # Simple: "7 années", "10 ans"
-        r'plus\s+de\s+(\d+)\s*(?:années?|ans?)',  # "plus de 7 années"
-        r'\(\s*(\d+)\s*\)\s*(?:années?|ans?)',  # "(7) années"
-        r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:années?|ans?)',  # "depuis 7 années"
-        r'(\d+)\s*(?:années?|ans?)\s+(?:d[ée]expérience|dans|en|de)',
+        r'(\d+)\s*(?:années?|ans?)',                          # "7 années", "10 ans"
+        r'plus\s+de\s+(\d+)\s*(?:années?|ans?)',              # "plus de 7 années"
+        r'\(\s*(\d+)\s*\)\s*(?:années?|ans?)',                # "(7) années"
+        r'\w+\s+\(\s*(\d+)\s*\)\s*(?:années?|ans?)',          # "sept (7) années"
+        r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:années?|ans?)',
+        r'(\d+)\s*(?:années?|ans?)\s+(?:d[ée]?expérience|dans|en|de)',
         r'expérience\s+(?:de\s+)?(\d+)\s*(?:années?|ans?)',
     ]
-    
+
+    text_lower = full_raw_text.lower().translate(_ACCENT_MAP)
     for pattern in years_patterns:
-        matches = re.findall(pattern, full_raw_text.lower())
+        matches = re.findall(pattern, text_lower, re.IGNORECASE)
         for match in matches:
             try:
                 years = float(match)
                 if years >= min_years:
                     print(f"    [EXP+] Durée explicite trouvée: {years} ans >= {min_years}")
-                    return True  # ✅ Retour immédiat
-            except ValueError:
-                continue
-
-    # ✅ Fallback: Chercher "7" ou "10" suivi de "années/ans" n'importe où
-    simple_numbers = re.findall(r'(\d+)', full_raw_text)
-    for num in simple_numbers:
-        try:
-            val = int(num)
-            if val >= min_years and val <= 40:
-                # Vérifier si proche d'un mot "année" ou "expérience"
-                context_pattern = rf'{num}\s*(?:années?|ans?|expérience|gestion\s+bancaire)'
-                if re.search(context_pattern, full_raw_text, re.IGNORECASE):
-                    print(f"    [EXP+] Nombre {val} détecté dans contexte pertinent")
                     return True
-        except:
-            continue
+            except (ValueError, TypeError):
+                continue
 
     banking_posts = [
         "Responsable Administration de Crédit",
@@ -1032,14 +1027,18 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
             continue
 
         if poste in banking_posts:
-            # ✅ Accepter si banque détectée même avec secteur non-financier ancien
             if NON_FINANCIAL_PATTERN.search(block.lower()):
-                recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
-                if recent_year_pattern.search(block):
-                    print(f"    [EXP-] Bloc exclu (secteur non-financier récent): {block[:100]}...")
-                    continue
+                # ✅ FIX 1 : Conserver le bloc si une banque commerciale est aussi présente
+                # (cas ZEBKALBA : "commerce/vente" = rubrique compétences, pas l'employeur)
+                if COMMERCIAL_BANK_PATTERN.search(block.lower()):
+                    print(f"    [EXP+] Bloc conservé (banque présente malgré secteur non-fin): {block[:100]}...")
                 else:
-                    print(f"    [EXP+] Bloc non-financier ancien (<2015) accepté: {block[:100]}...")
+                    recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
+                    if recent_year_pattern.search(block):
+                        print(f"    [EXP-] Bloc exclu (secteur non-financier récent sans banque): {block[:100]}...")
+                        continue
+                    else:
+                        print(f"    [EXP+] Bloc non-financier ancien (<2015) accepté: {block[:100]}...")
 
         elif poste == "IT Réseau & Infrastructure":
             critical_pattern = re.compile('|'.join([
@@ -1072,7 +1071,6 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
     result = total_years >= min_years
     print(f"    [EXP] Total années: {total_years} | Requis: {min_years} | Validé: {result}")
     return result
-
 # ══════════════════════════════════════════════════════════════════════════
 # 🧠 MAPPING MOTS-CLÉS
 # ══════════════════════════════════════════════════════════════════════════
