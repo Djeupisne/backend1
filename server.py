@@ -1,4 +1,4 @@
-"# server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
+# server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
 # ✅ CORRECTIONS v5 (ULTRA-permissif pour ZEBKALBA) :
 #   FIX 1 ✅ Détection durées : "plus de sept (7) années", "dix (10) années"
