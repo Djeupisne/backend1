@@ -1,11 +1,21 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
-# ✅ AJUSTEMENTS APPLIQUÉS (selon feedback) :
-#   1. ✅ Détection mots-clés assouplie : CV OU Lettre suffit pour Market Risk
-#   2. ✅ Expériences hors secteur ignorées si anciennes (avant 2015)
-#   3. ✅ Reconnaissance dates renforcée : "A nos jours", "depuis 2018", etc.
-#   4. ✅ Mots-clés Market Risk enrichis : stress testing, alm, fx, reporting...
-#   5. ✅ Validation institution : expérience bancaire valide même avec secteur non-financier ancien
+# ✅ CORRECTIONS FINALES TESTÉES :
+#   1. ✅ normalize_spaces() appliqué AVANT matching (critique pour DOCX corrompus)
+#   2. ✅ Market Risk: CV OU Lettre suffit pour validation (assouplissement)
+#   3. ✅ Banques détectées même avec espaces: "U B A" = "UBA"
+#   4. ✅ Microfinance acceptée (FINADEV = agréé COBAC)
+#   5. ✅ "Risque de Marche" corrigé en "Risque de Marché"
+#   6. ✅ Erreur 413 RÉSOLUE (500MB)
+#   7. ✅ OCR intégré pour PDF scannés et images (Tesseract + OpenCV)
+#   8. ✅ NLP avec spaCy pour extraction entités nommées
+#   9. ✅ Détection fiable type fichier avec python-magic
+#  10. ✅ Expériences hors secteur ignorées si anciennes (<2015)
+# ============================================================================
+# 🔧 CORRECTIONS v2 (bug fixes faux-négatifs) :
+#   FIX 1 ✅ "A nos jours" / "nos jours" ajouté comme marqueur de date actuelle
+#   FIX 2 ✅ "Juin2018" (sans espace) désormais reconnu dans les patterns de dates
+#   FIX 3 ✅ "années" (avec accent) désormais reconnu dans le calcul de durée
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -34,6 +44,44 @@ try:
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
+
+# ── OCR & IMAGE PROCESSING (NOUVEAU) ─────────────────────────────────────
+try:
+    from PIL import Image
+    import pytesseract
+    from pdf2image import convert_from_path
+    import cv2
+    import numpy as np
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+    print("⚠️ OCR libraries non installées. Extraction image désactivée.")
+
+# ── FILE TYPE DETECTION (NOUVEAU) ────────────────────────────────────────
+try:
+    import magic
+    MAGIC_AVAILABLE = True
+except ImportError:
+    MAGIC_AVAILABLE = False
+
+# ── NLP WITH SPACY (NOUVEAU) ─────────────────────────────────────────────
+try:
+    import spacy
+    try:
+        nlp = spacy.load("fr_core_news_sm")
+    except OSError:
+        nlp = None
+    SPACY_AVAILABLE = True
+except ImportError:
+    SPACY_AVAILABLE = False
+    nlp = None
+
+# ── DATA PROCESSING (NOUVEAU) ────────────────────────────────────────────
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
 
 # ── DÉTECTION ENCODAGE & LANGUE ───────────────────────────────────────────
 try:
@@ -110,7 +158,7 @@ os.makedirs(UPLOAD_FOLDER,  exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 os.makedirs(CHUNKS_FOLDER,  exist_ok=True)
 
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg', 'tiff', 'bmp'}
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # ✅ 500MB pour 49+ dossiers
 
 def allowed_file(filename):
@@ -376,6 +424,99 @@ def normalize_spaces(text):
     return text.strip()
 
 
+def detect_file_type(filepath):
+    """✅ Détection fiable du type de fichier avec python-magic"""
+    if MAGIC_AVAILABLE:
+        try:
+            mime = magic.from_file(filepath, mime=True)
+            if mime in ['application/pdf']:
+                return 'pdf'
+            elif mime in ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
+                return 'docx'
+            elif mime.startswith('image/'):
+                return 'image'
+            elif mime in ['text/plain']:
+                return 'txt'
+        except Exception as e:
+            print(f"⚠️ Erreur magic: {e}")
+    ext = filepath.rsplit('.', 1)[-1].lower() if '.' in filepath else ''
+    return ext if ext in ['pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg'] else 'unknown'
+
+
+def extract_text_with_ocr(filepath, filename):
+    """✅ Extraction OCR pour PDF scannés et images"""
+    if not OCR_AVAILABLE:
+        return ""
+    
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    text = ""
+    
+    try:
+        if ext == 'pdf':
+            images = convert_from_path(filepath, dpi=300)
+            for i, image in enumerate(images):
+                img_array = np.array(image)
+                if len(img_array.shape) == 3:
+                    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+                else:
+                    gray = img_array
+                _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                ocr_text = pytesseract.image_to_string(
+                    Image.fromarray(thresh),
+                    lang='fra+eng',
+                    config='--oem 3 --psm 6'
+                )
+                text += normalize_spaces(ocr_text) + "\n"
+        elif ext in ['png', 'jpg', 'jpeg', 'tiff', 'bmp']:
+            image = Image.open(filepath)
+            img_array = np.array(image)
+            if len(img_array.shape) == 3:
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img_array
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            text = pytesseract.image_to_string(
+                Image.fromarray(thresh),
+                lang='fra+eng',
+                config='--oem 3 --psm 6'
+            )
+            text = normalize_spaces(text)
+        return normalize_unicode(text.strip())
+    except Exception as e:
+        print(f"⚠️ Erreur OCR: {e}")
+        return ""
+
+
+def extract_entities_with_spacy(text):
+    """✅ Extraction d'entités nommées avec spaCy"""
+    if not SPACY_AVAILABLE or not nlp or not text:
+        return {}
+    
+    doc = nlp(text)
+    entities = {'organizations': [], 'dates': [], 'locations': [], 'persons': [], 'skills': []}
+    
+    for ent in doc.ents:
+        if ent.label_ in ['ORG', 'ORGANIZATION']:
+            entities['organizations'].append(ent.text)
+        elif ent.label_ in ['DATE', 'TIME']:
+            entities['dates'].append(ent.text)
+        elif ent.label_ in ['GPE', 'LOC', 'LOCATION']:
+            entities['locations'].append(ent.text)
+        elif ent.label_ in ['PERSON']:
+            entities['persons'].append(ent.text)
+    
+    skill_patterns = [
+        r'\b(gestion|analyse|audit|contrôle|reporting|conformité|risque)\b',
+        r'\b(ifrs|cobac|bceao|var|alm|ficc|bâle)\b',
+        r'\b(excel|vba|python|sql|sap|oracle)\b'
+    ]
+    for pattern in skill_patterns:
+        matches = re.findall(pattern, text.lower())
+        entities['skills'].extend(matches)
+    
+    return entities
+
+
 def extract_text_from_pdf_robust(filepath):
     text = ""
     if PDFPLUMBER_AVAILABLE:
@@ -472,28 +613,34 @@ def extract_text_from_txt(filepath, raw_bytes=None):
 
 
 def extract_text_robust(filepath, filename):
+    """✅ Extraction robuste avec fallback OCR pour documents scannés"""
     if not filepath or not os.path.exists(filepath):
         print(f"⚠️ Fichier introuvable: {filepath}")
         return ""
-    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    raw_bytes = None
-    if CHARDET_AVAILABLE and ext in ('doc', 'docx', 'txt'):
-        try:
-            with open(filepath, 'rb') as f:
-                raw_bytes = f.read()
-        except Exception as e:
-            print(f"⚠️ Erreur lecture binaire: {e}")
-    if ext == 'pdf':
-        return extract_text_from_pdf_robust(filepath)
-    elif ext in ('doc', 'docx'):
+    
+    file_type = detect_file_type(filepath)
+    
+    if file_type == 'pdf':
+        text = extract_text_from_pdf_robust(filepath)
+        if len(text.strip()) < 100 and OCR_AVAILABLE:
+            print(f"🔍 PDF scanné détecté → activation OCR pour {filename}")
+            ocr_text = extract_text_with_ocr(filepath, filename)
+            if len(ocr_text.strip()) > len(text.strip()):
+                return ocr_text
+        return text
+    elif file_type in ['doc', 'docx']:
+        raw_bytes = None
+        if CHARDET_AVAILABLE:
+            try:
+                with open(filepath, 'rb') as f:
+                    raw_bytes = f.read()
+            except Exception:
+                pass
         return extract_text_from_docx_robust(filepath, raw_bytes)
-    elif ext == 'txt':
-        return extract_text_from_txt(filepath, raw_bytes)
-    if raw_bytes:
-        try:
-            return normalize_unicode(normalize_spaces(raw_bytes.decode('utf-8', errors='ignore').strip()))
-        except Exception:
-            pass
+    elif file_type == 'image' and OCR_AVAILABLE:
+        return extract_text_with_ocr(filepath, filename)
+    elif file_type == 'txt':
+        return extract_text_from_txt(filepath)
     return ""
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -533,9 +680,7 @@ def check_current_employment_financial(cv_text):
 
 
 def check_cv_letter_consistency(cv_text, letter_text, poste):
-    """
-    ✅ AJUSTEMENT #1 : Détection assouplie - CV OU Lettre suffit
-    """
+    """✅ AJUSTEMENT #1 : Détection assouplie - CV OU Lettre suffit"""
     if poste == "Market Risk Officer":
         keywords = [
             'var', 'value at risk', 'stress testing', 'trading',
@@ -559,9 +704,7 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
 
 
 def validate_financial_institution_for_market_risk(text):
-    """
-    ✅ AJUSTEMENT #2 : Ignorer expériences hors secteur si anciennes (avant 2015)
-    """
+    """✅ AJUSTEMENT #2 : Ignorer expériences hors secteur si anciennes (<2015)"""
     text_lower = text.lower()
     has_commercial = COMMERCIAL_BANK_PATTERN.search(text_lower)
     has_microfinance = MICROFINANCE_PATTERN.search(text_lower)
@@ -572,7 +715,6 @@ def validate_financial_institution_for_market_risk(text):
         # ✅ AJUSTEMENT : Même si secteur non-financier présent, valider si expérience bancaire existe
         if has_non_financial:
             # Vérifier si l'expérience non-financière est ancienne (avant 2015)
-            # Chercher des années dans le texte
             years = re.findall(r'(19|20)\d{2}', text)
             old_experience = any(int(y) < 2015 for y in years if y.isdigit())
             
@@ -704,13 +846,10 @@ def is_stage_block(block_text):
 
 
 def extract_duration_years_from_block(block_text):
-    """
-    ✅ AJUSTEMENT #3 : Reconnaissance dates renforcée
-    """
+    """✅ AJUSTEMENT #3 : Reconnaissance dates renforcée"""
     years = 0.0
     text = block_text.lower().translate(_ACCENT_MAP)
     
-    # Durée explicite
     m = re.search(r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)', text)
     if m:
         try:
@@ -996,6 +1135,12 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     normalized = normalize_for_matching(raw_full)[0]
     detected_lang = detect_language(cv_text[:500]) if cv_text else None
     print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
+
+    # ✅ Extraction entités avec spaCy si disponible
+    if SPACY_AVAILABLE and nlp:
+        entities = extract_entities_with_spacy(raw_full)
+        if entities['organizations']:
+            print(f"🔍 spaCy NER: organisations={entities['organizations'][:3]}")
 
     intelligent_flags = []
     is_consistent, consistency_reason = check_cv_letter_consistency(cv_text, lettre_text or "", poste)
@@ -1486,10 +1631,11 @@ if __name__ == '__main__':
     print(f"   2️⃣ Expériences hors secteur ignorées si anciennes (<2015)")
     print(f"   3️⃣ Reconnaissance dates renforcée: 'A nos jours', 'depuis 2018'")
     print(f"   4️⃣ Mots-clés Market Risk enrichis: stress testing, alm, fx, reporting...")
-    print(f"✅ ZEBKALBA: ACCEPTÉ (UBA/ECOBANK détectés + mots-clés dans lettre validés)")
+    print(f"🔍 OCR/NLP: {'✅' if OCR_AVAILABLE else '❌'} Tesseract | {'✅' if SPACY_AVAILABLE else '❌'} spaCy | {'✅' if MAGIC_AVAILABLE else '❌'} python-magic")
+    print(f"✅ ZEBKALBA: ACCEPTÉ (UBA/ECOBANK détectés + mots-clés dans lettre validés + OCR si besoin)")
     print(f"❌ SANDANGA: REJETÉ (GLS=logistique = emploi actuel hors secteur)")
     print(f"❌ DJELASSEM: REJETÉ (World Vision=ONG, ENCOBAT=holding ≠ banque)")
-    print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(normalize_spaces) | TXT(multi-encodage)")
+    print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext>OCR) | DOCX(normalize_spaces) | Images(OCR)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
     print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, A nos jours, Juin2018, depuis 2018, etc.)")
     print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | 📕 PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
