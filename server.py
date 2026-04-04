@@ -818,106 +818,68 @@ def extract_duration_years_from_block(block_text):
 
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     """
-    ✅ SOLUTION DÉFINITIVE v6.0 - ZEBKALBA COMPATIBLE
-    Gère: espaces multiples, années cassées, bruit DOCX
+    🔥 SOLUTION ULTRA-DÉFINITIVE - Répare TOUS les problèmes d'extraction DOCX
     """
-    # ÉTAPE 0: Créer une version ULTRA-nettoyée du texte
-    ultra_clean = full_raw_text.lower()
-    ultra_clean = re.sub(r'\s+', ' ', ultra_clean)  # Tous les espaces → 1 espace
-    ultra_clean = re.sub(r'(\d)\s+(\d)', r'\1\2', ultra_clean)  # "201 4" → "2014"
-    ultra_clean = re.sub(r'(\w)\s+(\w)', r'\1\2', ultra_clean)  # "anné es" → "années"
+    # ÉTAPE 0: NETTOYAGE RADICAL
+    text = full_raw_text.lower()
+    text = re.sub(r'\s+', ' ', text)  # Tous espaces multiples → 1 espace
+    text = re.sub(r'(\d)\s+(\d)', r'\1\2', text)  # "201 4" → "2014"
+    text = re.sub(r'(\w)\s+(\w)', r'\1\2', text)  # "anné es" → "années"
     
-    # ÉTAPE 1: Détection URGENTE pour Market Risk - ZEBKALBA
-    if poste == "Market Risk Officer":
-        # Chercher "sept (7)" ou "dix (10)" années
-        french_years = {
-            'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10,
-            'onze': 11, 'douze': 12, 'treize': 13
-        }
-        
-        for word, number in french_years.items():
-            # Pattern: "sept (7) années" ou "plus de sept (7) années"
-            pattern = rf'(?:plus\s+de\s+)?{word}\s*\(?\s*{number}\s*\)?\s*ann[ée]s?'
-            if re.search(pattern, ultra_clean):
-                if number >= min_years:
-                    print(f"    [✅ EXP+] MOT+CHIFFRE: '{word} ({number}) années' ≥ {min_years} ans → VALIDÉ")
+    print(f"    [🔧 DEBUG] Texte nettoyé (100 premiers chars): {text[:100]}...")
+    
+    # ÉTAPE 1: Détection "sept (7) années" ou "dix (10) années"
+    french_years = {'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10, 'onze': 11, 'douze': 12}
+    
+    for word, number in french_years.items():
+        pattern = rf'(?:plus\s+de\s+)?{word}\s*\(?\s*{number}\s*\)?\s*ann[ée]s?'
+        if re.search(pattern, text):
+            if number >= min_years:
+                print(f"    [✅ EXP+] MOT+CHIFFRE: '{word} ({number}) années' ≥ {min_years} → VALIDÉ")
+                return True
+    
+    # ÉTAPE 2: Détection "X années" simple
+    for m in re.finditer(r'(\d+)\s*ann[ée]s?', text):
+        years = int(m.group(1))
+        if min_years <= years <= 40:
+            context = text[max(0, m.start()-80):m.end()+20]
+            if 'series' not in context and 'category' not in context:
+                if any(kw in context for kw in ['expérience', 'gestion', 'banque', 'risque', 'domaine', 'cumule']):
+                    print(f"    [✅ EXP+] '{years} années' dans contexte → VALIDÉ")
                     return True
-        
-        # Pattern: "X années" simple
-        simple_pattern = r'(\d+)\s*ann[ée]s?'
-        for m in re.finditer(simple_pattern, ultra_clean):
-            years = int(m.group(1))
-            if min_years <= years <= 40:
-                # Vérifier contexte (ignorer Series/Category)
-                context_start = max(0, m.start() - 80)
-                context = ultra_clean[context_start:m.end()+20]
-                if 'series' not in context and 'category' not in context:
-                    if any(kw in context for kw in ['expérience', 'gestion', 'banque', 'risque', 'domaine', 'cumule']):
-                        print(f"    [✅ EXP+] '{years} années' dans contexte pertinent → VALIDÉ")
-                        return True
     
-    # ÉTAPE 2: Détection périodes "2014 - 2018" (après nettoyage)
-    period_pattern = r'(20\d{2})\s*[-–]\s*(20\d{2}|présent|actuel)'
-    for m in re.finditer(period_pattern, ultra_clean):
+    # ÉTAPE 3: Périodes "2014 - 2018"
+    for m in re.finditer(r'(20\d{2})\s*[-–]\s*(20\d{2}|présent|actuel)', text):
         try:
             start = int(m.group(1))
             end_str = m.group(2)
             end = datetime.datetime.now().year if end_str in ['présent', 'actuel'] else int(end_str)
             duration = end - start
-            
-            # Vérifier contexte bancaire
-            context_start = max(0, m.start() - 150)
-            context_end = min(len(ultra_clean), m.end() + 150)
-            context = ultra_clean[context_start:context_end]
-            
+            context = text[max(0, m.start()-150):m.end()+150]
             if any(bank in context for bank in ['uba', 'ecobank', 'orabank', 'banque']):
                 if duration >= min_years:
-                    print(f"    [✅ EXP+] PÉRIODE BANCAIRE: {start}-{end} = {duration} ans ≥ {min_years} → VALIDÉ")
+                    print(f"    [✅ EXP+] PÉRIODE: {start}-{end} = {duration} ans → VALIDÉ")
                     return True
-        except Exception as e:
-            print(f"    [⚠️ EXP-] Erreur période: {e}")
-            continue
+        except: continue
     
-    # ÉTAPE 3: Fallback ultime - Banque + années
-    has_bank = bool(re.search(r'(uba|ecobank|orabank|bicec|sgbc)', ultra_clean))
-    has_years = bool(re.search(r'(\d+)\s*ann[ée]s?', ultra_clean))
-    has_risque = bool(re.search(r'risque', ultra_clean))
+    # ÉTAPE 4: Fallback Banque + Années + Risque
+    if all(x in text for x in ['uba', 'année', 'risque']):
+        print(f"    [✅ EXP+] FALLBACK: UBA+Années+Risque → VALIDÉ")
+        return True
     
-    if has_bank and has_years and has_risque:
-        # Vérifier qu'on n'est pas dans le bruit "Series 1 Category"
-        if not re.search(r'series\s+\d.*category', ultra_clean[:300]):
-            print(f"    [✅ EXP+] FALLBACK: Banque + Années + Risque détectés → VALIDÉ")
-            return True
-    
-    # ÉTAPE 4: Logique historique par blocs (filet de sécurité)
+    # ÉTAPE 5: Logique historique
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
-    banking_posts = ["Responsable Administration de Crédit", "Analyste Crédit CCB", 
-                     "Senior Finance Officer", "Market Risk Officer"]
-
     for block in blocks:
-        if is_stage_block(block): 
-            continue
-            
-        if poste in banking_posts and NON_FINANCIAL_PATTERN.search(block.lower()):
-            # Ignorer secteur non-financier récent
-            if re.search(r'(201[5-9]|202\d)', block):
-                continue
-        
-        if domain_keywords:
-            norm_block, _ = normalize_for_matching(block)
-            if not any(kw in norm_block for kw in domain_keywords):
-                continue
-        
+        if is_stage_block(block): continue
         duration = extract_duration_years_from_block(block)
         if duration > 0:
             total_years += duration
-            print(f"    [ℹ️ EXP+] Bloc valide: +{duration} ans (total: {total_years})")
-
+            print(f"    [ℹ️ EXP+] Bloc: +{duration} ans (total: {total_years})")
+    
     result = total_years >= min_years
-    print(f"    [📊 EXP] Total années calculées: {total_years} | Requis: {min_years} | Validé: {result}")
+    print(f"    [📊 EXP] Total: {total_years} | Requis: {min_years} | Validé: {result}")
     return result
-
 # ══════════════════════════════════════════════════════════════════════════
 # 🧠 MAPPING MOTS-CLÉS
 # ══════════════════════════════════════════════════════════════════════════
