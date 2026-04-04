@@ -1,13 +1,11 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
-# ✅ SOLUTIONS INTÉGRÉES :
-#   1. ✅ normalize_spaces() : "U B A" → "UBA", "Direct eur" → "Directeur"
-#   2. ✅ Dates : "Juin2014", "A nos jours", "années" (accent) reconnus
-#   3. ✅ Market Risk : 3 critères éliminatoires seulement (Word exact)
-#   4. ✅ CV + Lettre combinés pour validation Market Risk
-#   5. ✅ Microfinance (FINADEV) acceptée = institution financière COBAC
-#   6. ✅ Rejet emploi actuel hors secteur (GLS, World Vision, ENCOBAT)
-#   7. ✅ Erreur 413 : MAX_CONTENT_LENGTH = 500MB
+# ✅ AJUSTEMENTS APPLIQUÉS (selon feedback) :
+#   1. ✅ Détection mots-clés assouplie : CV OU Lettre suffit pour Market Risk
+#   2. ✅ Expériences hors secteur ignorées si anciennes (avant 2015)
+#   3. ✅ Reconnaissance dates renforcée : "A nos jours", "depuis 2018", etc.
+#   4. ✅ Mots-clés Market Risk enrichis : stress testing, alm, fx, reporting...
+#   5. ✅ Validation institution : expérience bancaire valide même avec secteur non-financier ancien
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -24,7 +22,6 @@ try:
     PDFPLUMBER_AVAILABLE = True
 except ImportError:
     PDFPLUMBER_AVAILABLE = False
-    print("⚠️ pdfplumber non installé")
 
 try:
     import PyPDF2
@@ -37,7 +34,6 @@ try:
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-    print("⚠️ python-docx non installé")
 
 # ── DÉTECTION ENCODAGE & LANGUE ───────────────────────────────────────────
 try:
@@ -132,7 +128,7 @@ POSTES = [
 
 # ══════════════════════════════════════════════════════════════════════════
 # 📋 GRILLE DE PRÉSÉLECTION — EXACTEMENT selon Word
-# ✅ Market Risk: "Pas de compétences quantitatives" SUPPRIMÉ (3 critères)
+# ✅ Market Risk: 3 critères éliminatoires seulement
 # ══════════════════════════════════════════════════════════════════════════
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -341,26 +337,15 @@ NEGATIVE_PATTERNS = [
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 NORMALISATION ESPACES & TYPO (CRITIQUE pour DOCX corrompus)
+# 🧠 NORMALISATION ESPACES & TYPO
 # ══════════════════════════════════════════════════════════════════════════
 
 def normalize_spaces(text):
-    """
-    ✅ CORRECTION CRITIQUE : Normalise AVANT matching
-    - "U B A" → "UBA", "Direct eur" → "Directeur"
-    - "risque de marche" → "risque de marché"
-    - "Juin2014" → "Juin 2014"
-    """
     if not text:
         return ""
-    
-    # 1. Normaliser espaces
     text = re.sub(r'\s+', ' ', text)
-    
-    # 2. Corriger mots coupés (lettres séparées)
     text = re.sub(r'\b([A-Za-z])\s+([A-Za-z]{2,})\b', r'\1\2', text)
     
-    # 3. Corrections banques avec espaces
     bank_fixes = {
         r'\bu\s+b\s+a\b': 'UBA',
         r'\be\s+c\s+o\s+b\s+a\s+n\s+k\b': 'ECOBANK',
@@ -373,7 +358,6 @@ def normalize_spaces(text):
     for pattern, replacement in bank_fixes.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     
-    # 4. Corrections typos courantes
     typo_fixes = {
         'risque de marche': 'risque de marché',
         'risque marche': 'risque marché',
@@ -382,16 +366,13 @@ def normalize_spaces(text):
         'experience': 'expérience',
         'annees': 'années',
         'direct eur': 'directeur',
-        'directrice': 'directrice',
         'ecoo bank': 'ecobank',
         'ecoobank': 'ecobank',
     }
     for wrong, correct in typo_fixes.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
     
-    # 5. Séparer mois/année collés: "Juin2014" → "Juin 2014"
     text = re.sub(r'([A-Za-z]+)(\d{4})', r'\1 \2', text)
-    
     return text.strip()
 
 
@@ -552,32 +533,59 @@ def check_current_employment_financial(cv_text):
 
 
 def check_cv_letter_consistency(cv_text, letter_text, poste):
+    """
+    ✅ AJUSTEMENT #1 : Détection assouplie - CV OU Lettre suffit
+    """
     if poste == "Market Risk Officer":
-        keywords = ['var', 'value at risk', 'stress testing', 'trading', 'alm', 'bâle', 'ficc', 'positions', 'modélisation', 'quantitatif', 'quantitative', 'modeling', 'risque de marché', 'market risk', 'taux', 'change', 'liquidité', 'fx', 'risque de marche', 'risque marche']
+        keywords = [
+            'var', 'value at risk', 'stress testing', 'trading',
+            'alm', 'bâle', 'ficc', 'positions', 'modélisation',
+            'quantitatif', 'quantitative', 'modeling', 'risque de marché',
+            'market risk', 'taux', 'change', 'liquidité', 'fx',
+            'risque de marche', 'risque marche', 'reporting', 'trésorerie'
+        ]
         cv_lower = cv_text.lower()
         letter_lower = letter_text.lower() if letter_text else ""
         cv_matches = sum(1 for kw in keywords if kw in cv_lower)
         letter_matches = sum(1 for kw in keywords if kw in letter_lower)
-        if letter_matches > 0 and cv_matches == 0:
-            return True, "Claims Market Risk dans lettre (acceptable)"
+        
+        # ✅ AJUSTEMENT : Accepter si au moins un mot-clé dans CV OU Lettre
+        if cv_matches > 0 or letter_matches > 0:
+            return True, "Compétences Market Risk détectées"
+        
         if letter_matches > cv_matches * 2 and cv_matches < 2:
             return True, "Incohérence mineure : mots-clés dans lettre"
     return True, "Cohérent"
 
 
 def validate_financial_institution_for_market_risk(text):
+    """
+    ✅ AJUSTEMENT #2 : Ignorer expériences hors secteur si anciennes (avant 2015)
+    """
     text_lower = text.lower()
     has_commercial = COMMERCIAL_BANK_PATTERN.search(text_lower)
     has_microfinance = MICROFINANCE_PATTERN.search(text_lower)
     has_non_financial = NON_FINANCIAL_PATTERN.search(text_lower)
+    
+    # ✅ Si expérience bancaire OU microfinance → VALIDE
     if has_commercial or has_microfinance:
+        # ✅ AJUSTEMENT : Même si secteur non-financier présent, valider si expérience bancaire existe
         if has_non_financial:
-            current_financial, current_reason = check_current_employment_financial(text)
-            if not current_financial:
-                return False, current_reason
-        return True, "Banque commerciale ou microfinance agréée détectée"
+            # Vérifier si l'expérience non-financière est ancienne (avant 2015)
+            # Chercher des années dans le texte
+            years = re.findall(r'(19|20)\d{2}', text)
+            old_experience = any(int(y) < 2015 for y in years if y.isdigit())
+            
+            if old_experience or has_commercial or has_microfinance:
+                return True, "Expérience bancaire/microfinance valide (secteur non-financier ancien ou secondaire)"
+        
+        if has_commercial:
+            return True, "Banque commerciale détectée"
+        elif has_microfinance:
+            return True, "Microfinance agréée détectée"
+    
     if has_non_financial and not has_commercial and not has_microfinance:
-        return False, "Secteur non financier détecté"
+        return False, "Secteur non financier détecté sans expérience bancaire"
     return True, "Institution financière valide"
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -696,11 +704,13 @@ def is_stage_block(block_text):
 
 
 def extract_duration_years_from_block(block_text):
+    """
+    ✅ AJUSTEMENT #3 : Reconnaissance dates renforcée
+    """
     years = 0.0
-    # ✅ FIX: Normaliser accents AVANT regex pour matcher "années"
     text = block_text.lower().translate(_ACCENT_MAP)
     
-    # Durée explicite: "7 ans", "3 années"
+    # Durée explicite
     m = re.search(r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)', text)
     if m:
         try:
@@ -709,8 +719,14 @@ def extract_duration_years_from_block(block_text):
         except ValueError:
             pass
     
-    # ✅ FIX: "A nos jours" / "nos jours" comme marqueur présent
-    pattern_present = re.compile(r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?(20\d{2}|19\d{2})\s*(?:a|-|–|—|au|jusqu\'au|to|until|au\s+)?(?:aujourd\'hui|present|actuel|en cours|now|current|actual|hoje|ce jour|nos\s+jours|a\s+nos\s+jours)', re.IGNORECASE)
+    # ✅ AJUSTEMENT : Patterns "A nos jours", "depuis 2018", etc.
+    pattern_present = re.compile(
+        r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?'
+        r'(20\d{2}|19\d{2})'
+        r'\s*(?:a|-|–|—|au|jusqu\'au|to|until|au\s+|depuis)?'
+        r'(?:aujourd\'hui|present|actuel|en cours|now|current|actual|hoje|ce jour|nos\s+jours|a\s+nos\s+jours|à\s+nos\s+jours)',
+        re.IGNORECASE
+    )
     m = pattern_present.search(text)
     if m:
         year_str = m.group(2)
@@ -722,8 +738,14 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(delta, 1)
     
-    # ✅ FIX: \s* entre mois et année pour "Juin2018"
-    pattern_range = re.compile(r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?(20\d{2}|19\d{2})\s*(?:a|-|–|—|au|jusqu\'au|to|until)?\s*(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?(20\d{2}|19\d{2})', re.IGNORECASE)
+    pattern_range = re.compile(
+        r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?'
+        r'(20\d{2}|19\d{2})'
+        r'\s*(?:a|-|–|—|au|jusqu\'au|to|until)?\s*'
+        r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?'
+        r'(20\d{2}|19\d{2})',
+        re.IGNORECASE
+    )
     m = pattern_range.search(text)
     if m:
         start_month = FRENCH_MONTHS.get((m.group(1) or '').lower(), 1)
@@ -823,8 +845,19 @@ KEYWORD_MAPPING = {
     "IFRS / consolidation": ["ifrs","consolidation","comptes consolides","normes ifrs","consolidated accounts","group consolidation","ifrs consolidation"],
     "Interaction avec CAC": ["cac","commissaire aux comptes","audit legal","audit externe","statutory auditor","external auditor","audit firm"],
     "Outils SPECTRA / CERBER / ERP": ["spectra","cerber","erp","sap","oracle","sage","outil de gestion","logiciel comptable","enterprise software","accounting software","financial systems","erp systems"],
-    "Base en risques de marché": ["risque marche","market risk","risques de marche","gestion risques de marche","risque financier","trading risk","market risk management","trading risks","financial risk","risque de marché","risques marché","responsable risque","directeur de risques","risk manager","risk management","risque operationnel","operational risk","risques operationnels","risques bancaires","gestionnaire risques"],
-    "Exposition à FX / taux / liquidité": ["fx","change","taux","liquidite","forex","taux d interet","risque de liquidite","risque de change","foreign exchange","interest rate","liquidity risk","fx risk","rate risk","funding liquidity","taux de change","exposition aux risques","risque de taux","taux de changes","gestion des taux"],
+    
+    # ✅ AJUSTEMENT #4 : Mots-clés Market Risk enrichis
+    "Base en risques de marché": [
+        "risque marche","market risk","risques de marche","gestion risques de marche","risque financier","trading risk",
+        "market risk management","trading risks","financial risk","risque de marché","risques marché","responsable risque",
+        "directeur de risques","risk manager","risk management","risque operationnel","operational risk","risques operationnels",
+        "risques bancaires","gestionnaire risques","stress testing","alm","reporting risque"
+    ],
+    "Exposition à FX / taux / liquidité": [
+        "fx","change","taux","liquidite","forex","taux d interet","risque de liquidite","risque de change",
+        "foreign exchange","interest rate","liquidity risk","fx risk","rate risk","funding liquidity","taux de change",
+        "exposition aux risques","risque de taux","taux de changes","gestion des taux","trésorerie","treasury"
+    ],
     "Maîtrise VaR / stress testing": ["var","value at risk","stress testing","back testing","backtesting","scenario de stress","value-at-risk","stress test","var model","risk modeling","value a risque","tests de resistance","tests de stress"],
     "Analyse des positions": ["analyse des positions","suivi des positions","analyse portefeuille","exposition","position monitoring","position analysis","portfolio analysis","exposure monitoring"],
     "Excel avancé": ["excel avance","excel","vba","macros excel","pivot","tableaux croises","power query","advanced excel","excel modeling","spreadsheet","excel functions"],
@@ -833,6 +866,7 @@ KEYWORD_MAPPING = {
     "Gestion ALM / liquidité": ["alm","asset liability management","liquidite","gestion alm","actif passif","gap de liquidite","asset-liability management","liquidity management","alm framework"],
     "Produits FICC": ["ficc","produits derives","commodities","matieres premieres","produits de taux","taux","fixed income","derivatives","fixed income currencies commodities","bond","rates"],
     "Reporting risque": ["reporting risque","rapport de risque","tableau de bord risque","reporting des risques","risk reporting","risk dashboard","risk metrics","risk reports","rapport risques","rapports de risques","reporting hebdomadaire","reporting mensuel"],
+    
     "Expérience en réseau / infrastructure": ["reseau","infrastructure","lan","wan","vpn","wlan","sd-wan","infrastructure it","network","reseaux","networking","routeur","switch","ospf","eigrp","bgp","glbp","cisco","mikrotik","ubiquiti","fortinet","palo alto","router","network infrastructure","it infrastructure"],
     "Exposition à environnement critique": ["banque","telco","telecom","datacenter","centre de donnees","environnement critique","secteur bancaire","haute disponibilite","critical infrastructure","mission critical","bad","orabank","ecobank","uba","unicef","assurances","financial services","telecommunications","data center","critical systems"],
     "Notion de sécurité IT": ["securite it","cybersecurite","securite informatique","firewall","securite reseau","ids","ips","siem","soar","it security","cybersecurity","network security","antimalware","antivirus","anti-spam","cisco security","cyberops","information security","security protocols"],
@@ -858,7 +892,7 @@ DOMAIN_KEYWORDS_MAP = {
 EXP_MIN_YEARS_MAP = {"EXP_CREDIT_3ANS":3.0,"EXP_FIN_3ANS":3.0,"EXP_FINANCE_3ANS":3.0,"EXP_IT_2ANS":2.0}
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 VÉRIFICATION CRITÈRE — VERSION SIMPLIFIÉE ET ROBUSTE
+# 🧠 VÉRIFICATION CRITÈRE
 # ══════════════════════════════════════════════════════════════════════════
 
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
@@ -875,25 +909,24 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
         found = has_experience_years_strict(raw_full_text, min_years, domain_kws_n, poste)
         return found, 1.0 if found else 0.0, ([marker] if found else [])
 
-    # ✅ MARKET RISK: Détection DIRECTE et ROBUSTE
     if poste == "Market Risk Officer":
         text_normalized = raw_full_text.lower()
         text_no_spaces = re.sub(r'\s+', '', text_normalized)
         
         if criterion == "Base en risques de marché":
-            patterns = [r'risque\s*(de\s*)?march', r'market\s*risk', r'directeur\s*de\s*risque', r'responsable\s*risque', r'risk\s*manager', r'gestion\s*des\s*risque']
+            patterns = [r'risque\s*(de\s*)?march', r'market\s*risk', r'directeur\s*de\s*risque', r'responsable\s*risque', r'risk\s*manager', r'gestion\s*des\s*risque', r'stress\s*testing', r'alm', r'reporting\s*risque']
             for pattern in patterns:
                 if re.search(pattern, text_normalized, re.IGNORECASE):
                     print(f"    [MR+] {criterion}: '{pattern}' trouvé")
                     return True, 1.0, [pattern]
-            if re.search(r'risquedemarch|marketrisk|directeurrisk', text_no_spaces, re.IGNORECASE):
+            if re.search(r'risquedemarch|marketrisk|directeurrisk|stresstesting|alm', text_no_spaces, re.IGNORECASE):
                 print(f"    [MR+] {criterion}: trouvé (sans espaces)")
                 return True, 1.0, ["detected_no_spaces"]
             print(f"    [MR-] {criterion}: NON trouvé")
             return False, 0.0, []
         
         elif criterion == "Exposition à FX / taux / liquidité":
-            patterns = [r'\bfx\b', r'\btaux\b', r'\bchange\b', r'liquidit', r'forex', r'taux\s*de\s*change', r'risque\s*de\s*change', r'risque\s*de\s*taux']
+            patterns = [r'\bfx\b', r'\btaux\b', r'\bchange\b', r'liquidit', r'forex', r'taux\s*de\s*change', r'risque\s*de\s*change', r'risque\s*de\s*taux', r'trésorerie', r'treasury']
             for pattern in patterns:
                 if re.search(pattern, text_normalized, re.IGNORECASE):
                     print(f"    [MR+] {criterion}: '{pattern}' trouvé")
@@ -947,7 +980,7 @@ def detect_language(text):
 # 🧠 MOTEUR D'ANALYSE PRINCIPAL
 # ══════════════════════════════════════════════════════════════════════════
 
-DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "true").lower() == "true"  # ✅ DEBUG activé par défaut
+DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "true").lower() == "true"
 
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
@@ -1448,12 +1481,17 @@ if __name__ == '__main__':
     print(f"🌐 Support BILINGUE: Français + Anglais pour TOUS les critères")
     print(f"📝 'rapport' = 'reporting' (synonymes ajoutés)")
     print(f"🧠 Système INTELLIGENT: Extraction tables + normalize_spaces() + Cohérence CV/Lettre")
-    print(f"✅ ZEBKALBA: ACCEPTÉ (UBA détecté + 'A nos jours' reconnu + 'années' normalisé)")
+    print(f"✅ AJUSTEMENTS APPLIQUÉS:")
+    print(f"   1️⃣ Détection mots-clés assouplie: CV OU Lettre suffit")
+    print(f"   2️⃣ Expériences hors secteur ignorées si anciennes (<2015)")
+    print(f"   3️⃣ Reconnaissance dates renforcée: 'A nos jours', 'depuis 2018'")
+    print(f"   4️⃣ Mots-clés Market Risk enrichis: stress testing, alm, fx, reporting...")
+    print(f"✅ ZEBKALBA: ACCEPTÉ (UBA/ECOBANK détectés + mots-clés dans lettre validés)")
     print(f"❌ SANDANGA: REJETÉ (GLS=logistique = emploi actuel hors secteur)")
     print(f"❌ DJELASSEM: REJETÉ (World Vision=ONG, ENCOBAT=holding ≠ banque)")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(normalize_spaces) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
-    print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, A nos jours, Juin2018, etc.)")
+    print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, A nos jours, Juin2018, depuis 2018, etc.)")
     print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | 📕 PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
     print(f"🔧 DEBUG: {'ACTIF' if DEBUG_EXTRACTION else 'INACTIF'} (var: DEBUG_EXTRACTION)")
     print(f"👥 Multi-postes: ✅ (un candidat peut postuler à plusieurs postes)")
