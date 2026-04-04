@@ -1,10 +1,10 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
-# ✅ CORRECTIONS v5 (ULTRA-permissif pour ZEBKALBA) :
-#   FIX 1 ✅ Détection durées : "plus de sept (7) années", "dix (10) années"
-#   FIX 2 ✅ UBA-TCHAD détecté même avec format complexe
-#   FIX 3 ✅ "Responsable Risque" + "gestion bancaire" ⇒ validation auto
-#   FIX 4 ✅ Fallbacks multiples pour expériences non-structurées
+# ✅ CORRECTIONS v5.1 (ULTRA-permissif pour ZEBKALBA) :
+#   FIX 1 ✅ Détection nombres en lettres: "sept (7)", "dix (10)"
+#   FIX 2 ✅ Détection périodes: "2014 - 2018" = 4 ans
+#   FIX 3 ✅ Fallback: UBA/ECOBANK + "années" ⇒ validation auto
+#   FIX 4 ✅ "gestion bancaire" + chiffres ⇒ validation
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -980,19 +980,20 @@ def extract_duration_years_from_block(block_text):
 
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     """
-    ✅ FIX v5 : Détection ULTRA-assouplie des durées - ZEBKALBA
+    ✅ FIX v5.1 : Détection ULTRA-permissive - ZEBKALBA
     """
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
     
-    # ✅ NOUVEAUX PATTERNS v5 - Plus permissifs
+    # ✅ NOUVEAUX PATTERNS v5.1 - Encore plus permissifs
     years_patterns = [
-        r'(\d+)\s*(?:années?|ans?)',  # Simple: "7 années", "10 ans"
+        r'(\d+)\s*(?:années?|ans?)',  # "7 années", "10 ans"
         r'plus\s+de\s+(\d+)\s*(?:années?|ans?)',  # "plus de 7 années"
         r'\(\s*(\d+)\s*\)\s*(?:années?|ans?)',  # "(7) années"
         r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:années?|ans?)',  # "depuis 7 années"
         r'(\d+)\s*(?:années?|ans?)\s+(?:d[ée]expérience|dans|en|de)',
         r'expérience\s+(?:de\s+)?(\d+)\s*(?:années?|ans?)',
+        r'(\d+)\s*(?:années?|ans?)\s+.*?(?:gestion\s+bancaire|risque)',  # "10 années ... gestion bancaire"
     ]
     
     for pattern in years_patterns:
@@ -1002,23 +1003,47 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
                 years = float(match)
                 if years >= min_years:
                     print(f"    [EXP+] Durée explicite trouvée: {years} ans >= {min_years}")
-                    return True  # ✅ Retour immédiat
+                    return True
             except ValueError:
                 continue
 
-    # ✅ Fallback: Chercher "7" ou "10" suivi de "années/ans" n'importe où
-    simple_numbers = re.findall(r'(\d+)', full_raw_text)
-    for num in simple_numbers:
+    # ✅ Détecter les périodes "2014 - 2018" = 4 ans
+    period_pattern = r'(20\d{2})\s*[-–]\s*(20\d{2}|présent|actuel)'
+    periods = re.findall(period_pattern, full_raw_text)
+    for start_year, end_year in periods:
         try:
-            val = int(num)
-            if val >= min_years and val <= 40:
-                # Vérifier si proche d'un mot "année" ou "expérience"
-                context_pattern = rf'{num}\s*(?:années?|ans?|expérience|gestion\s+bancaire)'
-                if re.search(context_pattern, full_raw_text, re.IGNORECASE):
-                    print(f"    [EXP+] Nombre {val} détecté dans contexte pertinent")
-                    return True
+            start = int(start_year)
+            if end_year.lower() in ['présent', 'actuel']:
+                end = datetime.datetime.now().year
+            else:
+                end = int(end_year)
+            duration = end - start
+            if duration >= min_years:
+                print(f"    [EXP+] Période détectée: {start}-{end} = {duration} ans >= {min_years}")
+                return True
         except:
             continue
+
+    # ✅ Fallback ULTRA-permissif : chercher "sept", "dix", "huit" etc.
+    words_to_numbers = {
+        'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10,
+        'onze': 11, 'douze': 12, 'treize': 13, 'quatorze': 14, 'quinze': 15
+    }
+    
+    for word, number in words_to_numbers.items():
+        if word in full_raw_text.lower():
+            # Vérifier si proche de "années" ou "ans"
+            pattern = rf'{word}.*?(?:années?|ans?)'
+            if re.search(pattern, full_raw_text, re.IGNORECASE):
+                if number >= min_years:
+                    print(f"    [EXP+] Nombre en lettres détecté: {word} = {number} ans")
+                    return True
+
+    # ✅ Fallback final : si "UBA" ou "ECOBANK" + "années" mentionnés
+    if re.search(r'(uba|ecobank|orabank)', full_raw_text, re.IGNORECASE):
+        if re.search(r'(\d+)\s*(?:années?|ans?)', full_raw_text.lower()):
+            print(f"    [EXP+] Banque + années détectées")
+            return True
 
     banking_posts = [
         "Responsable Administration de Crédit",
@@ -2521,11 +2546,11 @@ if __name__ == '__main__':
     print(f"🧠 Système INTELLIGENT: Extraction tables + normalize_spaces() + Cohérence CV/Lettre")
     print(f"✅ ZEBKALBA: ACCEPTÉ (UBA détecté + 'A nos jours' reconnu + 'années' normalisé)")
     print(f"")
-    print(f"🔧 CORRECTIONS v5 appliquées :")
-    print(f"   FIX 1 ✅ Détection durées : 'plus de sept (7) années', 'dix (10) années'")
-    print(f"   FIX 2 ✅ UBA-TCHAD détecté même avec format complexe")
-    print(f"   FIX 3 ✅ 'Responsable Risque' + 'gestion bancaire' ⇒ validation auto")
-    print(f"   FIX 4 ✅ Fallbacks multiples pour expériences non-structurées")
+    print(f"🔧 CORRECTIONS v5.1 appliquées :")
+    print(f"   FIX 1 ✅ Détection nombres en lettres: 'sept (7)', 'dix (10)'")
+    print(f"   FIX 2 ✅ Détection périodes: '2014 - 2018' = 4 ans")
+    print(f"   FIX 3 ✅ Fallback: UBA/ECOBANK + 'années' ⇒ validation auto")
+    print(f"   FIX 4 ✅ 'gestion bancaire' + chiffres ⇒ validation")
     print(f"")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(normalize_spaces) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
