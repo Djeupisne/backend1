@@ -629,55 +629,102 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         return True, "Cohérent"
 
 
+# ✅ Dictionnaire pour convertir les nombres en lettres
+NUMBER_WORDS = {
+    "un": 1, "une": 1, "deux": 2, "trois": 3, "quatre": 4, "cinq": 5,
+    "six": 6, "sept": 7, "huit": 8, "neuf": 9, "dix": 10,
+    "onze": 11, "douze": 12, "treize": 13, "quatorze": 14,
+    "quinze": 15, "seize": 16, "dix-sept": 17, "dix-huit": 18,
+    "dix-neuf": 19, "vingt": 20
+}
+
+YEARS_PATTERN = re.compile(
+    r'(\d+|\b(?:' + '|'.join(NUMBER_WORDS.keys()) + r')\b)\s*(années?|ans?)',
+    re.IGNORECASE
+)
+
+def extract_years_experience(text):
+    """
+    Détecte les années d'expérience en chiffres ou en lettres
+    """
+    matches = YEARS_PATTERN.findall(text)
+    for match in matches:
+        val = match[0].lower()
+        if val.isdigit():
+            return int(val)
+        elif val in NUMBER_WORDS:
+            return NUMBER_WORDS[val]
+    return 0
+
+def calculate_duration_from_dates(text):
+    """
+    Calcule la durée entre une date de début et 'présent / à nos jours'
+    Exemple : 'Juin 2018 – A nos jours' => 8 ans en 2026
+    """
+    date_match = re.search(r'(\d{4})\s*[-–]\s*(présent|a nos jours|à nos jours|actuel|now)', text, re.IGNORECASE)
+    if date_match:
+        start_year = int(date_match.group(1))
+        current_year = datetime.datetime.now().year
+        return current_year - start_year
+    return 0
+
 def validate_financial_institution_for_market_risk(text):
     """
-    ✅ FIX v5 : Détection ULTRA-permissive pour UBA/ECOBANK - ZEBKALBA
+    ✅ Détection ULTRA-permissive pour UBA/ECOBANK/ORABANK
+    + Reconnaissance des durées en lettres
+    + Calcul automatique des années à partir des dates
     """
     text_lower = text.lower()
-    
-    # ✅ Normaliser d'abord les espaces
     text_normalized = normalize_spaces(text_lower)
 
     has_commercial = COMMERCIAL_BANK_PATTERN.search(text_normalized)
     has_microfinance = MICROFINANCE_PATTERN.search(text_normalized)
     has_non_financial = NON_FINANCIAL_PATTERN.search(text_normalized)
 
-    # ✅ Patterns ULTRA-permissifs pour UBA/ECOBANK
+    # ✅ Patterns ULTRA-permissifs pour UBA/ECOBANK/ORABANK
     uba_patterns = [
-        r'u\s*b\s*a',  # UBA avec espaces
-        r'uba[-\s]*tchad',  # UBA-TCHAD
-        r'uba[-\s]*congo',  # UBA-CONGO
-        r'ubagroup',  # UBA Group
+        r'u\s*b\s*a',
+        r'uba[-\s]*tchad',
+        r'uba[-\s]*congo',
+        r'ubagroup',
     ]
-    
     ecobank_patterns = [
-        r'e\s*c\s*o\s*b\s*a\s*n\s*k',  # ECOBANK avec espaces
-        r'ecobank[-\s]*tchad',  # ECOBANK-TCHAD
+        r'e\s*c\s*o\s*b\s*a\s*n\s*k',
+        r'ecobank[-\s]*tchad',
     ]
-    
     orabank_patterns = [
-        r'o\s*r\s*a\s*b\s*a\s*n\s*k',  # ORABANK
+        r'o\s*r\s*a\s*b\s*a\s*n\s*k',
         r'orabank[-\s]*tchad',
     ]
 
     for pattern in uba_patterns + ecobank_patterns + orabank_patterns:
         if re.search(pattern, text, re.IGNORECASE):
-            print(f"    [BANK+] Banque détectée par pattern: {pattern}")
-            return True, "Banque commerciale détectée (UBA/ECOBANK/ORABANK)"
+            years = extract_years_experience(text)
+            if years < 3:
+                years = calculate_duration_from_dates(text)
+            if years >= 3:
+                return True, f"Expérience bancaire détectée ({years} ans)"
+            return True, "Banque commerciale détectée (durée non précisée)"
 
     if has_commercial or has_microfinance:
+        years = extract_years_experience(text)
+        if years < 3:
+            years = calculate_duration_from_dates(text)
+        if years >= 3:
+            return True, f"Expérience institution financière détectée ({years} ans)"
         if has_commercial:
-            return True, "Banque commerciale détectée"
+            return True, "Banque commerciale détectée (durée non précisée)"
         elif has_microfinance:
-            return True, "Microfinance agréée détectée"
+            return True, "Microfinance agréée détectée (durée non précisée)"
 
-    # ✅ Si "gestion bancaire" ou "risque" mentionné + années d'expérience
-    if re.search(r'gestion\s+bancaire', text_lower) or re.search(r'risque', text_lower):
-        years_match = re.search(r'(\d+)\s*(?:années?|ans?)', text_lower)
-        if years_match:
-            years = int(years_match.group(1))
-            if years >= 3:
-                return True, f"Expérience bancaire mentionnée ({years} ans)"
+    # ✅ Fallback : gestion bancaire ou risque + années
+    if "gestion bancaire" in text_lower or "risque" in text_lower:
+        years = extract_years_experience(text_lower)
+        if years < 3:
+            years = calculate_duration_from_dates(text_lower)
+        if years >= 3:
+            return True, f"Expérience bancaire mentionnée ({years} ans)"
+        return True, "Expérience bancaire détectée mais durée non précisée"
 
     if has_non_financial and not has_commercial and not has_microfinance:
         recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
@@ -686,6 +733,7 @@ def validate_financial_institution_for_market_risk(text):
         return False, "Secteur non financier détecté (récent)"
 
     return True, "Institution financière valide"
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🔤 NORMALISATION TEXTE
