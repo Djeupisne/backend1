@@ -1641,14 +1641,14 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
 
     eliminatoire_failed = False
 
-    for i, crit in enumerate(grille['eliminatoire']):
-        key = f"elim_{i}"
-
-        original_keywords = None
+        for i, crit in enumerate(grille['eliminatoire']):  # ← 4 espaces
+        key = f"elim_{i}"                               # ← 8 espaces
+        
+        original_keywords = None                        # ← 8 espaces
         if detected_lang and detected_lang in {'en', 'es', 'pt'}:
-            original_keywords = KEYWORD_MAPPING.get(crit, [])
-
-               is_present, confidence, found_kws = check_criterion_match_advanced(
+            original_keywords = KEYWORD_MAPPING.get(crit, [])  # ← 12 espaces
+        
+        is_present, confidence, found_kws = check_criterion_match_advanced(  # ← 8 espaces
             crit, normalized, raw_full, poste=poste
         )
 
