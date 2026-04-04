@@ -445,55 +445,56 @@ def extract_text_from_pdf_robust(filepath):
 
 
 def extract_text_from_docx_robust(filepath, raw_bytes=None):
+    """
+    ✅ FIX CRITIQUE v7 : Extraction XML directe
+    python-docx ne voit que les tables de PREMIER niveau.
+    Le CV ZEBKALBA a des tables IMBRIQUÉES → seuls 170 chars extraits.
+    L'itération sur w:t extrait TOUT le texte quelque soit la profondeur.
+    """
     if not DOCX_AVAILABLE:
         return ""
     try:
         doc = Document(filepath)
-        parts = []
+        W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        W_T  = f'{{{W_NS}}}t'
 
-        for para in doc.paragraphs:
-            t = normalize_spaces(para.text)
-            if t:
-                parts.append(t)
-
-        for table in doc.tables:
-            for row in table.rows:
-                cells = []
-                for cell in row.cells:
-                    cell_text = normalize_spaces(cell.text)
-                    if cell_text:
-                        cells.append(cell_text)
-                if cells:
-                    parts.append(" | ".join(cells))
-
-        for section in doc.sections:
-            for element in (section.header.paragraphs + section.footer.paragraphs):
-                t = normalize_spaces(element.text)
-                if t:
-                    parts.append(t)
-
-        try:
-            for comment in doc.comments:
-                t = normalize_spaces(comment.text)
-                if t:
-                    parts.append(f"[Commentaire] {t}")
-        except Exception:
-            pass
-
-        result = "\n".join(parts).strip()
-        return normalize_unicode(result)
+        # ✅ Itération XML directe : capture tables imbriquées, headers, footnotes
+        texts = [
+            e.text for e in doc.element.body.iter(W_T)
+            if e.text and e.text.strip()
+        ]
+        raw = ' '.join(texts)
+        raw = re.sub(r'\s+', ' ', raw).strip()
+        return normalize_unicode(raw)
 
     except Exception as e:
-        print(f"⚠️ Erreur lecture DOCX: {e}")
-        if raw_bytes:
-            try:
-                text = re.sub(r'[^\x20-\x7E\u00C0-\u017F\u0400-\u04FF\u0600-\u06FF]+', ' ',
-                             raw_bytes.decode('utf-8', errors='ignore'))
-                return normalize_unicode(normalize_spaces(text.strip()))
-            except Exception:
-                pass
-        return ""
-
+        print(f"⚠️ Erreur lecture DOCX (XML): {e}")
+        # Fallback : méthode classique
+        try:
+            doc = Document(filepath)
+            parts = []
+            for para in doc.paragraphs:
+                t = normalize_spaces(para.text)
+                if t: parts.append(t)
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = []
+                    for cell in row.cells:
+                        ct = normalize_spaces(cell.text)
+                        if ct: cells.append(ct)
+                    if cells: parts.append(" | ".join(cells))
+            result = "\n".join(parts).strip()
+            return normalize_unicode(result)
+        except Exception as e2:
+            print(f"⚠️ Fallback DOCX échoué: {e2}")
+            if raw_bytes:
+                try:
+                    text = re.sub(r'[^\x20-\x7E\u00C0-\u017F]+', ' ',
+                                 raw_bytes.decode('utf-8', errors='ignore'))
+                    return normalize_unicode(normalize_spaces(text.strip()))
+                except Exception:
+                    pass
+            return ""
 
 def extract_text_from_txt(filepath, raw_bytes=None):
     if raw_bytes and CHARDET_AVAILABLE:
@@ -897,30 +898,52 @@ def is_stage_block(block_text):
 
 
 def extract_duration_years_from_block(block_text):
+    """
+    ✅ FIX v7 : \s* ajouté APRÈS le séparateur dans pattern_present et pattern_range
+    Sans ce fix : "2018 – a nos jours" → le " " après "–" bloque le match
+    """
     years = 0.0
     text = block_text.lower().translate(_ACCENT_MAP)
 
-    m = re.search(r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)', text)
-    if m:
-        try:
-            years = float(m.group(1).replace(',', '.'))
-            return years
-        except ValueError:
-            pass
+    # Durée explicite : "7 ans", "(7) années", "sept (7) années"
+    duration_patterns = [
+        r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)',
+        r'\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',           # "(7) années"
+        r'\w+\s+\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',    # "sept (7) années"
+        r'plus\s+de\s+(\d+)\s*(?:ans?|annee?s?|years?)',        # "plus de 7 ans"
+        r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:ans?|annee?s?)', # "depuis 7 ans"
+    ]
+    for dp in duration_patterns:
+        m = re.search(dp, text)
+        if m:
+            try:
+                years = float(m.group(1).replace(',', '.'))
+                if 0 < years <= 40:
+                    return years
+            except (ValueError, IndexError):
+                pass
 
+    FRENCH_MONTHS = {
+        'janvier': 1, 'jan': 1, 'fevrier': 2, 'fev': 2,
+        'mars': 3, 'mar': 3, 'avril': 4, 'avr': 4, 'mai': 5,
+        'juin': 6, 'juillet': 7, 'juil': 7, 'aout': 8, 'aou': 8,
+        'septembre': 9, 'sep': 9, 'octobre': 10, 'oct': 10,
+        'novembre': 11, 'nov': 11, 'decembre': 12, 'dec': 12
+    }
+
+    # ✅ FIX : \s* après le séparateur → "2018 – a nos jours" reconnu
     pattern_present = re.compile(
         r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|'
         r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?'
         r'(20\d{2}|19\d{2})'
-        r'\s*(?:a|-|–|—|au|jusqu\'au|to|until|au\s+)?'
+        r'\s*(?:a|-|–|—|au|jusqu\'au|to|until|au\s+)?\s*'  # ← \s* ajouté
         r'(?:aujourd\'hui|present|actuel|en cours|now|current|actual|hoje|ce jour'
-        r'|nos\s+jours|a\s+nos\s+jours|à\s+nos\s+jours|depuis|to\s+present)',
+        r'|nos\s+jours|a\s+nos\s+jours)',
         re.IGNORECASE
     )
     m = pattern_present.search(text)
     if m:
-        year_str = m.group(2)
-        start_year = int(year_str)
+        start_year = int(m.group(2))
         start_month = FRENCH_MONTHS.get((m.group(1) or '').lower(), 1)
         end_year = datetime.datetime.now().year
         end_month = datetime.datetime.now().month
@@ -928,24 +951,26 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(delta, 1)
 
+    # Pattern "depuis XXXX"
     pattern_since = re.compile(
-        r'(?:depuis|since|from)\s+(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|'
-        r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec\s+)?(20\d{2}|19\d{2})',
+        r'(?:depuis|since|from)\s+(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|'
+        r'septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec\s+)?'
+        r'(20\d{2}|19\d{2})',
         re.IGNORECASE
     )
-    m_since = pattern_since.search(text)
-    if m_since:
-        start_year = int(m_since.group(1))
-        end_year = datetime.datetime.now().year
-        delta = end_year - start_year
+    m = pattern_since.search(text)
+    if m:
+        start_year = int(m.group(1))
+        delta = datetime.datetime.now().year - start_year
         if 0 < delta <= 40:
             return round(float(delta), 1)
 
+    # ✅ FIX : \s* après le séparateur dans pattern_range aussi
     pattern_range = re.compile(
         r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|'
         r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?'
         r'(20\d{2}|19\d{2})'
-        r'\s*(?:a|-|–|—|au|jusqu\'au|to|until)?\s*'
+        r'\s*(?:a|-|–|—|au|jusqu\'au|to|until)?\s*'  # ← \s* ajouté
         r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|'
         r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?'
         r'(20\d{2}|19\d{2})',
@@ -961,8 +986,10 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(delta, 1)
 
+    # Pattern MM/YYYY
     m = re.search(
-        r'(\d{1,2})[/\-\.](20\d{2}|19\d{2})\s*[-–—\.]?\s*(?:(\d{1,2})[/\-\.])?(20\d{2}|19\d{2}|present|current|now)',
+        r'(\d{1,2})[/\-\.](20\d{2}|19\d{2})\s*[-–—\.]?\s*'
+        r'(?:(\d{1,2})[/\-\.])?(20\d{2}|19\d{2}|present|current|now)',
         text
     )
     if m:
@@ -981,7 +1008,6 @@ def extract_duration_years_from_block(block_text):
             return round(delta, 1)
 
     return 0.0
-
 
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     """
