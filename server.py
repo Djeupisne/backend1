@@ -980,71 +980,98 @@ def extract_duration_years_from_block(block_text):
 
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     """
-    ✅ FIX v5.1 : Détection ULTRA-permissive - ZEBKALBA
+    ✅ FIX v5.2 : ULTRA-tolérant aux espaces multiples dans DOCX
     """
-    blocks = split_into_jobs(full_raw_text)
+    # ✅ ÉTAPE 1 : Normaliser TOUS les espaces multiples en espace simple
+    normalized_text = re.sub(r'\s+', ' ', full_raw_text).strip()
+    normalized_lower = normalized_text.lower()
+    
+    blocks = split_into_jobs(normalized_text)
     total_years = 0.0
     
-    # ✅ NOUVEAUX PATTERNS v5.1 - Encore plus permissifs
-    years_patterns = [
-        r'(\d+)\s*(?:années?|ans?)',  # "7 années", "10 ans"
-        r'plus\s+de\s+(\d+)\s*(?:années?|ans?)',  # "plus de 7 années"
-        r'\(\s*(\d+)\s*\)\s*(?:années?|ans?)',  # "(7) années"
-        r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:années?|ans?)',  # "depuis 7 années"
-        r'(\d+)\s*(?:années?|ans?)\s+(?:d[ée]expérience|dans|en|de)',
-        r'expérience\s+(?:de\s+)?(\d+)\s*(?:années?|ans?)',
-        r'(\d+)\s*(?:années?|ans?)\s+.*?(?:gestion\s+bancaire|risque)',  # "10 années ... gestion bancaire"
-    ]
-    
-    for pattern in years_patterns:
-        matches = re.findall(pattern, full_raw_text.lower())
-        for match in matches:
-            try:
-                years = float(match)
-                if years >= min_years:
-                    print(f"    [EXP+] Durée explicite trouvée: {years} ans >= {min_years}")
-                    return True
-            except ValueError:
-                continue
-
-    # ✅ Détecter les périodes "2014 - 2018" = 4 ans
-    period_pattern = r'(20\d{2})\s*[-–]\s*(20\d{2}|présent|actuel)'
-    periods = re.findall(period_pattern, full_raw_text)
-    for start_year, end_year in periods:
-        try:
-            start = int(start_year)
-            if end_year.lower() in ['présent', 'actuel']:
-                end = datetime.datetime.now().year
-            else:
-                end = int(end_year)
-            duration = end - start
-            if duration >= min_years:
-                print(f"    [EXP+] Période détectée: {start}-{end} = {duration} ans >= {min_years}")
-                return True
-        except:
-            continue
-
-    # ✅ Fallback ULTRA-permissif : chercher "sept", "dix", "huit" etc.
-    words_to_numbers = {
+    # ✅ ÉTAPE 2 : Chercher "sept (7)", "dix (10)", etc. avec espaces tolérants
+    french_numbers = {
         'sept': 7, 'huit': 8, 'neuf': 9, 'dix': 10,
         'onze': 11, 'douze': 12, 'treize': 13, 'quatorze': 14, 'quinze': 15
     }
     
-    for word, number in words_to_numbers.items():
-        if word in full_raw_text.lower():
-            # Vérifier si proche de "années" ou "ans"
-            pattern = rf'{word}.*?(?:années?|ans?)'
-            if re.search(pattern, full_raw_text, re.IGNORECASE):
-                if number >= min_years:
-                    print(f"    [EXP+] Nombre en lettres détecté: {word} = {number} ans")
-                    return True
-
-    # ✅ Fallback final : si "UBA" ou "ECOBANK" + "années" mentionnés
-    if re.search(r'(uba|ecobank|orabank)', full_raw_text, re.IGNORECASE):
-        if re.search(r'(\d+)\s*(?:années?|ans?)', full_raw_text.lower()):
-            print(f"    [EXP+] Banque + années détectées")
+    for word, number in french_numbers.items():
+        # Pattern tolérant : "sept (7) années" ou "sept années" ou "7 années"
+        pattern = rf'{word}\s*\(?\s*{number}\s*\)?\s*(?:années?|ans?)'
+        if re.search(pattern, normalized_lower):
+            if number >= min_years:
+                print(f"    [EXP+] Nombre français détecté: '{word} ({number}) années'")
+                return True
+        
+        # Juste le mot en lettres
+        pattern2 = rf'{word}\s+(?:années?|ans?)'
+        if re.search(pattern2, normalized_lower):
+            if number >= min_years:
+                print(f"    [EXP+] Mot français détecté: '{word} années'")
+                return True
+    
+    # ✅ ÉTAPE 3 : Chercher "plus de X années"
+    more_than_pattern = r'plus\s+de\s+(\d+)\s*(?:années?|ans?)'
+    m = re.search(more_than_pattern, normalized_lower)
+    if m:
+        years = int(m.group(1))
+        if years >= min_years:
+            print(f"    [EXP+] 'plus de {years} années' détecté")
             return True
-
+    
+    # ✅ ÉTAPE 4 : Chercher "X années" simple
+    simple_years = r'(\d+)\s*(?:années?|ans?)'
+    for m in re.finditer(simple_years, normalized_lower):
+        years = int(m.group(1))
+        if years >= min_years:
+            # Vérifier le contexte (pas un score ou autre nombre)
+            context_start = max(0, m.start() - 50)
+            context_end = min(len(normalized_text), m.end() + 50)
+            context = normalized_text[context_start:context_end].lower()
+            
+            # Ignorer si c'est un score "Series 1 Category 1 80"
+            if 'series' in context or 'category' in context:
+                continue
+                
+            if any(kw in context for kw in ['expérience', 'gestion', 'banque', 'risque', 'domaine', 'cumule']):
+                print(f"    [EXP+] '{years} années' détecté dans contexte pertinent")
+                return True
+    
+    # ✅ ÉTAPE 5 : Périodes "2014 - 2018"
+    period_pattern = r'(20\d{2})\s*[-–]\s*(20\d{2}|présent|actuel)'
+    for m in re.finditer(period_pattern, normalized_text):
+        try:
+            start = int(m.group(1))
+            end_str = m.group(2)
+            if end_str.lower() in ['présent', 'actuel']:
+                end = datetime.datetime.now().year
+            else:
+                end = int(end_str)
+            duration = end - start
+            
+            # Vérifier le contexte bancaire
+            context_start = max(0, m.start() - 100)
+            context_end = min(len(normalized_text), m.end() + 100)
+            context = normalized_text[context_start:context_end].lower()
+            
+            if any(bank in context for bank in ['uba', 'ecobank', 'orabank', 'banque']):
+                if duration >= min_years:
+                    print(f"    [EXP+] Période bancaire: {start}-{end} = {duration} ans")
+                    return True
+        except:
+            continue
+    
+    # ✅ ÉTAPE 6 : Fallback ULTRA - Si banque + "années" n'importe où
+    banks_found = bool(re.search(r'(uba|ecobank|orabank)', normalized_lower))
+    years_mentioned = bool(re.search(r'(\d+)\s*(?:années?|ans?)', normalized_lower))
+    
+    if banks_found and years_mentioned:
+        # Vérifier qu'on n'est pas dans les "Series 1 Category"
+        if 'series 1' not in normalized_lower[:500]:  # Ignorer le début du CV corrompu
+            print(f"    [EXP+] Fallback: Banque + années détectées")
+            return True
+    
+    # Reste du code inchangé pour les blocks...
     banking_posts = [
         "Responsable Administration de Crédit",
         "Analyste Crédit CCB",
@@ -1057,14 +1084,12 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
             continue
 
         if poste in banking_posts:
-            # ✅ Accepter si banque détectée même avec secteur non-financier ancien
             if NON_FINANCIAL_PATTERN.search(block.lower()):
                 recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
                 if recent_year_pattern.search(block):
-                    print(f"    [EXP-] Bloc exclu (secteur non-financier récent): {block[:100]}...")
                     continue
                 else:
-                    print(f"    [EXP+] Bloc non-financier ancien (<2015) accepté: {block[:100]}...")
+                    print(f"    [EXP+] Bloc non-financier ancien (<2015) accepté")
 
         elif poste == "IT Réseau & Infrastructure":
             critical_pattern = re.compile('|'.join([
@@ -1078,7 +1103,6 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
                 'financial services', 'telecommunications', 'critical systems'
             ]), re.IGNORECASE)
             if not critical_pattern.search(block.lower()):
-                print(f"    [EXP-] Bloc exclu (pas environnement IT critique): {block[:100]}...")
                 continue
 
         if domain_keywords:
