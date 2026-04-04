@@ -629,44 +629,63 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         return True, "Cohérent"
 
 
-def calculate_duration_from_dates(text):
-    """
-    Calcule la durée entre une date de début et 'présent / à nos jours'
-    Exemple : 'Juin2018 – A nos jours' => 8 ans en 2026
-    """
-    # Match aussi '2018–A nos jours' ou 'Juin2018–A nos jours'
-    date_match = re.search(r'(\d{4})\s*[-–]?\s*(présent|a nos jours|à nos jours|actuel|now)', text, re.IGNORECASE)
-    if date_match:
-        start_year = int(date_match.group(1))
-        current_year = datetime.datetime.now().year
-        return current_year - start_year
-    return 0
-
 def validate_financial_institution_for_market_risk(text):
+    """
+    ✅ FIX v5 : Détection ULTRA-permissive pour UBA/ECOBANK - ZEBKALBA
+    """
     text_lower = text.lower()
+    
+    # ✅ Normaliser d'abord les espaces
     text_normalized = normalize_spaces(text_lower)
 
-    years = extract_years_experience(text_normalized)
-    if years < 3:
-        years = calculate_duration_from_dates(text_normalized)
+    has_commercial = COMMERCIAL_BANK_PATTERN.search(text_normalized)
+    has_microfinance = MICROFINANCE_PATTERN.search(text_normalized)
+    has_non_financial = NON_FINANCIAL_PATTERN.search(text_normalized)
 
-    if years >= 3:
-        return True, f"Expérience bancaire détectée ({years} ans)"
+    # ✅ Patterns ULTRA-permissifs pour UBA/ECOBANK
+    uba_patterns = [
+        r'u\s*b\s*a',  # UBA avec espaces
+        r'uba[-\s]*tchad',  # UBA-TCHAD
+        r'uba[-\s]*congo',  # UBA-CONGO
+        r'ubagroup',  # UBA Group
+    ]
+    
+    ecobank_patterns = [
+        r'e\s*c\s*o\s*b\s*a\s*n\s*k',  # ECOBANK avec espaces
+        r'ecobank[-\s]*tchad',  # ECOBANK-TCHAD
+    ]
+    
+    orabank_patterns = [
+        r'o\s*r\s*a\s*b\s*a\s*n\s*k',  # ORABANK
+        r'orabank[-\s]*tchad',
+    ]
 
-    if COMMERCIAL_BANK_PATTERN.search(text_normalized):
-        return True, "Banque commerciale détectée (durée non précisée)"
+    for pattern in uba_patterns + ecobank_patterns + orabank_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            print(f"    [BANK+] Banque détectée par pattern: {pattern}")
+            return True, "Banque commerciale détectée (UBA/ECOBANK/ORABANK)"
 
-    if MICROFINANCE_PATTERN.search(text_normalized):
-        return True, "Microfinance détectée (durée non précisée)"
+    if has_commercial or has_microfinance:
+        if has_commercial:
+            return True, "Banque commerciale détectée"
+        elif has_microfinance:
+            return True, "Microfinance agréée détectée"
 
-    if "gestion bancaire" in text_lower or "risque" in text_lower:
-        return True, "Expérience bancaire détectée mais durée non précisée"
+    # ✅ Si "gestion bancaire" ou "risque" mentionné + années d'expérience
+    if re.search(r'gestion\s+bancaire', text_lower) or re.search(r'risque', text_lower):
+        years_match = re.search(r'(\d+)\s*(?:années?|ans?)', text_lower)
+        if years_match:
+            years = int(years_match.group(1))
+            if years >= 3:
+                return True, f"Expérience bancaire mentionnée ({years} ans)"
 
-    if NON_FINANCIAL_PATTERN.search(text_normalized):
-        return False, "Secteur non financier détecté"
+    if has_non_financial and not has_commercial and not has_microfinance:
+        recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
+        if not recent_year_pattern.search(text):
+            return True, "Expériences hors secteur mais antérieures à 2015 – ignorées"
+        return False, "Secteur non financier détecté (récent)"
 
     return True, "Institution financière valide"
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🔤 NORMALISATION TEXTE
