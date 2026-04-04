@@ -1648,12 +1648,22 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         if detected_lang and detected_lang in {'en', 'es', 'pt'}:
             original_keywords = KEYWORD_MAPPING.get(crit, [])
 
-        is_present, confidence, found_kws = check_criterion_match_advanced(
+               is_present, confidence, found_kws = check_criterion_match_advanced(
             crit, normalized, raw_full, poste=poste
         )
 
         if detected_lang and detected_lang in {'en', 'es', 'pt'} and original_keywords:
             KEYWORD_MAPPING[crit] = original_keywords
+
+        # 🔧 FIX SYNCHRO v6 : Pour Market Risk Officer, si le critère est
+        # "Minimum 3 ans institution financière (hors stage)" ET que
+        # validate_financial_institution_for_market_risk a validé l'institution,
+        # FORCER is_present = True pour la checklist (synchronisation avec le score)
+        if poste == "Market Risk Officer" and crit == "Minimum 3 ans institution financière (hors stage)":
+            inst_valid, _ = validate_financial_institution_for_market_risk(raw_full)
+            if inst_valid and not is_present:
+                print(f"    [🔧 FIX SYNCHRO] Force checklist[{key}] = True (institution validée par fallback)")
+                is_present = True  # ← Force la validation pour la checklist uniquement
 
         checklist[key] = is_present
 
