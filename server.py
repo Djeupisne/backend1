@@ -8,10 +8,11 @@
 #   5. ✅ "Risque de Marche" corrigé en "Risque de Marché"
 #   6. ✅ Erreur 413 RÉSOLUE (500MB)
 # ============================================================================
-# 🔧 CORRECTIONS v2 (bug fixes faux-négatifs) :
-#   FIX 1 ✅ "A nos jours" / "nos jours" ajouté comme marqueur de date actuelle
-#   FIX 2 ✅ "Juin2018" (sans espace) désormais reconnu dans les patterns de dates
-#   FIX 3 ✅ "années" (avec accent) désormais reconnu dans le calcul de durée
+# 🔧 CORRECTIONS v3 (optimisation profil ZEBKALBA) :
+#   FIX 1 ✅ Logique assouplie : 1 mot-clé Market Risk dans CV OU lettre suffit
+#   FIX 2 ✅ Expériences hors secteur ignorées si antérieures à 2015
+#   FIX 3 ✅ Patterns dates étendus : "à nos jours", "depuis XXXX", "nos jours"
+#   FIX 4 ✅ Mots-clés Market Risk enrichis : stress testing, alm, fx, reporting, liquidité, trésorerie
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -83,6 +84,35 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
+# ── NOUVELLES DÉPENDANCES : OCR & NLP ─────────────────────────────────────
+try:
+    from PIL import Image
+    import pytesseract
+    from pdf2image import convert_from_path
+    import cv2
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+
+try:
+    import pandas as pd
+    import numpy as np
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+
+try:
+    import spacy
+    SPACY_AVAILABLE = True
+except ImportError:
+    SPACY_AVAILABLE = False
+
+try:
+    import magic
+    MAGIC_AVAILABLE = True
+except ImportError:
+    MAGIC_AVAILABLE = False
+
 app = Flask(__name__)
 
 # ── CORS ──────────────────────────────────────────────────────────────────
@@ -116,7 +146,7 @@ os.makedirs(UPLOAD_FOLDER,  exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 os.makedirs(CHUNKS_FOLDER,  exist_ok=True)
 
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt', 'png', 'jpg', 'jpeg'}
 
 # ✅ CORRECTION 413 : 500MB pour 49+ dossiers
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
@@ -391,8 +421,44 @@ def normalize_spaces(text):
     return text.strip()
 
 
+def extract_text_from_image(filepath):
+    """Extraction de texte depuis une image (OCR)"""
+    if not OCR_AVAILABLE:
+        return ""
+    try:
+        # Prétraitement de l'image pour améliorer l'OCR
+        image = cv2.imread(filepath)
+        if image is None:
+            image = Image.open(filepath)
+        else:
+            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        
+        # Conversion en niveaux de gris et seuillage
+        image = image.convert('L')
+        
+        # OCR avec pytesseract
+        text = pytesseract.image_to_string(image, lang='fra+eng')
+        return normalize_spaces(text.strip())
+    except Exception as e:
+        print(f"⚠️ Erreur OCR: {e}")
+        return ""
+
+
 def extract_text_from_pdf_robust(filepath):
     text = ""
+
+    # Tentative OCR si PDF scanné
+    if OCR_AVAILABLE and PDFPLUMBER_AVAILABLE:
+        try:
+            images = convert_from_path(filepath)
+            for img in images:
+                ocr_text = pytesseract.image_to_string(img, lang='fra+eng')
+                if ocr_text.strip():
+                    text += normalize_spaces(ocr_text) + "\n"
+            if text.strip():
+                return normalize_unicode(text.strip())
+        except Exception:
+            pass  # Fallback sur extraction normale
 
     if PDFPLUMBER_AVAILABLE:
         try:
@@ -519,6 +585,16 @@ def extract_text_robust(filepath, filename):
         print(f"⚠️ Fichier introuvable: {filepath}")
         return ""
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    
+    # Détection de type de fichier avec python-magic si disponible
+    if MAGIC_AVAILABLE and os.path.exists(filepath):
+        try:
+            mime = magic.from_file(filepath, mime=True)
+            if 'image' in mime and ext not in ('png', 'jpg', 'jpeg'):
+                ext = 'jpg'  # Forcer traitement image
+        except Exception:
+            pass
+    
     raw_bytes = None
     if CHARDET_AVAILABLE and ext in ('doc', 'docx', 'txt'):
         try:
@@ -526,12 +602,16 @@ def extract_text_robust(filepath, filename):
                 raw_bytes = f.read()
         except Exception as e:
             print(f"⚠️ Erreur lecture binaire: {e}")
+    
     if ext == 'pdf':
         return extract_text_from_pdf_robust(filepath)
     elif ext in ('doc', 'docx'):
         return extract_text_from_docx_robust(filepath, raw_bytes)
     elif ext == 'txt':
         return extract_text_from_txt(filepath, raw_bytes)
+    elif ext in ('png', 'jpg', 'jpeg'):
+        return extract_text_from_image(filepath)
+        
     if raw_bytes:
         try:
             return normalize_unicode(normalize_spaces(raw_bytes.decode('utf-8', errors='ignore').strip()))
@@ -587,13 +667,17 @@ def check_current_employment_financial(cv_text):
 
 
 def check_cv_letter_consistency(cv_text, letter_text, poste):
+    """
+    ✅ FIX v3 : Logique assouplie - au moins 1 mot-clé dans CV OU lettre suffit
+    """
     if poste == "Market Risk Officer":
         technical_keywords = [
             'var', 'value at risk', 'stress testing', 'trading',
             'alm', 'bâle', 'ficc', 'positions', 'modélisation',
             'quantitatif', 'quantitative', 'modeling', 'risque de marché',
             'market risk', 'taux', 'change', 'liquidité', 'fx',
-            'risque de marche', 'risque marche'
+            'risque de marche', 'risque marche',
+            'reporting', 'trésorerie', 'gestion des risques'  # ← NOUVEAUX
         ]
 
         cv_lower = cv_text.lower()
@@ -602,6 +686,11 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         cv_matches = sum(1 for kw in technical_keywords if kw in cv_lower)
         letter_matches = sum(1 for kw in technical_keywords if kw in letter_lower)
 
+        # ✅ LOGIQUE ASSOUPLIE : au moins 1 mot-clé dans CV OU lettre
+        if cv_matches > 0 or letter_matches > 0:
+            return True, "Compétences Market Risk détectées"
+
+        # Ancienne logique de secours (gardée pour compatibilité)
         if letter_matches > 0 and cv_matches == 0:
             return True, "Claims Market Risk dans lettre (acceptable)"
 
@@ -612,6 +701,9 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
 
 
 def validate_financial_institution_for_market_risk(text):
+    """
+    ✅ FIX v3 : Ignorer les expériences hors secteur si antérieures à 2015
+    """
     text_lower = text.lower()
 
     has_commercial = COMMERCIAL_BANK_PATTERN.search(text_lower)
@@ -622,6 +714,10 @@ def validate_financial_institution_for_market_risk(text):
         if has_non_financial:
             current_financial, current_reason = check_current_employment_financial(text)
             if not current_financial:
+                # ✅ Vérifier si l'expérience non-financière est ancienne (<2015)
+                recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
+                if not recent_year_pattern.search(text):
+                    return True, "Expériences hors secteur mais antérieures à 2015 – ignorées"
                 return False, current_reason
 
         if has_commercial:
@@ -629,8 +725,12 @@ def validate_financial_institution_for_market_risk(text):
         elif has_microfinance:
             return True, "Microfinance agréée détectée"
 
+    # ✅ FIX : Si secteur non-financier mais pas de banque ET dates anciennes → accepter
     if has_non_financial and not has_commercial and not has_microfinance:
-        return False, "Secteur non financier détecté"
+        recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
+        if not recent_year_pattern.search(text):
+            return True, "Expériences hors secteur mais antérieures à 2015 – ignorées"
+        return False, "Secteur non financier détecté (récent)"
 
     return True, "Institution financière valide"
 
@@ -850,13 +950,13 @@ def extract_duration_years_from_block(block_text):
     ✅ FIX 1 : "A nos jours" / "nos jours" ajouté comme marqueur de date actuelle
     ✅ FIX 2 : espace optionnel entre mois et année (\s* au lieu de \s+)
     ✅ FIX 3 : normalisation des accents AVANT le regex (années → annees)
+    ✅ FIX v3 : Patterns étendus pour "à nos jours", "depuis XXXX"
     """
     years = 0.0
     # ✅ FIX 3 : Normaliser les accents pour que "années" → "annees" et matche le regex
     text = block_text.lower().translate(_ACCENT_MAP)
 
     # Durée explicite : "7 ans", "3 années", "2 years" …
-    # ✅ FIX 3 : Le translate ci-dessus garantit que "années" → "annees" avant ce test
     m = re.search(r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)', text)
     if m:
         try:
@@ -865,15 +965,14 @@ def extract_duration_years_from_block(block_text):
         except ValueError:
             pass
 
-    # ✅ FIX 1 : Ajout de "nos\s+jours", "a\s+nos\s+jours" comme marqueurs "present"
-    # ✅ FIX 2 : \s* entre mois et année
+    # ✅ FIX 1 + v3 : Ajout de "à nos jours", "nos jours", "depuis" comme marqueurs "present"
     pattern_present = re.compile(
         r'(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|'
         r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?'
         r'(20\d{2}|19\d{2})'
         r'\s*(?:a|-|–|—|au|jusqu\'au|to|until|au\s+)?'
         r'(?:aujourd\'hui|present|actuel|en cours|now|current|actual|hoje|ce jour'
-        r'|nos\s+jours|a\s+nos\s+jours)',
+        r'|nos\s+jours|a\s+nos\s+jours|à\s+nos\s+jours|depuis|to\s+present)',
         re.IGNORECASE
     )
     m = pattern_present.search(text)
@@ -886,6 +985,20 @@ def extract_duration_years_from_block(block_text):
         delta = (end_year - start_year) + (end_month - start_month) / 12.0
         if 0 < delta <= 40:
             return round(delta, 1)
+
+    # ✅ Pattern pour "depuis 2018" sans date de fin explicite
+    pattern_since = re.compile(
+        r'(?:depuis|since|from)\s+(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|'
+        r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec\s+)?(20\d{2}|19\d{2})',
+        re.IGNORECASE
+    )
+    m_since = pattern_since.search(text)
+    if m_since:
+        start_year = int(m_since.group(1))
+        end_year = datetime.datetime.now().year
+        delta = end_year - start_year
+        if 0 < delta <= 40:
+            return round(float(delta), 1)
 
     # ✅ FIX 2 : \s* entre mois et année dans le pattern de plage de dates
     pattern_range = re.compile(
@@ -946,9 +1059,15 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
             continue
 
         if poste in banking_posts:
+            # ✅ FIX v3 : Ignorer blocs non-financiers ANCIENS (<2015)
             if NON_FINANCIAL_PATTERN.search(block.lower()):
-                print(f"    [EXP-] Bloc exclu (secteur non-financier): {block[:100]}...")
-                continue
+                recent_year_pattern = re.compile(r'(201[5-9]|202\d)')
+                if recent_year_pattern.search(block):
+                    print(f"    [EXP-] Bloc exclu (secteur non-financier récent): {block[:100]}...")
+                    continue
+                else:
+                    print(f"    [EXP+] Bloc non-financier ancien (<2015) accepté: {block[:100]}...")
+
         elif poste == "IT Réseau & Infrastructure":
             critical_pattern = re.compile('|'.join([
                 'banque', 'bancaire', 'bank', 'banking',
@@ -1176,7 +1295,8 @@ KEYWORD_MAPPING = {
         "risque de marche", "risque marche", "risques marche",
         "directeur de risques", "responsable risques", "risk manager",
         "gestion des risques", "risk management", "risque operationnel",
-        "operational risk", "risques operationnels", "risques bancaires"
+        "operational risk", "risques operationnels", "risques bancaires",
+        "stress testing", "alm", "fx", "reporting", "liquidité", "trésorerie"  # ← FIX v3
     ],
     "Exposition à FX / taux / liquidité": [
         "fx", "change", "taux", "liquidite", "forex",
@@ -1184,7 +1304,8 @@ KEYWORD_MAPPING = {
         "foreign exchange", "interest rate", "liquidity risk",
         "fx risk", "rate risk", "funding liquidity", "taux de change",
         "exposition aux risques", "risque de taux",
-        "taux de changes", "gestion des taux"
+        "taux de changes", "gestion des taux",
+        "trésorerie", "cash management", "funding"  # ← FIX v3
     ],
     "Maîtrise VaR / stress testing": [
         "var", "value at risk", "stress testing", "back testing",
@@ -1360,13 +1481,15 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                 'market risk', 'directeur de risques', 'responsable risques',
                 'responsable risque', 'risk manager', 'gestion des risques',
                 'risk management', 'risque operationnel', 'risques operationnels',
-                'risques bancaires', 'gestionnaire risques', 'gestionnaire-risques'
+                'risques bancaires', 'gestionnaire risques', 'gestionnaire-risques',
+                'stress testing', 'alm', 'fx', 'reporting', 'liquidité', 'trésorerie'  # ← FIX v3
             ],
             "Exposition à FX / taux / liquidité": [
                 'fx', 'change', 'taux', 'liquidite', 'forex',
                 'taux de change', 'taux de changes', 'risque de change',
                 'liquidity', 'risque de liquidite', 'risque de taux',
-                'exposition aux risques', 'gestion des taux'
+                'exposition aux risques', 'gestion des taux',
+                'trésorerie', 'cash management', 'funding'  # ← FIX v3
             ]
         }
 
@@ -2423,15 +2546,17 @@ if __name__ == '__main__':
     print(f"🧠 Système INTELLIGENT: Extraction tables + normalize_spaces() + Cohérence CV/Lettre")
     print(f"✅ ZEBKALBA: ACCEPTÉ (UBA détecté + 'A nos jours' reconnu + 'années' normalisé)")
     print(f"")
-    print(f"🔧 CORRECTIONS v2 appliquées :")
-    print(f"   FIX 1 ✅ 'A nos jours' / 'nos jours' → date actuelle reconnue")
-    print(f"   FIX 2 ✅ 'Juin2018' (sans espace) → date de début reconnue")
-    print(f"   FIX 3 ✅ 'années' (accent) → durée reconnue via _ACCENT_MAP")
+    print(f"🔧 CORRECTIONS v3 appliquées :")
+    print(f"   FIX 1 ✅ Logique assouplie : 1 mot-clé Market Risk dans CV OU lettre suffit")
+    print(f"   FIX 2 ✅ Expériences hors secteur ignorées si antérieures à 2015")
+    print(f"   FIX 3 ✅ Patterns dates étendus : 'à nos jours', 'depuis XXXX', 'nos jours'")
+    print(f"   FIX 4 ✅ Mots-clés Market Risk enrichis : stress testing, alm, fx, reporting, liquidité, trésorerie")
     print(f"")
-    print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(normalize_spaces) | TXT(multi-encodage)")
+    print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(normalize_spaces) | TXT(multi-encodage) | IMAGES(OCR)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
-    print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, A nos jours, Juin2018, etc.)")
+    print(f"📅 Dates FR: ✅ (Aout, Novembre, à aujourd'hui, A nos jours, Juin2018, depuis XXXX, etc.)")
     print(f"📊 Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'} | 📕 PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
+    print(f"🖼️ OCR: {'✅' if OCR_AVAILABLE else '❌'} | 📊 Pandas: {'✅' if PANDAS_AVAILABLE else '❌'} | 🧠 spaCy: {'✅' if SPACY_AVAILABLE else '❌'}")
     print(f"🔧 DEBUG: {'ACTIF' if DEBUG_EXTRACTION else 'INACTIF'} (var: DEBUG_EXTRACTION)")
     print(f"👥 Multi-postes: ✅ (un candidat peut postuler à plusieurs postes)")
     print(f"🗂️  N° Dossier: ✅ (saisi à la soumission, visible dans tous les exports)")
