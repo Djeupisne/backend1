@@ -589,6 +589,10 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
     """
     ✅ FIX v5 : Logique ULTRA-assouplie pour ZEBKALBA
     """
+    cv_lower = cv_text.lower()
+    letter_lower = letter_text.lower() if letter_text else ""
+    
+    # Cas spécial Market Risk Officer
     if poste == "Market Risk Officer":
         technical_keywords = [
             'var', 'value at risk', 'stress testing', 'trading',
@@ -599,9 +603,6 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
             'reporting', 'trésorerie', 'gestion des risques',
             'risque opérationnel', 'responsable risque', 'directeur risque'
         ]
-
-        cv_lower = cv_text.lower()
-        letter_lower = letter_text.lower() if letter_text else ""
 
         cv_matches = sum(1 for kw in technical_keywords if kw in cv_lower)
         letter_matches = sum(1 for kw in technical_keywords if kw in letter_lower)
@@ -627,6 +628,24 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
                 return True, "Gestion bancaire avec expérience détectée"
 
         return True, "Cohérent"
+    
+    # Pour tous les autres postes : vérifier cohérence basique
+    # Si lettre existe, vérifier qu'elle mentionne le poste ou des compétences liées
+    if letter_text and len(letter_text.strip()) > 10:
+        # Vérifier si la lettre mentionne le poste ou des mots-clés liés
+        poste_keywords = poste.lower().split()
+        letter_mentions_poste = any(kw in letter_lower for kw in poste_keywords if len(kw) > 3)
+        
+        if letter_mentions_poste:
+            return True, "Lettre cohérente avec le poste"
+        
+        # Sinon, vérifier présence de mots-clés génériques de motivation
+        generic_motivation = ['postule', 'candidature', 'poste', 'offre', 'motivation', 'intérêt']
+        if any(mot in letter_lower for mot in generic_motivation):
+            return True, "Lettre de motivation détectée"
+    
+    # Par défaut, considérer cohérent (pas de lettre ou lettre trop courte)
+    return True, "Cohérent"
 
 
 def validate_financial_institution_for_market_risk(text):
