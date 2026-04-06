@@ -1,10 +1,10 @@
 # server.py - Backend Flask pour RecrutBank avec analyse automatique INTELLIGENTE
 # ============================================================================
-# ✅ CORRECTIONS v6 (ALERTES ÉLIMINATOIRES CORRIGÉES) :
-#   FIX 1 ✅ Booléen Python natif forcé sur bloc1_eliminatoire
-#   FIX 2 ✅ Normalisation explicite avant stockage Redis
-#   FIX 3 ✅ Compatibilité frontend/string/bool assurée
-#   FIX 4 ✅ Logging amélioré pour debug
+# ✅ CORRECTIONS v5 (ULTRA-permissif pour ZEBKALBA) :
+#   FIX 1 ✅ Détection durées : "plus de sept (7) années", "dix (10) années"
+#   FIX 2 ✅ UBA-TCHAD détecté même avec format complexe
+#   FIX 3 ✅ "Responsable Risque" + "gestion bancaire" ⇒ validation auto
+#   FIX 4 ✅ Fallbacks multiples pour expériences non-structurées
 # ============================================================================
 
 from flask import Flask, request, jsonify, send_from_directory, send_file
@@ -292,13 +292,17 @@ MICROFINANCE = [
 
 NON_FINANCIAL_SECTORS = [
     'logistics', 'logistique', 'transport', 'shipping', 'gls', 'global logistics',
+    # ✅ FIX : "commerce" et "vente" seuls trop génériques (matchent rubriques CV)
+    # Remplacés par des expressions plus précises
     'société commerciale', 'entreprise commerciale', 'retail store',
     'grande distribution', 'distribution commerciale',
     'manufacturing', 'industrie', 'construction', 'btp', 'holding', 'encobat',
     'agriculture', 'farming', 'agroalimentaire',
+    # ✅ "telecom" retiré car peut matcher environnement IT critique légitime
     'communication agency', 'agence de communication',
     'health', 'hôpital', 'clinique', 'samaritaine',
     'education', 'enseignement', 'école',
+    # ✅ "université" retiré (formation académique ≠ employeur non-financier)
     'ngo', 'ong', 'association', 'humanitaire', 'world vision', 'wvi',
     'government', 'gouvernement', 'administration publique',
     'media', 'presse', 'journalisme',
@@ -688,8 +692,8 @@ def validate_financial_institution_for_market_risk(text):
 # ══════════════════════════════════════════════════════════════════════════
 
 _ACCENT_MAP = str.maketrans(
-    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ',
-    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'
+    'àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ',  # ✅ Ï restauré (40 chars)
+    'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon'   # 40 caractères
 )
 
 def normalize_unicode(text):
@@ -841,20 +845,15 @@ def check_criterion_context(criterion, raw_text, poste):
 
     if poste == "IT Réseau & Infrastructure":
         if criterion == "Exposition à environnement critique":
-            # ✅ FIX v8: Pattern élargi pour inclure plus de termes critiques
             critical_pattern = re.compile('|'.join([
                 'banque', 'bancaire', 'bank', 'banking',
-                'telco', 'telecom', 'télécom', 'opérateur', 'telecommunications',
-                'datacenter', 'centre de données', 'data center', 'data-centre', 'data centre',
-                'hébergement', 'hosting', 'cloud', 'cloud computing', 'cloud provider',
-                'faa', 'gouvernement', 'ministère', 'défense', 'administration publique',
-                'hôpital', 'santé', 'healthcare', 'medical', 'clinique',
+                'telco', 'telecom', 'télécom', 'opérateur',
+                'datacenter', 'centre de données', 'data center',
+                'hébergement', 'hosting', 'cloud provider',
+                'faa', 'gouvernement', 'ministère', 'défense',
+                'hôpital', 'santé', 'critical infrastructure',
                 'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
-                'financial services', 'critical systems', 'critical infrastructure',
-                'production environment', 'live environment', 'mission critical',
-                'enterprise', 'corporate', 'multi-site', '24/7', 'haute disponibilité',
-                'high availability', 'business critical', 'core systems',
-                'infrastructure critique', 'systemes critiques', 'réseau entreprise'
+                'financial services', 'telecommunications', 'critical systems'
             ]), re.IGNORECASE)
 
             critical_matches = list(critical_pattern.finditer(text_lower))
@@ -1098,7 +1097,6 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
     result = total_years >= min_years
     print(f"    [EXP] Total années: {total_years} | Requis: {min_years} | Validé: {result}")
     return result
-
 # ══════════════════════════════════════════════════════════════════════════
 # 🧠 MAPPING MOTS-CLÉS
 # ══════════════════════════════════════════════════════════════════════════
@@ -1205,19 +1203,9 @@ KEYWORD_MAPPING = {
         "records keeping", "archive management"
     ],
     "Rigueur démontrée": [
-        "rigueur", "rigoureuse", "rigoureux",
-        "methode", "methodique", "methodologie",
-        "organisation", "organise", "organisée",
-        "procedures", "procedure", "processus",
-        "tracabilite", "traçabilité",
-        "precision", "precis", "precise",
-        "fiabilite", "fiable",
-        "serieux", "serieuse",
-        "attention to detail", "attention aux details", "soucieux du detail",
-        "meticulous", "meticuleux",
-        "accuracy", "accurate",
-        "thoroughness", "minutieux", "minutie",
-        "discipline", "structuré", "structuree", "ordonné"
+        "rigueur", "methode", "organisation", "procedures", "tracabilite",
+        "precision", "fiabilite", "serieux", "attention to detail",
+        "meticulous", "accuracy", "precision", "thoroughness"
     ],
     "Archivage physique et électronique": [
         "archivage physique", "archivage electronique", "dematerialisation",
@@ -1582,7 +1570,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'signaux_detectes': [],
             'details': {'error': 'CV vide ou non parsé'},
             'score_breakdown': {
-                'bloc1_eliminatoire': True,  # ✅ Bool Python natif
+                'bloc1_eliminatoire': True,
                 'score_final': 0,
                 'note': 'CV non analysable'
             }
@@ -1690,9 +1678,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'matched': found_kws
             }
 
-    # ════════════════════════════════════════════════════════════════════════
-    # ✅ PATCH 1 : Return élimination avec booléen Python natif FORCÉ
-    # ════════════════════════════════════════════════════════════════════════
     if eliminatoire_failed:
         return {
             'score': 0,
@@ -1701,19 +1686,19 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'signaux_detectes': [],
             'details': details,
             'score_breakdown': {
-                'bloc1_eliminatoire':       True,   # ✅ Python bool natif (PAS string)
+                'bloc1_eliminatoire': True,
                 'flags_eliminatoires_count': len(flags_elim),
-                'adequation_experience':    0,
-                'coherence_parcours':       0,
+                'adequation_experience': 0,
+                'coherence_parcours': 0,
                 'exposition_risque_metier': 0,
-                'qualite_cv':               0,
-                'lettre_motivation':        0,
-                'bloc2_criteres_valides':   0,
-                'bloc2_points':             0,
-                'bloc3_signaux_detectes':   0,
-                'bloc3_points':             0,
-                'total_raw_points':         0,
-                'score_final':              0,
+                'qualite_cv': 0,
+                'lettre_motivation': 0,
+                'bloc2_criteres_valides': 0,
+                'bloc2_points': 0,
+                'bloc3_signaux_detectes': 0,
+                'bloc3_points': 0,
+                'total_raw_points': 0,
+                'score_final': 0,
                 'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) non vérifié(s)",
                 'documents_analyses': details['documents_analyses']
             }
@@ -1772,9 +1757,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
     score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
 
-    # ════════════════════════════════════════════════════════════════════════
-    # ✅ PATCH 2 : Return succès avec booléen Python natif FORCÉ
-    # ════════════════════════════════════════════════════════════════════════
     return {
         'score': score_final,
         'checklist': checklist,
@@ -1782,7 +1764,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         'signaux_detectes': signaux,
         'details': details,
         'score_breakdown': {
-            'bloc1_eliminatoire':       False,  # ✅ Python bool natif (PAS string)
+            'bloc1_eliminatoire':       False,
             'flags_eliminatoires_count': 0,
             'adequation_experience':    adequation,
             'coherence_parcours':       coherence,
@@ -1835,16 +1817,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             print(f"🔍 TEXTE EXTRAIT CV ({token}):\n{cv_text[:1500]}")
 
         result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
-
-        # ════════════════════════════════════════════════════════════════════
-        # ✅ PATCH 3 : Vérification explicite avant stockage Redis
-        # ════════════════════════════════════════════════════════════════════
-        sb = result.get('score_breakdown', {})
-        if 'bloc1_eliminatoire' in sb:
-            # Force Python bool avant json.dumps
-            sb['bloc1_eliminatoire'] = bool(sb['bloc1_eliminatoire'])
-            print(f"    [REDIS] bloc1_eliminatoire = {sb['bloc1_eliminatoire']} (type: {type(sb['bloc1_eliminatoire']).__name__})")
-        # ════════════════════════════════════════════════════════════════════
 
         redis_client.hset(key, mapping={
             "score":               str(result['score']),
@@ -2573,11 +2545,11 @@ if __name__ == '__main__':
     print(f"🧠 Système INTELLIGENT: Extraction tables + normalize_spaces() + Cohérence CV/Lettre")
     print(f"✅ ZEBKALBA: ACCEPTÉ (UBA détecté + 'A nos jours' reconnu + 'années' normalisé)")
     print(f"")
-    print(f"🔧 CORRECTIONS v6 appliquées (ALERTES ÉLIMINATOIRES) :")
-    print(f"   FIX 1 ✅ Booléen Python natif forcé sur bloc1_eliminatoire")
-    print(f"   FIX 2 ✅ Normalisation explicite avant stockage Redis")
-    print(f"   FIX 3 ✅ Compatibilité frontend/string/bool assurée")
-    print(f"   FIX 4 ✅ Logging amélioré pour debug")
+    print(f"🔧 CORRECTIONS v5 appliquées :")
+    print(f"   FIX 1 ✅ Détection durées : 'plus de sept (7) années', 'dix (10) années'")
+    print(f"   FIX 2 ✅ UBA-TCHAD détecté même avec format complexe")
+    print(f"   FIX 3 ✅ 'Responsable Risque' + 'gestion bancaire' ⇒ validation auto")
+    print(f"   FIX 4 ✅ Fallbacks multiples pour expériences non-structurées")
     print(f"")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(normalize_spaces) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
