@@ -841,15 +841,20 @@ def check_criterion_context(criterion, raw_text, poste):
 
     if poste == "IT Réseau & Infrastructure":
         if criterion == "Exposition à environnement critique":
+            # ✅ FIX v8: Pattern élargi pour inclure plus de termes critiques
             critical_pattern = re.compile('|'.join([
                 'banque', 'bancaire', 'bank', 'banking',
-                'telco', 'telecom', 'télécom', 'opérateur',
-                'datacenter', 'centre de données', 'data center',
-                'hébergement', 'hosting', 'cloud provider',
-                'faa', 'gouvernement', 'ministère', 'défense',
-                'hôpital', 'santé', 'critical infrastructure',
+                'telco', 'telecom', 'télécom', 'opérateur', 'telecommunications',
+                'datacenter', 'centre de données', 'data center', 'data-centre', 'data centre',
+                'hébergement', 'hosting', 'cloud', 'cloud computing', 'cloud provider',
+                'faa', 'gouvernement', 'ministère', 'défense', 'administration publique',
+                'hôpital', 'santé', 'healthcare', 'medical', 'clinique',
                 'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam',
-                'financial services', 'telecommunications', 'critical systems'
+                'financial services', 'critical systems', 'critical infrastructure',
+                'production environment', 'live environment', 'mission critical',
+                'enterprise', 'corporate', 'multi-site', '24/7', 'haute disponibilité',
+                'high availability', 'business critical', 'core systems',
+                'infrastructure critique', 'systemes critiques', 'réseau entreprise'
             ]), re.IGNORECASE)
 
             critical_matches = list(critical_pattern.finditer(text_lower))
@@ -1200,9 +1205,19 @@ KEYWORD_MAPPING = {
         "records keeping", "archive management"
     ],
     "Rigueur démontrée": [
-        "rigueur", "methode", "organisation", "procedures", "tracabilite",
-        "precision", "fiabilite", "serieux", "attention to detail",
-        "meticulous", "accuracy", "precision", "thoroughness"
+        "rigueur", "rigoureuse", "rigoureux",
+        "methode", "methodique", "methodologie",
+        "organisation", "organise", "organisée",
+        "procedures", "procedure", "processus",
+        "tracabilite", "traçabilité",
+        "precision", "precis", "precise",
+        "fiabilite", "fiable",
+        "serieux", "serieuse",
+        "attention to detail", "attention aux details", "soucieux du detail",
+        "meticulous", "meticuleux",
+        "accuracy", "accurate",
+        "thoroughness", "minutieux", "minutie",
+        "discipline", "structuré", "structuree", "ordonné"
     ],
     "Archivage physique et électronique": [
         "archivage physique", "archivage electronique", "dematerialisation",
