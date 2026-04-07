@@ -12,7 +12,7 @@ from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
-import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata
+import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile
 from werkzeug.utils import secure_filename
 
 # ── PARSING DOCUMENTS ──────────────────────────────────────────────────────
@@ -75,6 +75,15 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
+
+# ── EXPORT WORD ─────────────────────────────────────────────────────
+try:
+    from docx import Document as DocxDocument
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -2167,6 +2176,184 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     return buf
 
 # ══════════════════════════════════════════════════════════════════════════
+# 📄 GÉNÉRATION RAPPORT WORD
+# ══════════════════════════════════════════════════════════════════════════
+
+def generate_word_report(candidats_data, poste_filter=None):
+    """
+    Génère un rapport Word (.docx) détaillé incluant:
+    - Liste complète des candidats
+    - Candidats retenus avec motifs
+    - Candidats exclus avec motifs
+    - Statistiques par poste
+    """
+    if not DOCX_AVAILABLE:
+        return None
+    
+    buf = io.BytesIO()
+    doc = DocxDocument()
+    
+    # Titre principal
+    title = doc.add_heading('Rapport Détaillé de Recrutement', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Sous-titre avec filtre et date
+    subtitle = f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}"
+    if poste_filter:
+        subtitle += f" - Poste: {poste_filter}"
+    doc.add_paragraph(subtitle).alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    doc.add_paragraph()  # Espace
+    
+    # ── STATISTIQUES GÉNÉRALES ────────────────────────────────────────
+    stats_title = doc.add_heading('1. Statistiques Générales', level=1)
+    
+    total = len(candidats_data)
+    retenus = sum(1 for c in candidats_data if c.get('statut') == 'retenu')
+    exclus = sum(1 for c in candidats_data if c.get('statut') == 'exclu')
+    en_attente = sum(1 for c in candidats_data if c.get('statut') == 'en_attente')
+    entretien = sum(1 for c in candidats_data if c.get('statut') == 'entretien')
+    
+    stats_text = (
+        f"• Total des candidatures: {total}\n"
+        f"• Candidats retenus: {retenus}\n"
+        f"• Candidats exclus: {exclus}\n"
+        f"• En attente: {en_attente}\n"
+        f"• En cours d'entretien: {entretien}"
+    )
+    doc.add_paragraph(stats_text)
+    doc.add_paragraph()
+    
+    # ── CANDIDATS RETENUS ────────────────────────────────────────────
+    retenus_title = doc.add_heading('2. Candidats Retenus', level=1)
+    candidats_retenus = [c for c in candidats_data if c.get('statut') == 'retenu']
+    
+    if candidats_retenus:
+        table_ret = doc.add_table(rows=1, cols=6)
+        table_ret.style = 'Table Grid'
+        hdr_cells = table_ret.rows[0].cells
+        headers_ret = ['N° Dossier', 'Nom', 'Prénom', 'Poste', 'Score', 'Motif de Retention']
+        for i, h in enumerate(headers_ret):
+            hdr_cells[i].text = h
+            hdr_cells[i].paragraphs[0].runs[0].bold = True
+        
+        for idx, c in enumerate(candidats_retenus, 1):
+            row_cells = table_ret.add_row().cells
+            num_dos = c.get('numero_dossier', '') or '–'
+            nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
+            
+            # Motif de retention basé sur le score et l'analyse
+            score = int(c.get('score', 0))
+            motif = ""
+            if score >= 8:
+                motif = f"Excellent profil (Score: {score}/10). "
+            elif score >= 6:
+                motif = f"Bon profil (Score: {score}/10). "
+            
+            # Ajouter détails de l'analyse si disponibles
+            if c.get('signaux_detectes'):
+                motif += f"Signaux forts: {c.get('signaux_detectes')[:100]}..."
+            elif c.get('checklist'):
+                try:
+                    checklist = json.loads(c.get('checklist', '{}'))
+                    points_valides = sum(1 for v in checklist.values() if v is True)
+                    motif += f"Critères validés: {points_valides}"
+                except:
+                    pass
+            
+            row_cells[0].text = str(num_dos)
+            row_cells[1].text = c.get('nom', '') or '–'
+            row_cells[2].text = c.get('prenom', '') or '–'
+            row_cells[3].text = c.get('poste', '') or '–'
+            row_cells[4].text = f"{score}/10"
+            row_cells[5].text = motif[:200] if motif else 'Profil correspondant aux exigences'
+    else:
+        doc.add_paragraph("Aucun candidat retenu pour le moment.")
+    
+    doc.add_paragraph()
+    
+    # ── CANDIDATS EXCLUS ────────────────────────────────────────────
+    exclus_title = doc.add_heading('3. Candidats Exclus', level=1)
+    candidats_exclus = [c for c in candidats_data if c.get('statut') == 'exclu']
+    
+    if candidats_exclus:
+        table_exc = doc.add_table(rows=1, cols=6)
+        table_exc.style = 'Table Grid'
+        hdr_cells_exc = table_exc.rows[0].cells
+        headers_exc = ['N° Dossier', 'Nom', 'Prénom', 'Poste', 'Score', 'Motif d\'Exclusion']
+        for i, h in enumerate(headers_exc):
+            hdr_cells_exc[i].text = h
+            hdr_cells_exc[i].paragraphs[0].runs[0].bold = True
+        
+        for idx, c in enumerate(candidats_exclus, 1):
+            row_cells = table_exc.add_row().cells
+            num_dos = c.get('numero_dossier', '') or '–'
+            nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
+            
+            score = int(c.get('score', 0))
+            motif = f"Score insuffisant ({score}/10). "
+            
+            # Motifs d'exclusion détaillés
+            if c.get('flags_eliminatoires'):
+                try:
+                    flags = json.loads(c.get('flags_eliminatoires', '[]'))
+                    if flags:
+                        motif += f"Critères non satisfaits: {', '.join(flags[:3])}"
+                except:
+                    motif += c.get('flags_eliminatoires', '')[:100]
+            
+            if c.get('note'):
+                motif += f" Note: {c.get('note', '')[:50]}"
+            
+            row_cells[0].text = str(num_dos)
+            row_cells[1].text = c.get('nom', '') or '–'
+            row_cells[2].text = c.get('prenom', '') or '–'
+            row_cells[3].text = c.get('poste', '') or '–'
+            row_cells[4].text = f"{score}/10"
+            row_cells[5].text = motif[:200] if motif else 'Ne correspond pas aux exigences'
+    else:
+        doc.add_paragraph("Aucun candidat exclu.")
+    
+    doc.add_paragraph()
+    
+    # ── LISTE COMPLÈTE DES CANDIDATS ─────────────────────────────────
+    liste_title = doc.add_heading('4. Liste Complète des Candidats', level=1)
+    
+    if candidats_data:
+        table_all = doc.add_table(rows=1, cols=7)
+        table_all.style = 'Table Grid'
+        hdr_cells_all = table_all.rows[0].cells
+        headers_all = ['N°', 'Dossier', 'Nom', 'Prénom', 'Email', 'Poste', 'Statut', 'Score']
+        for i, h in enumerate(headers_all):
+            hdr_cells_all[i].text = h
+            hdr_cells_all[i].paragraphs[0].runs[0].bold = True
+        
+        for idx, c in enumerate(candidats_data, 1):
+            row_cells = table_all.add_row().cells
+            num_dos = c.get('numero_dossier', '') or '–'
+            
+            row_cells[0].text = str(idx)
+            row_cells[1].text = str(num_dos)
+            row_cells[2].text = c.get('nom', '') or '–'
+            row_cells[3].text = c.get('prenom', '') or '–'
+            row_cells[4].text = c.get('email', '') or '–'
+            row_cells[5].text = c.get('poste', '') or '–'
+            row_cells[6].text = c.get('statut', 'en_attente')
+            row_cells[7].text = f"{c.get('score', 0)}/10"
+    
+    doc.add_paragraph()
+    
+    # Pied de page
+    footer = doc.add_paragraph()
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    footer_run = footer.add_run('--- Fin du Rapport ---')
+    footer_run.italic = True
+    
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
+# ══════════════════════════════════════════════════════════════════════════
 # 🔑 AUTH HELPERS
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -2228,8 +2415,9 @@ def postuler():
         email          = (request.form.get('email')          or '').strip().lower()
         telephone      = (request.form.get('telephone')      or '').strip()
         poste          = (request.form.get('poste')          or '').strip()
-        numero_dossier = (request.form.get('numero_dossier') or '').strip()
-
+        # Le numero_dossier est maintenant généré automatiquement par le backend
+        # Ignorer toute valeur envoyée par le frontend
+        
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
@@ -2239,6 +2427,30 @@ def postuler():
                 return jsonify({
                     'error': f'Vous avez déjà soumis une candidature pour le poste "{poste}".'
                 }), 409
+
+        # ── GÉNÉRATION AUTOMATIQUE DU NUMÉRO DE DOSSIER ────────────────────
+        # Compter les dossiers existants pour ce poste et incrémenter
+        max_num = 0
+        for k in redis_client.keys("candidat:*"):
+            existing = redis_client.hgetall(k)
+            if existing.get('poste') == poste:
+                existing_num = existing.get('numero_dossier', '')
+                if existing_num:
+                    try:
+                        # Extraire le numéro (format attendu: POSTE-YYYY-NNN ou juste NNN)
+                        num_part = existing_num.split('-')[-1] if '-' in existing_num else existing_num
+                        num_val = int(num_part)
+                        if num_val > max_num:
+                            max_num = num_val
+                    except (ValueError, IndexError):
+                        pass
+        
+        new_num = max_num + 1
+        annee = datetime.datetime.now().year
+        # Format: CODEPOSTE-ANNEE-NUMERO (ex: RAC-2025-001)
+        code_poste = ''.join(word[0].upper() for word in poste.split()[:3])  # 3 premières lettres
+        numero_dossier = f"{code_poste}-{annee}-{new_num:03d}"
+        # =====================================================================
 
         def save_file(field, suffix):
             f = request.files.get(field)
@@ -2483,7 +2695,18 @@ def export_candidates(fmt):
                              as_attachment=True,
                              download_name=f'{filename_base}.pdf')
 
-        return jsonify({'error': 'Format non supporté. Utilisez: csv, excel ou pdf'}), 400
+        elif fmt.lower() in ('word', 'docx'):
+            if not DOCX_AVAILABLE:
+                return jsonify({'error': 'python-docx non installé'}), 503
+            buf = generate_word_report(result, poste_filter=poste_filter)
+            if not buf:
+                return jsonify({'error': 'Erreur génération Word'}), 500
+            return send_file(buf,
+                             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                             as_attachment=True,
+                             download_name=f'{filename_base}.docx')
+
+        return jsonify({'error': 'Format non supporté. Utilisez: csv, excel, pdf ou word'}), 400
 
     except Exception as e:
         import traceback
@@ -2539,6 +2762,122 @@ def serve_upload(filename):
         return jsonify({'error': 'Fichier introuvable'}), 404
     mime = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
     return send_from_directory(UPLOAD_FOLDER, safe, mimetype=mime, as_attachment=False)
+
+# ══════════════════════════════════════════════════════════════════════════
+# 📦 EXPORT ZIP DES DOSSIERS CANDIDATS
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/recruteur/dossiers/zip', methods=['GET'])
+@jwt_required()
+def export_dossiers_zip():
+    """
+    Télécharge tous les dossiers des candidats en format ZIP.
+    Paramètres optionnels:
+      - ?poste=NomDuPoste : Filtrer par poste
+      - ?date_start=YYYY-MM-DD : Date de début
+      - ?date_end=YYYY-MM-DD : Date de fin
+    
+    Le ZIP contient:
+      - Un dossier par candidat nommé avec son numero_dossier
+      - Tous les fichiers soumis par chaque candidat dans son dossier
+    """
+    try:
+        poste_filter = request.args.get('poste', '')
+        date_start = request.args.get('date_start', '')
+        date_end = request.args.get('date_end', '')
+        
+        # Récupérer tous les candidats
+        keys = redis_client.keys("candidat:*")
+        candidats = []
+        
+        for k in keys:
+            c = redis_client.hgetall(k)
+            c['id'] = k.split(':', 1)[1]
+            
+            # Filtre par poste
+            if poste_filter and c.get('poste') != poste_filter:
+                continue
+            
+            # Filtre par dates
+            date_cand = c.get('date_candidature', '')
+            if date_cand:
+                date_only = date_cand.split('T')[0] if 'T' in date_cand else date_cand[:10]
+                if date_start and date_only < date_start:
+                    continue
+                if date_end and date_only > date_end:
+                    continue
+            
+            candidats.append(c)
+        
+        if not candidats:
+            return jsonify({'error': 'Aucun dossier à exporter pour les critères spécifiés'}), 404
+        
+        # Créer le fichier ZIP en mémoire
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for cand in candidats:
+                # Nom du dossier candidat: numero_dossier (ex: RAC-2025-001)
+                num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+                
+                # Nettoyer le nom du dossier (caractères invalides pour ZIP)
+                num_dossier = re.sub(r'[<>:"/\\|?*]', '_', num_dossier)
+                
+                # Liste des fichiers à inclure
+                fichiers_a_inclure = []
+                
+                # CV
+                cv_file = cand.get('cv_filename', '')
+                if cv_file and os.path.exists(os.path.join(UPLOAD_FOLDER, cv_file)):
+                    fichiers_a_inclure.append((cv_file, 'CV'))
+                
+                # Lettre de motivation
+                lettre_file = cand.get('lettre_filename', '')
+                if lettre_file and os.path.exists(os.path.join(UPLOAD_FOLDER, lettre_file)):
+                    fichiers_a_inclure.append((lettre_file, 'Lettre_de_motivation'))
+                
+                # Attestations
+                att_raw = cand.get('attestation_filenames', '[]')
+                try:
+                    att_files = json.loads(att_raw)
+                    for idx, att_file in enumerate(att_files, 1):
+                        if att_file and os.path.exists(os.path.join(UPLOAD_FOLDER, att_file)):
+                            fichiers_a_inclure.append((att_file, f'Attestation_{idx}'))
+                except:
+                    pass
+                
+                # Ajouter chaque fichier au ZIP dans le dossier du candidat
+                for original_filename, prefix in fichiers_a_inclure:
+                    filepath = os.path.join(UPLOAD_FOLDER, original_filename)
+                    
+                    # Extraire l'extension originale
+                    ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
+                    
+                    # Nom dans le ZIP: numero_dossier/prefix.ext
+                    archive_name = f"{num_dossier}/{prefix}.{ext}" if ext else f"{num_dossier}/{prefix}"
+                    
+                    try:
+                        zip_file.write(filepath, archive_name)
+                    except Exception as e:
+                        print(f"⚠️ Erreur ajout fichier {original_filename}: {e}")
+        
+        # Préparer la réponse
+        zip_buffer.seek(0)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
+        filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
+        
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🚀 DÉMARRAGE
