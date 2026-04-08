@@ -2320,7 +2320,7 @@ def generate_word_report(candidats_data, poste_filter=None):
     liste_title = doc.add_heading('4. Liste Complète des Candidats', level=1)
     
     if candidats_data:
-        table_all = doc.add_table(rows=1, cols=7)
+        table_all = doc.add_table(rows=1, cols=8)
         table_all.style = 'Table Grid'
         hdr_cells_all = table_all.rows[0].cells
         headers_all = ['N°', 'Dossier', 'Nom', 'Prénom', 'Email', 'Poste', 'Statut', 'Score']
