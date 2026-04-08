@@ -214,7 +214,10 @@ def send_email(to_email, subject, body):
             server = smtplib.SMTP_SSL(smtp_host, smtp_port)
         
         server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_from, to_email, msg.as_string())
+        import re as _re
+        match = _re.search(r'<(.+?)>', smtp_from)
+        sender_email = match.group(1) if match else smtp_from
+        server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
         
         print(f"✅ Email envoyé avec succès à {to_email} - Sujet: {subject}")
@@ -3105,6 +3108,14 @@ def export_dossiers_zip():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/test-email', methods=['GET'])
+def test_email():
+    to = request.args.get('to', '')
+    if not to:
+        return jsonify({'error': 'Paramètre ?to= requis'}), 400
+    ok = send_email(to, 'Test RecrutBank', 'Ceci est un email de test depuis RecrutBank.')
+    return jsonify({'sent': ok}), 200
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🚀 DÉMARRAGE
