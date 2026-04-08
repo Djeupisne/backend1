@@ -90,18 +90,28 @@ except ImportError:
 app = Flask(__name__)
 
 # ── CORS ──────────────────────────────────────────────────────────────────
-CORS(app, resources={r"/api/*": {
-    "origins": "*",
-    "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-    "allow_headers": ["Content-Type", "Authorization"]
-}})
+# Configuration CORS permissive pour permettre l'accès depuis tous les domaines
+cors_config = {
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False,
+        "max_age": 600
+    }
+}
+CORS(app, resources=cors_config)
 
 # ── CORS HEADERS FOR ALL RESPONSES ────────────────────────────────────────
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+    response.headers.add('Access-Control-Max-Age', '600')
+    # Gérer les requêtes preflight OPTIONS
+    if request.method == 'OPTIONS':
+        response.status_code = 200
     return response
 
 # ── JWT ───────────────────────────────────────────────────────────────────
