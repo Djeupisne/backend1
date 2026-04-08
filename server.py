@@ -2535,22 +2535,18 @@ init_recruteur()
 # 🌐 ROUTES PUBLIQUES
 # ══════════════════════════════════════════════════════════════════════════
 
-@app.route('/api/postes', methods=['GET', 'OPTIONS'])
+@app.route('/api/postes', methods=['GET'])
 def get_postes():
-    if request.method == 'OPTIONS':
-        return '', 204
     return jsonify(POSTES), 200
 
-@app.route('/api/grille/<poste>', methods=['GET', 'OPTIONS'])
+@app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
-    if request.method == 'OPTIONS':
-        return '', 204
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
 
-@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+@app.route('/api/auth/login', methods=['POST'])
 def login():
     if request.method == 'OPTIONS':
         return '', 204
@@ -2566,10 +2562,8 @@ def login():
             return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
     return jsonify({'error': 'Identifiants incorrects'}), 401
 
-@app.route('/api/candidats/postuler', methods=['POST', 'OPTIONS'])
+@app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
-    if request.method == 'OPTIONS':
-        return '', 204
     try:
         nom            = (request.form.get('nom')            or '').strip()
         prenom         = (request.form.get('prenom')         or '').strip()
@@ -2695,10 +2689,8 @@ def postuler():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/candidats/statut/<token>', methods=['GET', 'OPTIONS'])
+@app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
-    if request.method == 'OPTIONS':
-        return '', 204
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidature introuvable'}), 404
@@ -2707,11 +2699,9 @@ def get_statut(token):
               'analyse_details', 'score_breakdown'}
     return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
 
-@app.route('/api/recruteur/stats', methods=['GET', 'OPTIONS'])
+@app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
-    if request.method == 'OPTIONS':
-        return '', 204
     keys  = redis_client.keys("candidat:*")
     stats = {"total": len(keys), "en_attente": 0, "retenu": 0,
              "rejete": 0, "entretien": 0, "by_poste": []}
@@ -2727,11 +2717,9 @@ def get_stats():
                          for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
 
-@app.route('/api/recruteur/candidats', methods=['GET', 'OPTIONS'])
+@app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
-    if request.method == 'OPTIONS':
-        return '', 204
     poste_filter  = request.args.get('poste',  '')
     statut_filter = request.args.get('statut', '')
     search        = request.args.get('search', '').lower()
@@ -2758,11 +2746,9 @@ def list_candidats():
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
 
-@app.route('/api/recruteur/candidats/<token>', methods=['GET', 'OPTIONS'])
+@app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
-    if request.method == 'OPTIONS':
-        return '', 204
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -2781,11 +2767,9 @@ def get_candidat_detail(token):
                 pass
     return jsonify(data), 200
 
-@app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT', 'OPTIONS'])
+@app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
-    if request.method == 'OPTIONS':
-        return '', 204
     key = f"candidat:{token}"
     if not redis_client.exists(key):
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -2804,11 +2788,9 @@ def update_candidat(token):
     })
     return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
 
-@app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST', 'OPTIONS'])
+@app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
-    if request.method == 'OPTIONS':
-        return '', 204
     key  = f"candidat:{token}"
     data = redis_client.hgetall(key)
     if not data:
@@ -2830,11 +2812,9 @@ def trigger_analyze(token):
     ).start()
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
-@app.route('/api/recruteur/export/<fmt>', methods=['GET', 'OPTIONS'])
+@app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
-    if request.method == 'OPTIONS':
-        return '', 204
     try:
         poste_filter = request.args.get('poste', '')
         statut_filter = request.args.get('statut', '')
@@ -2910,11 +2890,9 @@ def export_candidates(fmt):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST', 'OPTIONS'])
+@app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
-    if request.method == 'OPTIONS':
-        return '', 204
     data = redis_client.hgetall(f"candidat:{token}")
     if not data:
         return jsonify({'error': 'Candidat introuvable'}), 404
@@ -2951,10 +2929,8 @@ def email_preview(token):
 
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
 
-@app.route('/api/recruteur/uploads/<filename>', methods=['GET', 'OPTIONS'])
+@app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
-    if request.method == 'OPTIONS':
-        return '', 204
     safe = secure_filename(filename)
     if not safe or safe != filename:
         return jsonify({'error': 'Nom de fichier invalide'}), 400
@@ -2968,11 +2944,9 @@ def serve_upload(filename):
 # 📦 EXPORT ZIP DES DOSSIERS CANDIDATS
 # ══════════════════════════════════════════════════════════════════════════
 
-@app.route('/api/recruteur/dossiers/zip', methods=['GET', 'OPTIONS'])
+@app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip():
-    if request.method == 'OPTIONS':
-        return '', 204
     """
     Télécharge tous les dossiers des candidats en format ZIP.
     Paramètres optionnels:
