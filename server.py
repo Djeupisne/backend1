@@ -2373,8 +2373,68 @@ def init_recruteur():
             print("✅ Compte recruteur créé dans Redis.")
         else:
             print("✅ Connexion Redis OK.")
+        
+        # Migration: Générer numero_dossier pour les anciens candidats qui n'en ont pas
+        migrate_numero_dossier()
+        
     except Exception as e:
         print(f"⚠️ Redis non disponible au démarrage : {e}")
+
+def migrate_numero_dossier():
+    """Génère automatiquement des numero_dossier pour les anciens candidats qui n'en ont pas."""
+    print("🔄 Vérification des numéros de dossier manquants...")
+    
+    # Regrouper les candidats par poste
+    postes_candidates = {}
+    for k in redis_client.keys("candidat:*"):
+        c = redis_client.hgetall(k)
+        token = k.split(':', 1)[1]
+        poste = c.get('poste', '')
+        numero_dossier = c.get('numero_dossier', '')
+        
+        if not numero_dossier and poste:
+            if poste not in postes_candidates:
+                postes_candidates[poste] = []
+            postes_candidates[poste].append((token, c))
+    
+    # Pour chaque poste, générer les numéros manquants
+    for poste, candidates in postes_candidates.items():
+        if not candidates:
+            continue
+            
+        # Trouver le numéro maximum existant pour ce poste
+        max_num = 0
+        for k in redis_client.keys("candidat:*"):
+            existing = redis_client.hgetall(k)
+            if existing.get('poste') == poste:
+                existing_num = existing.get('numero_dossier', '')
+                if existing_num:
+                    try:
+                        num_part = existing_num.split('-')[-1] if '-' in existing_num else existing_num
+                        num_val = int(num_part)
+                        if num_val > max_num:
+                            max_num = num_val
+                    except (ValueError, IndexError):
+                        pass
+        
+        # Trier les candidats sans numero_dossier par date de candidature
+        candidates_sorted = sorted(candidates, key=lambda x: x[1].get('date_candidature', ''))
+        
+        # Assigner les numéros
+        code_poste = ''.join(word[0].upper() for word in poste.split()[:3])
+        annee = datetime.datetime.now().year
+        
+        for token, c in candidates_sorted:
+            max_num += 1
+            numero_dossier = f"{code_poste}-{annee}-{max_num:03d}"
+            redis_client.hset(f"candidat:{token}", "numero_dossier", numero_dossier)
+            print(f"  ✅ Ajouté numero_dossier={numero_dossier} pour {c.get('nom', '?')} {c.get('prenom', '?')} ({poste})")
+    
+    total_migrated = sum(len(cands) for cands in postes_candidates.values())
+    if total_migrated > 0:
+        print(f"✅ Migration terminée: {total_migrated} candidats mis à jour")
+    else:
+        print("✅ Aucun numéro de dossier manquant")
 
 init_recruteur()
 
@@ -2814,6 +2874,8 @@ def export_dossiers_zip():
         
         # Créer le fichier ZIP en mémoire
         zip_buffer = io.BytesIO()
+        files_added = 0
+        candidates_processed = 0
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for cand in candidats:
@@ -2828,38 +2890,71 @@ def export_dossiers_zip():
                 
                 # CV
                 cv_file = cand.get('cv_filename', '')
-                if cv_file and os.path.exists(os.path.join(UPLOAD_FOLDER, cv_file)):
-                    fichiers_a_inclure.append((cv_file, 'CV'))
+                if cv_file:
+                    cv_path = os.path.join(UPLOAD_FOLDER, cv_file)
+                    if os.path.exists(cv_path):
+                        fichiers_a_inclure.append((cv_file, 'CV'))
+                    else:
+                        print(f"⚠️ Fichier CV non trouvé: {cv_file} pour candidat {num_dossier}")
                 
                 # Lettre de motivation
                 lettre_file = cand.get('lettre_filename', '')
-                if lettre_file and os.path.exists(os.path.join(UPLOAD_FOLDER, lettre_file)):
-                    fichiers_a_inclure.append((lettre_file, 'Lettre_de_motivation'))
+                if lettre_file:
+                    lettre_path = os.path.join(UPLOAD_FOLDER, lettre_file)
+                    if os.path.exists(lettre_path):
+                        fichiers_a_inclure.append((lettre_file, 'Lettre_de_motivation'))
+                    else:
+                        print(f"⚠️ Fichier lettre non trouvé: {lettre_file} pour candidat {num_dossier}")
                 
                 # Attestations
                 att_raw = cand.get('attestation_filenames', '[]')
                 try:
-                    att_files = json.loads(att_raw)
+                    att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
                     for idx, att_file in enumerate(att_files, 1):
-                        if att_file and os.path.exists(os.path.join(UPLOAD_FOLDER, att_file)):
-                            fichiers_a_inclure.append((att_file, f'Attestation_{idx}'))
-                except:
-                    pass
+                        if att_file:
+                            att_path = os.path.join(UPLOAD_FOLDER, att_file)
+                            if os.path.exists(att_path):
+                                fichiers_a_inclure.append((att_file, f'Attestation_{idx}'))
+                            else:
+                                print(f"⚠️ Fichier attestation non trouvé: {att_file} pour candidat {num_dossier}")
+                except Exception as e:
+                    print(f"⚠️ Erreur parsing attestations: {e}")
                 
-                # Ajouter chaque fichier au ZIP dans le dossier du candidat
-                for original_filename, prefix in fichiers_a_inclure:
-                    filepath = os.path.join(UPLOAD_FOLDER, original_filename)
+                # Si aucun fichier trouvé, créer un fichier d'information
+                if not fichiers_a_inclure:
+                    info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\n"
+                    info_content += f"Poste: {cand.get('poste', 'N/A')}\n"
+                    info_content += f"Numero dossier: {num_dossier}\n"
+                    info_content += f"Email: {cand.get('email', 'N/A')}\n"
+                    info_content += f"Telephone: {cand.get('telephone', 'N/A')}\n"
+                    info_content += f"Date candidature: {cand.get('date_candidature', 'N/A')}\n"
+                    info_content += f"\nNote: Les fichiers originaux ne sont plus disponibles sur le serveur."
                     
-                    # Extraire l'extension originale
-                    ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
-                    
-                    # Nom dans le ZIP: numero_dossier/prefix.ext
-                    archive_name = f"{num_dossier}/{prefix}.{ext}" if ext else f"{num_dossier}/{prefix}"
-                    
-                    try:
-                        zip_file.write(filepath, archive_name)
-                    except Exception as e:
-                        print(f"⚠️ Erreur ajout fichier {original_filename}: {e}")
+                    archive_name = f"{num_dossier}/INFOS_CANDIDAT.txt"
+                    zip_file.writestr(archive_name, info_content.encode('utf-8'))
+                    files_added += 1
+                    print(f"ℹ️ Ajout fichier infos pour candidat {num_dossier}")
+                else:
+                    # Ajouter chaque fichier au ZIP dans le dossier du candidat
+                    for original_filename, prefix in fichiers_a_inclure:
+                        filepath = os.path.join(UPLOAD_FOLDER, original_filename)
+                        
+                        # Extraire l'extension originale
+                        ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
+                        
+                        # Nom dans le ZIP: numero_dossier/prefix.ext
+                        archive_name = f"{num_dossier}/{prefix}.{ext}" if ext else f"{num_dossier}/{prefix}"
+                        
+                        try:
+                            zip_file.write(filepath, archive_name)
+                            files_added += 1
+                            print(f"✅ Ajouté: {archive_name}")
+                        except Exception as e:
+                            print(f"⚠️ Erreur ajout fichier {original_filename}: {e}")
+                
+                candidates_processed += 1
+        
+        print(f"📦 ZIP généré: {candidates_processed} candidats, {files_added} fichiers")
         
         # Préparer la réponse
         zip_buffer.seek(0)
