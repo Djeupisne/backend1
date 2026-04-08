@@ -102,8 +102,13 @@ def after_request(response):
     response.headers.add('Access-Control-Max-Age', '600')
     # Gérer les requêtes preflight OPTIONS
     if request.method == 'OPTIONS':
-        response.status_code = 200
+        response.status_code = 204
     return response
+
+# ── ROUTE HEALTH CHECK ────────────────────────────────────────────────────
+@app.route('/', methods=['GET', 'HEAD'])
+def health_check():
+    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
 
 # ── JWT ───────────────────────────────────────────────────────────────────
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
