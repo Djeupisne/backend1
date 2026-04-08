@@ -16,6 +16,10 @@ import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, c
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement depuis le fichier .env
+load_dotenv()
 
 # ── PARSING DOCUMENTS ──────────────────────────────────────────────────────
 try:
