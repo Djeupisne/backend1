@@ -96,6 +96,14 @@ CORS(app, resources={r"/api/*": {
     "allow_headers": ["Content-Type", "Authorization"]
 }})
 
+# ── CORS HEADERS FOR ALL RESPONSES ────────────────────────────────────────
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+    return response
+
 # ── JWT ───────────────────────────────────────────────────────────────────
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
