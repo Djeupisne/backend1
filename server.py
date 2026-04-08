@@ -89,7 +89,9 @@ except ImportError:
 
 app = Flask(__name__)
 
-# ── LOGGING POUR DEBUG ──────────────────────────────────────────────────────\nimport logging
+import logging
+
+# ── LOGGING POUR DEBUG ────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 logger.info("🚀 Démarrage du serveur Flask...")
