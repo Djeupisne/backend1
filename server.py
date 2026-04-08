@@ -1025,7 +1025,7 @@ def is_stage_block(block_text):
 
 def extract_duration_years_from_block(block_text):
     """
-    ✅ FIX v7 : \s* ajouté APRÈS le séparateur dans pattern_present et pattern_range
+    ✅ FIX v7 : \\s* ajouté APRÈS le séparateur dans pattern_present et pattern_range
     Sans ce fix : "2018 – a nos jours" → le " " après "–" bloque le match
     """
     years = 0.0
