@@ -143,7 +143,7 @@ app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
-app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'noreply@recrutbank.com')
+app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupisme@gmail.com>')
 app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
 
 # ── UPLOADS ───────────────────────────────────────────────────────────────
