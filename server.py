@@ -2410,23 +2410,20 @@ def migrate_numero_dossier():
                 existing_num = existing.get('numero_dossier', '')
                 if existing_num:
                     try:
-                        num_part = existing_num.split('-')[-1] if '-' in existing_num else existing_num
-                        num_val = int(num_part)
+                        # Le numéro de dossier est maintenant un nombre naturel simple
+                        num_val = int(existing_num)
                         if num_val > max_num:
                             max_num = num_val
-                    except (ValueError, IndexError):
+                    except (ValueError):
                         pass
         
         # Trier les candidats sans numero_dossier par date de candidature
         candidates_sorted = sorted(candidates, key=lambda x: x[1].get('date_candidature', ''))
         
         # Assigner les numéros
-        code_poste = ''.join(word[0].upper() for word in poste.split()[:3])
-        annee = datetime.datetime.now().year
-        
         for token, c in candidates_sorted:
             max_num += 1
-            numero_dossier = f"{code_poste}-{annee}-{max_num:03d}"
+            numero_dossier = str(max_num)
             redis_client.hset(f"candidat:{token}", "numero_dossier", numero_dossier)
             print(f"  ✅ Ajouté numero_dossier={numero_dossier} pour {c.get('nom', '?')} {c.get('prenom', '?')} ({poste})")
     
@@ -2497,19 +2494,16 @@ def postuler():
                 existing_num = existing.get('numero_dossier', '')
                 if existing_num:
                     try:
-                        # Extraire le numéro (format attendu: POSTE-YYYY-NNN ou juste NNN)
-                        num_part = existing_num.split('-')[-1] if '-' in existing_num else existing_num
-                        num_val = int(num_part)
+                        # Le numéro de dossier est maintenant un nombre naturel simple
+                        num_val = int(existing_num)
                         if num_val > max_num:
                             max_num = num_val
-                    except (ValueError, IndexError):
+                    except (ValueError):
                         pass
         
         new_num = max_num + 1
-        annee = datetime.datetime.now().year
-        # Format: CODEPOSTE-ANNEE-NUMERO (ex: RAC-2025-001)
-        code_poste = ''.join(word[0].upper() for word in poste.split()[:3])  # 3 premières lettres
-        numero_dossier = f"{code_poste}-{annee}-{new_num:03d}"
+        # Format: Nombre naturel simple (1, 2, 3, 4, ...)
+        numero_dossier = str(new_num)
         # =====================================================================
 
         def save_file(field, suffix):
@@ -2838,8 +2832,9 @@ def export_dossiers_zip():
       - ?date_end=YYYY-MM-DD : Date de fin
     
     Le ZIP contient:
-      - Un dossier par candidat nommé avec son numero_dossier
-      - Tous les fichiers soumis par chaque candidat dans son dossier
+      - Un dossier par poste nommé avec le nom du poste
+      - Dans chaque dossier poste, un dossier par candidat nommé "numero_dossier - NOM Prenom"
+      - Dans chaque dossier candidat, tous les fichiers soumis par le candidat
     """
     try:
         poste_filter = request.args.get('poste', '')
@@ -2879,11 +2874,23 @@ def export_dossiers_zip():
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for cand in candidats:
-                # Nom du dossier candidat: numero_dossier (ex: RAC-2025-001)
-                num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+                # Nom du poste pour ce candidat
+                poste_nom = cand.get('poste', 'Poste_Inconnu')
+                # Nettoyer le nom du poste (caractères invalides pour ZIP)
+                poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
                 
-                # Nettoyer le nom du dossier (caractères invalides pour ZIP)
-                num_dossier = re.sub(r'[<>:"/\\|?*]', '_', num_dossier)
+                # Numéro de dossier et nom complet du candidat
+                num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+                nom_candidat = cand.get('nom', 'N/A').upper()
+                prenom_candidat = cand.get('prenom', 'N/A')
+                
+                # Nom du dossier candidat: "numero_dossier - NOM Prenom"
+                dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
+                # Nettoyer le nom du dossier candidat
+                dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
+                
+                # Chemin complet dans le ZIP: Poste/dossier_candidat/
+                dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
                 
                 # Liste des fichiers à inclure
                 fichiers_a_inclure = []
@@ -2895,7 +2902,7 @@ def export_dossiers_zip():
                     if os.path.exists(cv_path):
                         fichiers_a_inclure.append((cv_file, 'CV'))
                     else:
-                        print(f"⚠️ Fichier CV non trouvé: {cv_file} pour candidat {num_dossier}")
+                        print(f"⚠️ Fichier CV non trouvé: {cv_file} pour candidat {dossier_candidat_nom}")
                 
                 # Lettre de motivation
                 lettre_file = cand.get('lettre_filename', '')
@@ -2904,7 +2911,7 @@ def export_dossiers_zip():
                     if os.path.exists(lettre_path):
                         fichiers_a_inclure.append((lettre_file, 'Lettre_de_motivation'))
                     else:
-                        print(f"⚠️ Fichier lettre non trouvé: {lettre_file} pour candidat {num_dossier}")
+                        print(f"⚠️ Fichier lettre non trouvé: {lettre_file} pour candidat {dossier_candidat_nom}")
                 
                 # Attestations
                 att_raw = cand.get('attestation_filenames', '[]')
@@ -2916,7 +2923,7 @@ def export_dossiers_zip():
                             if os.path.exists(att_path):
                                 fichiers_a_inclure.append((att_file, f'Attestation_{idx}'))
                             else:
-                                print(f"⚠️ Fichier attestation non trouvé: {att_file} pour candidat {num_dossier}")
+                                print(f"⚠️ Fichier attestation non trouvé: {att_file} pour candidat {dossier_candidat_nom}")
                 except Exception as e:
                     print(f"⚠️ Erreur parsing attestations: {e}")
                 
@@ -2930,10 +2937,10 @@ def export_dossiers_zip():
                     info_content += f"Date candidature: {cand.get('date_candidature', 'N/A')}\n"
                     info_content += f"\nNote: Les fichiers originaux ne sont plus disponibles sur le serveur."
                     
-                    archive_name = f"{num_dossier}/INFOS_CANDIDAT.txt"
+                    archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
                     zip_file.writestr(archive_name, info_content.encode('utf-8'))
                     files_added += 1
-                    print(f"ℹ️ Ajout fichier infos pour candidat {num_dossier}")
+                    print(f"ℹ️ Ajout fichier infos pour candidat {dossier_candidat_nom}")
                 else:
                     # Ajouter chaque fichier au ZIP dans le dossier du candidat
                     for original_filename, prefix in fichiers_a_inclure:
@@ -2942,8 +2949,8 @@ def export_dossiers_zip():
                         # Extraire l'extension originale
                         ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
                         
-                        # Nom dans le ZIP: numero_dossier/prefix.ext
-                        archive_name = f"{num_dossier}/{prefix}.{ext}" if ext else f"{num_dossier}/{prefix}"
+                        # Nom dans le ZIP: Poste/dossier_candidat/prefix.ext
+                        archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
                         
                         try:
                             zip_file.write(filepath, archive_name)
