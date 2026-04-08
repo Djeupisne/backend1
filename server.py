@@ -89,13 +89,21 @@ except ImportError:
 
 app = Flask(__name__)
 
+# ── LOGGING POUR DEBUG ──────────────────────────────────────────────────────\nimport logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+logger.info("🚀 Démarrage du serveur Flask...")
+
 # ── CORS ──────────────────────────────────────────────────────────────────
 # Configuration CORS permissive pour permettre l'accès depuis tous les domaines
+logger.info("🔧 Configuration CORS...")
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
+logger.info("✅ CORS configuré")
 
 # ── CORS HEADERS FOR ALL RESPONSES ────────────────────────────────────────
 @app.after_request
 def after_request(response):
+    logger.debug(f"📝 Requête {request.method} {request.path} - Status: {response.status_code}")
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
@@ -103,6 +111,7 @@ def after_request(response):
     # Gérer les requêtes preflight OPTIONS
     if request.method == 'OPTIONS':
         response.status_code = 204
+        logger.debug("✅ Requête OPTIONS traitée")
     return response
 
 # ── ROUTE HEALTH CHECK ────────────────────────────────────────────────────
