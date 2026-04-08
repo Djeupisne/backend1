@@ -12,7 +12,9 @@ from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
-import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile
+import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from werkzeug.utils import secure_filename
 
 # ── PARSING DOCUMENTS ──────────────────────────────────────────────────────
@@ -110,6 +112,15 @@ redis_client = redis.Redis(
     socket_timeout=5
 )
 
+# ── CONFIGURATION EMAIL ───────────────────────────────────────────────────
+# Configuration SMTP pour l'envoi d'emails
+app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
+app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
+app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
+app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'noreply@recrutbank.com')
+app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
+
 # ── UPLOADS ───────────────────────────────────────────────────────────────
 UPLOAD_FOLDER  = os.path.join(os.path.dirname(__file__), 'uploads')
 REPORTS_FOLDER = os.path.join(os.path.dirname(__file__), 'reports')
@@ -125,6 +136,68 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# ── FONCTION D'ENVOI D'EMAIL ───────────────────────────────────────────────
+def send_email(to_email, subject, body):
+    """
+    Envoie un email au candidat.
+    Retourne True si l'email a été envoyé avec succès, False sinon.
+    """
+    smtp_host = app.config.get('SMTP_HOST', 'smtp.gmail.com')
+    smtp_port = app.config.get('SMTP_PORT', 587)
+    smtp_user = app.config.get('SMTP_USER', '')
+    smtp_password = app.config.get('SMTP_PASSWORD', '')
+    smtp_from = app.config.get('SMTP_FROM', 'noreply@recrutbank.com')
+    smtp_use_tls = app.config.get('SMTP_USE_TLS', True)
+    
+    # Si les identifiants SMTP ne sont pas configurés, on logue et on retourne False
+    if not smtp_user or not smtp_password:
+        print(f"⚠️ Configuration SMTP incomplète. Email non envoyé à {to_email}")
+        print(f"   Pour activer l'envoi d'emails, configurez les variables d'environnement:")
+        print(f"   - SMTP_USER: votre adresse email")
+        print(f"   - SMTP_PASSWORD: votre mot de passe ou mot de passe d'application")
+        return False
+    
+    try:
+        # Création du message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = smtp_from
+        msg['To'] = to_email
+        
+        # Corps du message en texte brut et HTML
+        text_part = MIMEText(body, 'plain', 'utf-8')
+        html_body = f"""
+        <html>
+        <body>
+            <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+                {body.replace(chr(10), '<br>')}
+            </div>
+        </body>
+        </html>
+        """
+        html_part = MIMEText(html_body, 'html', 'utf-8')
+        
+        msg.attach(text_part)
+        msg.attach(html_part)
+        
+        # Connexion au serveur SMTP et envoi
+        if smtp_use_tls:
+            server = smtplib.SMTP(smtp_host, smtp_port)
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port)
+        
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_from, to_email, msg.as_string())
+        server.quit()
+        
+        print(f"✅ Email envoyé avec succès à {to_email} - Sujet: {subject}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erreur lors de l'envoi de l'email à {to_email}: {str(e)}")
+        return False
 
 # ── POSTES ────────────────────────────────────────────────────────────────
 POSTES = [
@@ -2553,6 +2626,31 @@ def postuler():
             args=(token, cv_filename, lettre_filename, att_filenames, poste),
             daemon=True
         ).start()
+        
+        # ── ENVOI EMAIL DE CONFIRMATION AU CANDIDAT ────────────────────────
+        # Création du message de confirmation
+        nom_complet = f"{prenom} {nom}".strip()
+        sujet_confirmation = f"Confirmation de candidature – {poste}"
+        corps_confirmation = (
+            f"Madame, Monsieur {nom_complet},\n\n"
+            f"Nous vous remercions d'avoir soumis votre candidature pour le poste de {poste} au sein de RecrutBank.\n\n"
+            f"Nous vous confirmons que votre dossier a été soumis avec succès et est actuellement en cours d'analyse par notre équipe.\n\n"
+            f"Votre numéro de dossier est : {numero_dossier}\n\n"
+            f"Vous serez informé(e) du résultat de l'étude de votre candidature dans les meilleurs délais. Nous vous prions de bien vouloir rester en attente.\n\n"
+            f"Pour toute question ou pour consulter l'état d'avancement de votre candidature, vous pouvez utiliser votre lien de suivi personnalisé.\n\n"
+            f"Nous vous remercions de l'intérêt que vous portez à notre institution.\n\n"
+            f"Cordialement,\n"
+            f"L'équipe Ressources Humaines\n"
+            f"RecrutBank"
+        )
+        
+        # Envoi de l'email en arrière-plan pour ne pas bloquer la réponse
+        threading.Thread(
+            target=send_email,
+            args=(email, sujet_confirmation, corps_confirmation),
+            daemon=True
+        ).start()
+        # ====================================================================
 
         return jsonify({
             'message':        'Candidature soumise avec succès',
@@ -3010,6 +3108,20 @@ if __name__ == '__main__':
     print(f"   FIX 2 ✅ UBA-TCHAD détecté même avec format complexe")
     print(f"   FIX 3 ✅ 'Responsable Risque' + 'gestion bancaire' ⇒ validation auto")
     print(f"   FIX 4 ✅ Fallbacks multiples pour expériences non-structurées")
+    print(f"")
+    print(f"📧 SYSTEME DE NOTIFICATION EMAIL:")
+    smtp_user = app.config.get('SMTP_USER', '')
+    if smtp_user:
+        print(f"   ✅ Emails ACTIVÉS via {app.config.get('SMTP_HOST', 'smtp.gmail.com')}")
+        print(f"      Expéditeur: {app.config.get('SMTP_FROM', 'noreply@recrutbank.com')}")
+    else:
+        print(f"   ⚠️  Emails DÉSACTIVÉS (configurez SMTP_USER et SMTP_PASSWORD)")
+        print(f"      Variables d'environnement requises:")
+        print(f"      - SMTP_HOST: smtp.gmail.com (ou autre)")
+        print(f"      - SMTP_PORT: 587")
+        print(f"      - SMTP_USER: votre@email.com")
+        print(f"      - SMTP_PASSWORD: mot de passe d'application")
+        print(f"      - SMTP_FROM: noreply@recrutbank.com")
     print(f"")
     print(f"🔍 Extraction: PDF(pdfplumber>PyPDF2>pdftotext) | DOCX(normalize_spaces) | TXT(multi-encodage)")
     print(f"🌐 Langue: {'✅' if LANGDETECT_AVAILABLE else '❌'} | 🔤 Unicode: ✅ | 🔍 Fuzzy: {'✅' if RAPIDFUZZ_AVAILABLE else '❌'}")
