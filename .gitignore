@@ -6,20 +6,26 @@ __pycache__/
 *.pyd
 
 # Environment
-.venv/
-venv/
 .env
 .env.local
 *.env.*
 
-# Logs and temporary files
+# Logs
 *.log
+
+# Temporary files
 *.tmp
 *.swp
+*.swo
 
 # Editors
 .vscode/
 .idea/
+
+# Dependencies
+.venv/
+venv/
+node_modules/
 
 # Build artifacts
 dist/

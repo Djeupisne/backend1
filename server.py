@@ -12,7 +12,9 @@ from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity
 )
-import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile
+import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from werkzeug.utils import secure_filename
 
 # ── PARSING DOCUMENTS ──────────────────────────────────────────────────────
@@ -110,6 +112,15 @@ redis_client = redis.Redis(
     socket_timeout=5
 )
 
+# ── CONFIGURATION EMAIL ───────────────────────────────────────────────────
+# Configuration SMTP pour l'envoi d'emails de confirmation
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@recrutbank.com")
+
 # ── UPLOADS ───────────────────────────────────────────────────────────────
 UPLOAD_FOLDER  = os.path.join(os.path.dirname(__file__), 'uploads')
 REPORTS_FOLDER = os.path.join(os.path.dirname(__file__), 'reports')
@@ -125,6 +136,83 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# ── FONCTION D'ENVOI D'EMAIL ───────────────────────────────────────────────
+def send_confirmation_email(to_email, nom, prenom, poste, numero_dossier):
+    """
+    Envoie un email de confirmation au candidat après soumission de sa candidature.
+    """
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        print(f"⚠️ Configuration SMTP incomplète. Email non envoyé à {to_email}")
+        return False
+    
+    try:
+        # Création du message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"Confirmation de candidature - {poste}"
+        msg['From'] = EMAIL_FROM
+        msg['To'] = to_email
+        
+        # Corps du message en texte brut
+        texte_brut = f"""Madame, Monsieur {prenom} {nom},
+
+Nous accusons réception de votre candidature pour le poste de "{poste}".
+
+Votre dossier a été enregistré avec succès sous le numéro : {numero_dossier}
+
+Notre équipe examinera attentivement votre profil et vous contactera dans les meilleurs délais pour vous informer de la suite du processus.
+
+Nous vous remercions de l'intérêt que vous portez à notre institution.
+
+Cordialement,
+L'équipe Ressources Humaines
+RecrutBank
+"""
+        
+        # Corps du message en HTML
+        texte_html = f"""
+<html>
+<body>
+<p>Madame, Monsieur {prenom} {nom},</p>
+
+<p>Nous accusons réception de votre candidature pour le poste de <strong>{poste}</strong>.</p>
+
+<p>Votre dossier a été enregistré avec succès sous le numéro : <strong>{numero_dossier}</strong></p>
+
+<p>Notre équipe examinera attentivement votre profil et vous contactera dans les meilleurs délais pour vous informer de la suite du processus.</p>
+
+<p>Nous vous remercions de l'intérêt que vous portez à notre institution.</p>
+
+<p>Cordialement,<br>
+<strong>L'équipe Ressources Humaines</strong><br>
+RecrutBank</p>
+</body>
+</html>
+"""
+        
+        # Attachement des versions texte et HTML
+        part1 = MIMEText(texte_brut, 'plain', 'utf-8')
+        part2 = MIMEText(texte_html, 'html', 'utf-8')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        # Connexion au serveur SMTP et envoi
+        if SMTP_USE_TLS:
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT)
+        
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.sendmail(EMAIL_FROM, to_email, msg.as_string())
+        server.quit()
+        
+        print(f"✅ Email de confirmation envoyé à {to_email} pour le poste {poste}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erreur lors de l'envoi de l'email à {to_email}: {str(e)}")
+        return False
 
 # ── POSTES ────────────────────────────────────────────────────────────────
 POSTES = [
@@ -2547,6 +2635,15 @@ def postuler():
             "analyse_status":        "pending",
             "date_candidature":      datetime.datetime.now().isoformat()
         })
+
+        # ── ENVOI EMAIL DE CONFIRMATION ─────────────────────────────────────
+        # Lancer l'envoi de l'email dans un thread séparé pour ne pas bloquer
+        threading.Thread(
+            target=send_confirmation_email,
+            args=(email, nom, prenom, poste, numero_dossier),
+            daemon=True
+        ).start()
+        # =====================================================================
 
         threading.Thread(
             target=run_analysis_for_candidat,
