@@ -92,7 +92,9 @@ app = Flask(__name__)
 import logging
 
 # ── LOGGING POUR DEBUG ────────────────────────────────────────────────────────
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
+logging.getLogger('pdfminer').setLevel(logging.WARNING)
+logging.getLogger('pdfplumber').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 logger.info("🚀 Démarrage du serveur Flask...")
 
@@ -3111,11 +3113,23 @@ def export_dossiers_zip():
 
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
-    to = request.args.get('to', '')
-    if not to:
-        return jsonify({'error': 'Paramètre ?to= requis'}), 400
-    ok = send_email(to, 'Test RecrutBank', 'Ceci est un email de test depuis RecrutBank.')
-    return jsonify({'sent': ok}), 200
+    try:
+        to = request.args.get('to', '')
+        if not to:
+            return jsonify({'error': 'Paramètre ?to= requis'}), 400
+        smtp_user = app.config.get('SMTP_USER', '')
+        smtp_password = app.config.get('SMTP_PASSWORD', '')
+        smtp_from = app.config.get('SMTP_FROM', '')
+        ok = send_email(to, 'Test RecrutBank', 'Ceci est un email de test depuis RecrutBank.')
+        return jsonify({
+            'sent': ok,
+            'smtp_user': smtp_user,
+            'smtp_from': smtp_from,
+            'password_length': len(smtp_password)
+        }), 200
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
 # ══════════════════════════════════════════════════════════════════════════
 # 🚀 DÉMARRAGE
