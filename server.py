@@ -114,12 +114,13 @@ redis_client = redis.Redis(
 
 # ── CONFIGURATION EMAIL ───────────────────────────────────────────────────
 # Configuration SMTP pour l'envoi d'emails de confirmation
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+# Support des anciens et nouveaux noms de variables pour compatibilit�
+SMTP_SERVER = os.getenv("SMTP_SERVER") or os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+SMTP_USERNAME = os.getenv("SMTP_USERNAME") or os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
-EMAIL_FROM = os.getenv("EMAIL_FROM", "noreply@recrutbank.com")
+EMAIL_FROM = os.getenv("EMAIL_FROM") or os.getenv("SMTP_FROM", "noreply@recrutbank.com")
 
 # ── UPLOADS ───────────────────────────────────────────────────────────────
 UPLOAD_FOLDER  = os.path.join(os.path.dirname(__file__), 'uploads')
