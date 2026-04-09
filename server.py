@@ -181,7 +181,7 @@ def send_email(to_email, subject, body):
     smtp_port = app.config.get('SMTP_PORT', 587)
     smtp_user = app.config.get('SMTP_USER', '')
     smtp_password = app.config.get('SMTP_PASSWORD', '')
-    smtp_from = app.config.get('SMTP_FROM', 'noreply@recrutbank.com')
+    smtp_from = app.config.get('SMTP_FROM', 'oualoumidjeupisne@gmail.com')
     smtp_use_tls = app.config.get('SMTP_USE_TLS', True)
     
     # Si les identifiants SMTP ne sont pas configurés, on logue et on retourne False
