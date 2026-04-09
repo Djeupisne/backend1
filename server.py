@@ -177,13 +177,14 @@ def send_email(to_email, subject, body):
     Envoie un email au candidat.
     Retourne True si l'email a été envoyé avec succès, False sinon.
     """
-    smtp_host = app.config.get('SMTP_HOST', 'smtp.gmail.com')
-    smtp_port = app.config.get('SMTP_PORT', 587)
-    smtp_user = app.config.get('SMTP_USER', '')
-    smtp_password = app.config.get('SMTP_PASSWORD', '')
-    smtp_from = app.config.get('SMTP_FROM', 'noreply@recrutbank.com')
-    smtp_use_tls = app.config.get('SMTP_USE_TLS', True)
-    
+    # Récupération directe depuis os.getenv pour compatibilité Render
+    smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+    smtp_port = int(os.getenv('SMTP_PORT', 587))
+    smtp_user = os.getenv('SMTP_USER', '')
+    smtp_password = os.getenv('SMTP_PASSWORD', '')
+    smtp_from_raw = os.getenv('SMTP_FROM', f'RecrutBank RH <{smtp_user}>')
+    smtp_use_tls = os.getenv('SMTP_USE_TLS', 'true').lower() in ('true', '1', 'yes')
+
     # Si les identifiants SMTP ne sont pas configurés, on logue et on retourne False
     if not smtp_user or not smtp_password:
         print(f"⚠️ Configuration SMTP incomplète. Email non envoyé à {to_email}")
@@ -191,14 +192,24 @@ def send_email(to_email, subject, body):
         print(f"   - SMTP_USER: votre adresse email")
         print(f"   - SMTP_PASSWORD: votre mot de passe ou mot de passe d'application")
         return False
-    
+
     try:
+        # Extraction de l'email réel depuis le champ From (format: "Nom <email@domaine.com>")
+        import re as _re
+        match = _re.search(r'<(.+?)>', smtp_from_raw)
+        sender_email = match.group(1) if match else smtp_from_raw
+        
+        # Vérification que l'email d'expédition correspond à l'utilisateur SMTP
+        if sender_email != smtp_user:
+            print(f"⚠️ Attention: SMTP_FROM ({sender_email}) différent de SMTP_USER ({smtp_user})")
+            print(f"   Gmail peut rejeter l'envoi. Pour éviter cela, assurez-vous que SMTP_FROM contient la même adresse que SMTP_USER")
+
         # Création du message
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
-        msg['From'] = smtp_from
+        msg['From'] = smtp_from_raw
         msg['To'] = to_email
-        
+
         # Corps du message en texte brut et HTML
         text_part = MIMEText(body, 'plain', 'utf-8')
         html_body = f"""
@@ -211,29 +222,34 @@ def send_email(to_email, subject, body):
         </html>
         """
         html_part = MIMEText(html_body, 'html', 'utf-8')
-        
+
         msg.attach(text_part)
         msg.attach(html_part)
+
+        # Connexion au serveur SMTP et envoi avec logs détaillés
+        print(f"📧 Tentative de connexion à {smtp_host}:{smtp_port} avec l'utilisateur {smtp_user}")
         
-        # Connexion au serveur SMTP et envoi
         if smtp_use_tls:
             server = smtplib.SMTP(smtp_host, smtp_port)
+            server.set_debuglevel(1)  # Active les logs SMTP pour débogage
             server.starttls()
         else:
             server = smtplib.SMTP_SSL(smtp_host, smtp_port)
-        
+            server.set_debuglevel(1)
+
+        print(f"🔐 Connexion réussie, tentative de login...")
         server.login(smtp_user, smtp_password)
-        import re as _re
-        match = _re.search(r'<(.+?)>', smtp_from)
-        sender_email = match.group(1) if match else smtp_from
+        print(f"✅ Login réussi, envoi de l'email de {sender_email} à {to_email}")
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        
+
         print(f"✅ Email envoyé avec succès à {to_email} - Sujet: {subject}")
         return True
-        
+
     except Exception as e:
         print(f"❌ Erreur lors de l'envoi de l'email à {to_email}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # ── POSTES ────────────────────────────────────────────────────────────────
