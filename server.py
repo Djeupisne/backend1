@@ -17,6 +17,13 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from werkzeug.utils import secure_filename
 
+# ── CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ────────────────────────────────
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Charge les variables depuis le fichier .env s'il existe
+except ImportError:
+    pass  # python-dotenv non installé, on utilise les variables système uniquement
+
 # ── PARSING DOCUMENTS ──────────────────────────────────────────────────────
 try:
     import pdfplumber

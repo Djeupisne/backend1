@@ -105,22 +105,54 @@ python3 server.py
 
 ## ⚙️ Configuration SMTP (email réel)
 
-Pour activer l'envoi d'emails réels, ajoutez dans `backend/server.py` :
+Pour activer l'envoi d'emails réels aux candidats après soumission de leur candidature :
 
-```python
-import smtplib
-from email.mime.text import MIMEText
+### 1. Créer un fichier `.env` à la racine du projet
 
-def send_email(to, sujet, corps):
-    msg = MIMEText(corps)
-    msg['Subject'] = sujet
-    msg['From'] = 'rh@banque.com'
-    msg['To'] = to
-    with smtplib.SMTP('smtp.banque.com', 587) as s:
-        s.starttls()
-        s.login('rh@banque.com', 'VOTRE_MOT_DE_PASSE')
-        s.send_message(msg)
+Copiez le fichier `.env.example` en `.env` et remplissez avec vos informations :
+
+```bash
+cp .env.example .env
 ```
+
+### 2. Configurer vos identifiants SMTP
+
+Exemple pour Gmail :
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=votre.email@gmail.com
+SMTP_PASSWORD=votre_mot_de_passe_application
+SMTP_FROM=RecrutBank RH <noreply@recrutbank.com>
+SMTP_USE_TLS=true
+```
+
+**Important pour Gmail :**
+1. Activez la validation en deux étapes sur votre compte Google
+2. Générez un mot de passe d'application : https://myaccount.google.com/apppasswords
+3. Utilisez ce mot de passe dans `SMTP_PASSWORD`
+
+### 3. Redémarrer le serveur
+
+Après avoir modifié le fichier `.env`, redémarrez le serveur pour prendre en compte les changements.
+
+---
+
+## 📧 Système de notification par email
+
+Le système envoie automatiquement un email de confirmation à chaque candidat après la soumission de sa candidature.
+
+**Contenu de l'email :**
+- ✅ Salutation personnalisée avec le nom complet du candidat
+- ✅ Confirmation de la soumission pour le poste spécifique
+- ✅ Numéro de dossier unique
+- ✅ Information que le dossier est en cours d'analyse
+- ✅ Message indiquant qu'il sera informé du résultat
+- ✅ Invitation à rester en attente
+- ✅ Signature de l'équipe RH
+
+Pour plus de détails, consultez le fichier [README_EMAIL.md](README_EMAIL.md).
 
 ---
 
