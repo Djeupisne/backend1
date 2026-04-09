@@ -142,6 +142,13 @@ def send_confirmation_email(to_email, nom, prenom, poste, numero_dossier):
     """
     Envoie un email de confirmation au candidat après soumission de sa candidature.
     """
+    print(f"📧 Tentative d'envoi d'email à {to_email}")
+    print(f"   SMTP_USERNAME: {'défini' if SMTP_USERNAME else 'NON DÉFINI'}")
+    print(f"   SMTP_PASSWORD: {'défini' if SMTP_PASSWORD else 'NON DÉFINI'}")
+    print(f"   SMTP_SERVER: {SMTP_SERVER}")
+    print(f"   SMTP_PORT: {SMTP_PORT}")
+    print(f"   EMAIL_FROM: {EMAIL_FROM}")
+    
     if not SMTP_USERNAME or not SMTP_PASSWORD:
         print(f"⚠️ Configuration SMTP incomplète. Email non envoyé à {to_email}")
         return False
@@ -212,8 +219,10 @@ RecrutBank</p>
         
     except Exception as e:
         print(f"❌ Erreur lors de l'envoi de l'email à {to_email}: {str(e)}")
-        return False
+        import traceback
+        print(f"📋 Détails de l'erreur: {traceback.format_exc()}")
 
+        return False
 # ── POSTES ────────────────────────────────────────────────────────────────
 POSTES = [
     "Responsable Administration de Crédit",

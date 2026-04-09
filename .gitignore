@@ -5,18 +5,14 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Logs and temp files
+*.log
+*.tmp
+
 # Environment
 .env
 .env.local
 *.env.*
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.swp
-*.swo
 
 # Editors
 .vscode/
@@ -31,4 +27,8 @@ node_modules/
 dist/
 build/
 target/
+
+# OS
+.DS_Store
+Thumbs.db
 ```
