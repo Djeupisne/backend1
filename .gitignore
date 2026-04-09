@@ -5,13 +5,13 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Dependencies
-venv/
-.venv/
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
 .env
 .env.local
 *.env.*
-
-# Logs
-*.log
 ```
