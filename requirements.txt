@@ -20,5 +20,5 @@ pandas>=2.2.0
 numpy>=1.26.0
 spacy>=3.7.0
 python-magic>=0.4.27
-
+requests==2.33.1
 python-dotenv>=1.0.0
