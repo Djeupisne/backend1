@@ -171,69 +171,98 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# ── FONCTION D'ENVOI D'EMAIL ───────────────────────────────────────────────
 def send_email(to_email, subject, body):
     """
-    Envoie un email au candidat.
-    Retourne True si l'email a été envoyé avec succès, False sinon.
+    Envoie un email via l'API Brevo (Sendinblue).
+    Compatible avec Render (utilise HTTPS, pas SMTP direct).
     """
-    smtp_host = app.config.get('SMTP_HOST', 'smtp.gmail.com')
-    smtp_port = app.config.get('SMTP_PORT', 587)
-    smtp_user = app.config.get('SMTP_USER', '')
-    smtp_password = app.config.get('SMTP_PASSWORD', '')
-    smtp_from = app.config.get('SMTP_FROM', 'oualoumidjeupisne@gmail.com')
-    smtp_use_tls = app.config.get('SMTP_USE_TLS', True)
+    import requests
+    import re as _re
     
-    # Si les identifiants SMTP ne sont pas configurés, on logue et on retourne False
-    if not smtp_user or not smtp_password:
-        print(f"⚠️ Configuration SMTP incomplète. Email non envoyé à {to_email}")
-        print(f"   Pour activer l'envoi d'emails, configurez les variables d'environnement:")
-        print(f"   - SMTP_USER: votre adresse email")
-        print(f"   - SMTP_PASSWORD: votre mot de passe ou mot de passe d'application")
+    brevo_api_key = os.getenv('BREVO_API_KEY', '')
+    smtp_from = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupisne@gmail.com>')
+    
+    if not brevo_api_key:
+        print(f"⚠️ BREVO_API_KEY non configurée. Email non envoyé à {to_email}")
+        print(f"   Pour activer l'envoi d'emails, configurez BREVO_API_KEY sur Render")
         return False
     
+    # Extraire l'email de l'expéditeur
+    match = _re.search(r'<(.+?)>', smtp_from)
+    sender_email = match.group(1) if match else smtp_from
+    sender_name = smtp_from.split('<')[0].strip() if '<' in smtp_from else 'RecrutBank RH'
+    
+    print(f"📧 [BREVO] Tentative d'envoi à: {to_email}")
+    print(f"   Expéditeur: {sender_name} <{sender_email}>")
+    print(f"   Sujet: {subject}")
+    print(f"   API Key définie: {'OUI' if brevo_api_key else 'NON'}")
+    
+    # Préparer le contenu HTML
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            {body.replace(chr(10), '<br>')}
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Appel API Brevo
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {
+        "api-key": brevo_api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    
+    payload = {
+        "sender": {
+            "name": sender_name,
+            "email": sender_email
+        },
+        "to": [
+            {
+                "email": to_email,
+                "name": to_email.split('@')[0]
+            }
+        ],
+        "subject": subject,
+        "htmlContent": html_content,
+        "textContent": body
+    }
+    
     try:
-        # Création du message
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = smtp_from
-        msg['To'] = to_email
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
         
-        # Corps du message en texte brut et HTML
-        text_part = MIMEText(body, 'plain', 'utf-8')
-        html_body = f"""
-        <html>
-        <body>
-            <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-                {body.replace(chr(10), '<br>')}
-            </div>
-        </body>
-        </html>
-        """
-        html_part = MIMEText(html_body, 'html', 'utf-8')
-        
-        msg.attach(text_part)
-        msg.attach(html_part)
-        
-        # Connexion au serveur SMTP et envoi
-        if smtp_use_tls:
-            server = smtplib.SMTP(smtp_host, smtp_port)
-            server.starttls()
+        if response.status_code == 201:
+            data = response.json()
+            print(f"✅ [BREVO] Email envoyé avec succès à {to_email}")
+            print(f"   Message ID: {data.get('messageId', 'N/A')}")
+            return True
         else:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port)
-        
-        server.login(smtp_user, smtp_password)
-        import re as _re
-        match = _re.search(r'<(.+?)>', smtp_from)
-        sender_email = match.group(1) if match else smtp_from
-        server.sendmail(sender_email, to_email, msg.as_string())
-        server.quit()
-        
-        print(f"✅ Email envoyé avec succès à {to_email} - Sujet: {subject}")
-        return True
-        
+            print(f"❌ [BREVO] Erreur API: {response.status_code}")
+            try:
+                error_data = response.json()
+                print(f"   Détail: {error_data.get('message', response.text)}")
+            except:
+                print(f"   Réponse: {response.text}")
+            return False
+            
+    except requests.exceptions.Timeout:
+        print(f"❌ [BREVO] Timeout - délai d'attente dépassé")
+        return False
+    except requests.exceptions.ConnectionError as e:
+        print(f"❌ [BREVO] Erreur de connexion: {e}")
+        return False
     except Exception as e:
-        print(f"❌ Erreur lors de l'envoi de l'email à {to_email}: {str(e)}")
+        print(f"❌ [BREVO] Erreur inattendue: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # ── POSTES ────────────────────────────────────────────────────────────────
