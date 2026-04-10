@@ -3543,14 +3543,16 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     cell.border = border
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-                    if col == 12:
-                        rec_color = get_recommandation_color(total)
+                    if col == 12:  # Colonne Recommandation
+                        rec_color = get_recommandation_color(total, poste_cand)
                         cell.font = Font(bold=True, color="000000")
-                        if rec_color == "00FF00":
+                        if rec_color == "00FF00":  # Vert - Shortlist prioritaire (≥80)
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                        elif rec_color == "FFA500":
+                        elif rec_color == "FFFF00":  # Jaune - À considérer (70-79)
                             cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-                        else:
+                        elif rec_color == "FFA500":  # Orange - Faible (60-69)
+                            cell.fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
+                        else:  # Rouge - Rejet (<60)
                             cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
             col_widths = [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
