@@ -275,6 +275,19 @@ POSTES = [
     "IT Réseau & Infrastructure"
 ]
 
+# ── NOUVEAUX POSTES (Grille 100 points avec scoring détaillé) ─────────────
+NOUVEAUX_POSTES = [
+    "Auditeur interne",
+    "Chef service contrôle des engagements",
+    "Chef service IT (maintenance/support)",
+    "Chef service finance",
+    "Chef service risques de marché",
+    "Chef service reporting réglementaire"
+]
+
+# Liste complète de tous les postes
+TOUS_POSTES = POSTES + NOUVEAUX_POSTES
+
 # ══════════════════════════════════════════════════════════════════════════
 # 📋 GRILLE DE PRÉSÉLECTION
 # ══════════════════════════════════════════════════════════════════════════
@@ -415,6 +428,153 @@ GRILLE = {
             "Profil trop helpdesk",
             "CV sans détail technique",
             "Aucune mention de sécurité"
+        ]
+    },
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🆕 NOUVEAUX POSTES - GRILLE 100 POINTS (Structure différente)
+    # ═══════════════════════════════════════════════════════════════════════
+    "Auditeur interne": {
+        "eliminatoire": [
+            "Minimum 3 ans expérience réelle en audit",
+            "Expérience cabinet d'audit ou banque",
+            "Connaissance normes audit et contrôle interne"
+        ],
+        "a_verifier": [
+            "Missions d'audit interne réalisées",
+            "Contrôle interne bancaire",
+            "Rapports d'audit produits",
+            "Connaissance réglementaire (COBAC, Bâle)"
+        ],
+        "signaux_forts": [
+            "Certification ACCA / CPA / CIA",
+            "Audit IFRS 9",
+            "Expérience Big Four",
+            "Management d'équipe audit"
+        ],
+        "points_attention": [
+            "Profil comptable sans audit réel",
+            "Uniquement audit externe",
+            "Pas d'exposition secteur bancaire"
+        ]
+    },
+    "Chef service contrôle des engagements": {
+        "eliminatoire": [
+            "Maîtrise analyse crédit et risque crédit",
+            "Expérience significative en institution financière",
+            "Capacité management équipe"
+        ],
+        "a_verifier": [
+            "Analyse financière entreprises",
+            "Validation dossiers crédit",
+            "Gestion portefeuille risques",
+            "Participation comités crédit"
+        ],
+        "signaux_forts": [
+            "Expérience risque crédit PME/Particuliers",
+            "Connaissance procédures COBAC",
+            "Outils scoring crédit",
+            "Formation risque bancaire"
+        ],
+        "points_attention": [
+            "Profil purement commercial sans analyse",
+            "Pas d'expérience validation crédit",
+            "Management non démontré"
+        ]
+    },
+    "Chef service IT (maintenance/support)": {
+        "eliminatoire": [
+            "Background IT solide (diplôme ou expérience)",
+            "Compétences techniques réelles maintenance/support",
+            "Expérience environnement critique"
+        ],
+        "a_verifier": [
+            "Maintenance systèmes et réseaux",
+            "Support utilisateurs niveau 2/3",
+            "Gestion incidents et problèmes",
+            "Administration serveurs Windows/Linux"
+        ],
+        "signaux_forts": [
+            "Certifications Cisco / Microsoft / ITIL",
+            "Expérience systèmes bancaires",
+            "Gestion parc informatique important",
+            "Connaissance cybersécurité"
+        ],
+        "points_attention": [
+            "Profil trop helpdesk niveau 1",
+            "Pas de compétences réseau réelles",
+            "CV sans détails techniques"
+        ]
+    },
+    "Chef service finance": {
+        "eliminatoire": [
+            "Minimum 7 ans expérience finance bancaire",
+            "Niveau Bac+5 spécialisé finance/comptabilité",
+            "Expérience management équipe finance"
+        ],
+        "a_verifier": [
+            "Reporting financier groupe",
+            "États financiers IFRS",
+            "Interaction auditeurs externes",
+            "Contraintes réglementaires BEAC/COBAC"
+        ],
+        "signaux_forts": [
+            "Certification ACCA / CPA / Expert-comptable",
+            "Expérience consolidation",
+            "Outils SPECTRA / CERBER",
+            "Management équipe > 5 personnes"
+        ],
+        "points_attention": [
+            "Profil comptable junior même avec années",
+            "Pas de responsabilité réelle reporting",
+            "Expérience hors banque uniquement"
+        ]
+    },
+    "Chef service risques de marché": {
+        "eliminatoire": [
+            "Expérience réelle marchés financiers",
+            "Exposition trésorerie / ALM / risques",
+            "Compétences analytiques avancées"
+        ],
+        "a_verifier": [
+            "Analyse positions de marché",
+            "Calcul VaR / stress testing",
+            "Gestion liquidité",
+            "Produits FICC (Fixed Income, Currencies, Commodities)"
+        ],
+        "signaux_forts": [
+            "Excel/VBA avancé ou Python",
+            "Connaissance Bâle II/III",
+            "Expérience salle de marchés",
+            "Formation spécialisée risques"
+        ],
+        "points_attention": [
+            "Profil trop théorique académique",
+            "Pas d'exposition trading/trésorerie",
+            "Incapacité à modéliser"
+        ]
+    },
+    "Chef service reporting réglementaire": {
+        "eliminatoire": [
+            "Comptabilité bancaire approfondie",
+            "Expérience reporting réglementaire",
+            "Rigueur et précision démontrées"
+        ],
+        "a_verifier": [
+            "Reporting BEAC / COBAC",
+            "Utilisation SPECTRA / outils réglementaires",
+            "Production rapports prudenciels",
+            "Veille réglementaire"
+        ],
+        "signaux_forts": [
+            "Expertise ratios prudentiels",
+            "Connaissance exigences COBAC",
+            "Expérience audits réglementaires",
+            "Formation comptabilité bancaire"
+        ],
+        "points_attention": [
+            "Profil généraliste sans spécialisation",
+            "Pas de reporting bancaire réel",
+            "CV flou sur livrables précis"
         ]
     }
 }
@@ -1729,6 +1889,12 @@ DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
+    """
+    Analyse un CV contre la grille de présélection d'un poste.
+    Gère automatiquement les deux types de grilles :
+    - Anciens postes (6) : scoring sur 10 points
+    - Nouveaux postes (6) : scoring détaillé sur 100 points (CV 70pts + Lettre 20pts + Diplôme 10pts)
+    """
     if not cv_text or len(cv_text.strip()) < 50:
         return {
             'score': 0,
@@ -1754,6 +1920,9 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'score_breakdown': {}
         }
 
+    # Déterminer le type de grille
+    est_nouveau_poste = poste in NOUVEAUX_POSTES
+    
     all_att_raw  = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full     = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
     normalized   = normalize_for_matching(raw_full)[0]
@@ -1917,12 +2086,57 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         if is_present:
             details['alertes_attention'].append(f"⚠️ Attention: {crit}")
 
-    adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
-    coherence     = min(2, points_bloc2)
-    risque_metier = min(3, len(signaux))
-    qualite_cv    = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
-    lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
-    score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
+    # ── SYSTÈME DE SCORING DIFFÉRENCIÉ SELON LE TYPE DE POSTE ──────────────
+    if est_nouveau_poste:
+        # NOUVEAU SYSTÈME : Grille 100 points détaillée
+        # CV (70pts) + Lettre (20pts) + Diplôme (10pts)
+        
+        # CV - 70 points
+        cv_exp       = min(20, len([k for k, v in checklist.items() if k.startswith('elim_') and v]) * 7)
+        cv_niveau    = min(10, points_bloc2 * 2)
+        cv_secteur   = 10 if any('banque' in str(v).lower() or 'financ' in str(v).lower() for v in checklist.values()) else 5
+        cv_tech      = min(15, points_bloc3 * 3)
+        cv_progression = 5 if len(signaux) >= 2 else 3
+        cv_management = 5 if poste.startswith('Chef service') and len(signaux) >= 1 else 3
+        cv_stabilite = 5 if not any('instabilit' in str(a).lower() for a in details.get('alertes_attention', [])) else 3
+        
+        score_cv = cv_exp + cv_niveau + cv_secteur + cv_tech + cv_progression + cv_management + cv_stabilite
+        
+        # Lettre - 20 points
+        lettre_comprehension = 5 if lettre_text and len(lettre_text) > 200 else 2
+        lettre_coherence     = 5 if lettre_text and len(lettre_text) > 150 else 2
+        lettre_motivation    = 5 if lettre_text and len(lettre_text) > 100 else 2
+        lettre_qualite       = 5 if lettre_text and len(lettre_text) > 80 else 2
+        
+        score_lettre = lettre_comprehension + lettre_coherence + lettre_motivation + lettre_qualite
+        
+        # Diplôme - 10 points (simplifié, basé sur attestations)
+        score_diplome = min(10, len(attestation_texts_list) * 5) if attestation_texts_list else 5
+        
+        score_final = min(100, score_cv + score_lettre + score_diplome)
+        
+        note = f"Score détaillé: {score_final}/100 (CV:{score_cv}/70 + Lettre:{score_lettre}/20 + Diplôme:{score_diplome}/10)"
+        
+        # Seuils de décision pour nouveaux postes
+        if score_final >= 80:
+            recommandation = "Shortlist prioritaire"
+        elif score_final >= 70:
+            recommandation = "À considérer"
+        elif score_final >= 60:
+            recommandation = "Faible"
+        else:
+            recommandation = "Rejet"
+    else:
+        # ANCIEN SYSTÈME : Grille 10 points (postes historiques)
+        adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
+        coherence     = min(2, points_bloc2)
+        risque_metier = min(3, len(signaux))
+        qualite_cv    = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
+        lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
+        score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
+        
+        note = f"Score Excel: {score_final}/10"
+        recommandation = get_recommandation_from_score(score_final)
 
     return {
         'score': score_final,
@@ -1930,21 +2144,28 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         'flags_eliminatoires': [],
         'signaux_detectes': signaux,
         'details': details,
+        'est_nouveau_poste': est_nouveau_poste,
+        'recommandation': recommandation,
         'score_breakdown': {
             'bloc1_eliminatoire':       False,
             'flags_eliminatoires_count': 0,
-            'adequation_experience':    adequation,
-            'coherence_parcours':       coherence,
-            'exposition_risque_metier': risque_metier,
-            'qualite_cv':               qualite_cv,
-            'lettre_motivation':        lettre_motiv,
+            'est_nouveau_poste':        est_nouveau_poste,
+            'type_grille':              'nouvelle_100pts' if est_nouveau_poste else 'ancienne_10pts',
+            'adequation_experience':    adequation if not est_nouveau_poste else cv_exp,
+            'coherence_parcours':       coherence if not est_nouveau_poste else cv_niveau,
+            'exposition_risque_metier': risque_metier if not est_nouveau_poste else cv_tech,
+            'qualite_cv':               qualite_cv if not est_nouveau_poste else cv_secteur,
+            'lettre_motivation':        lettre_motiv if not est_nouveau_poste else score_lettre,
             'bloc2_criteres_valides':   len(details['criteres_valides_bloc2']),
             'bloc2_points':             points_bloc2,
             'bloc3_signaux_detectes':   len(signaux),
             'bloc3_points':             points_bloc3,
             'total_raw_points':         points_bloc2 + points_bloc3,
+            'score_cv':                 score_cv if est_nouveau_poste else None,
+            'score_lettre':             score_lettre if est_nouveau_poste else None,
+            'score_diplome':            score_diplome if est_nouveau_poste else None,
             'score_final':              score_final,
-            'note': f"Score Excel: {score_final}/10",
+            'note':                     note,
             'documents_analyses': details['documents_analyses']
         }
     }
@@ -2580,14 +2801,36 @@ init_recruteur()
 
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
+    """Retourne la liste complète de tous les postes (anciens + nouveaux)"""
+    return jsonify(TOUS_POSTES), 200
+
+@app.route('/api/postes/anciens', methods=['GET'])
+def get_anciens_postes():
+    """Retourne uniquement les 6 postes historiques"""
     return jsonify(POSTES), 200
+
+@app.route('/api/postes/nouveaux', methods=['GET'])
+def get_nouveaux_postes():
+    """Retourne uniquement les 6 nouveaux postes avec grille 100 points"""
+    return jsonify(NOUVEAUX_POSTES), 200
 
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
-    return jsonify(g), 200
+    
+    # Déterminer le type de grille
+    est_nouveau = poste in NOUVEAUX_POSTES
+    est_ancien = poste in POSTES
+    
+    response = {
+        'poste': poste,
+        'type_grille': 'nouvelle_100pts' if est_nouveau else 'ancienne_10pts',
+        'est_nouveau_poste': est_nouveau,
+        **g
+    }
+    return jsonify(response), 200
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
