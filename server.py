@@ -2887,7 +2887,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
         
         note = f"Score Excel: {score_final}/10"
-        recommandation = get_recommandation_from_score(score_final)
+        recommandation = get_recommandation_from_score(score_final, poste)
 
     return {
         'score': score_final,
@@ -2984,21 +2984,47 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 # 🏆 CLASSEMENT
 # ══════════════════════════════════════════════════════════════════════════
 
-def get_recommandation_from_score(score):
+def get_recommandation_from_score(score, poste=None):
     s = int(score)
-    if s >= 8: return "🥇 Entretien prioritaire"
-    if s >= 6: return "🥈 Entretien si besoin"
-    return "❌ Rejet"
-
-
-def get_recommandation_color(score):
-    s = int(score)
-    if s >= 8:
-        return "00FF00"
-    elif s >= 6:
-        return "FFA500"
+    # Vérifier si c'est un nouveau poste (grille 100 points)
+    est_nouveau = poste in NOUVEAUX_POSTES if poste else False
+    
+    if est_nouveau:
+        # Grille 100 points pour les nouveaux postes
+        if s >= 80: return "🥇 Shortlist prioritaire"
+        if s >= 70: return "🥈 À considérer"
+        if s >= 60: return "⚠️ Faible"
+        return "❌ Rejet"
     else:
-        return "FF0000"
+        # Grille 10 points pour les anciens postes
+        if s >= 8: return "🥇 Entretien prioritaire"
+        if s >= 6: return "🥈 Entretien si besoin"
+        return "❌ Rejet"
+
+
+def get_recommandation_color(score, poste=None):
+    s = int(score)
+    # Vérifier si c'est un nouveau poste (grille 100 points)
+    est_nouveau = poste in NOUVEAUX_POSTES if poste else False
+    
+    if est_nouveau:
+        # Grille 100 points pour les nouveaux postes
+        if s >= 80:
+            return "00FF00"
+        elif s >= 70:
+            return "FFA500"
+        elif s >= 60:
+            return "FFFF00"
+        else:
+            return "FF0000"
+    else:
+        # Grille 10 points pour les anciens postes
+        if s >= 8:
+            return "00FF00"
+        elif s >= 6:
+            return "FFA500"
+        else:
+            return "FF0000"
 
 
 def calculate_ranking_score(c, poste):
@@ -3031,7 +3057,7 @@ def generate_ranking_for_poste(poste, candidats_data):
     ))
     for idx, c in enumerate(pool, 1):
         c['ranking_position']       = idx
-        c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0))
+        c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0), c.get('poste'))
     return pool
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3104,7 +3130,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 total = adeq + cohe + risq + qcv + lm
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_c = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip()
-                reco = cand.get('ranking_recommendation', get_recommandation_from_score(total))
+                poste_cand = cand.get('poste', poste)
+                reco = cand.get('ranking_recommendation', get_recommandation_from_score(total, poste_cand))
                 num_dos = cand.get('numero_dossier', '') or '–'
 
                 row_data = [
@@ -3119,7 +3146,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
                     if col == 12:
-                        rec_color = get_recommandation_color(total)
+                        rec_color = get_recommandation_color(total, poste_cand)
                         cell.font = Font(bold=True, color="000000")
                         if rec_color == "00FF00":
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -3164,7 +3191,8 @@ def generate_csv_report(candidats_data, poste_filter=None):
     for idx, c in enumerate(candidats_filtered, 1):
         sb = c.get('score_breakdown_parsed', {})
         score = int(c.get('score', 0))
-        reco = get_recommandation_from_score(score)
+        poste_cand = c.get('poste', '')
+        reco = get_recommandation_from_score(score, poste_cand)
         w.writerow([
             str(idx),
             str(c.get('numero_dossier', '') or '–'),
@@ -3242,11 +3270,14 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                            spaceAfter=10, alignment=TA_LEFT)
         ))
 
-        data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
+        data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score', 'Recommandation']]
         for idx, c in enumerate(candidats_poste, 1):
             score = int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
-            reco = get_recommandation_from_score(score)
+            poste_cand = c.get('poste', poste)
+            est_nouveau = poste_cand in NOUVEAUX_POSTES
+            score_label = f"{score}/100" if est_nouveau else f"{score}/10"
+            reco = get_recommandation_from_score(score, poste_cand)
             data.append([
                 str(idx),
                 num_dos,
@@ -3254,7 +3285,7 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 f"{c.get('prenom', '')} {c.get('nom', '')}",
                 c.get('telephone', '') or '–',
                 poste,
-                f"{score}/10",
+                score_label,
                 reco
             ])
 
@@ -3355,11 +3386,22 @@ def generate_word_report(candidats_data, poste_filter=None):
             
             # Motif de retention basé sur le score et l'analyse
             score = int(c.get('score', 0))
+            poste_cand = c.get('poste', '')
+            est_nouveau = poste_cand in NOUVEAUX_POSTES
+            score_label = f"{score}/100" if est_nouveau else f"{score}/10"
             motif = ""
-            if score >= 8:
-                motif = f"Excellent profil (Score: {score}/10). "
-            elif score >= 6:
-                motif = f"Bon profil (Score: {score}/10). "
+            if est_nouveau:
+                if score >= 80:
+                    motif = f"Excellent profil (Score: {score_label}). "
+                elif score >= 70:
+                    motif = f"Bon profil (Score: {score_label}). "
+                elif score >= 60:
+                    motif = f"Profil faible (Score: {score_label}). "
+            else:
+                if score >= 8:
+                    motif = f"Excellent profil (Score: {score_label}). "
+                elif score >= 6:
+                    motif = f"Bon profil (Score: {score_label}). "
             
             # Ajouter détails de l'analyse si disponibles
             if c.get('signaux_detectes'):
@@ -3376,7 +3418,7 @@ def generate_word_report(candidats_data, poste_filter=None):
             row_cells[1].text = c.get('nom', '') or '–'
             row_cells[2].text = c.get('prenom', '') or '–'
             row_cells[3].text = c.get('poste', '') or '–'
-            row_cells[4].text = f"{score}/10"
+            row_cells[4].text = score_label
             row_cells[5].text = motif[:200] if motif else 'Profil correspondant aux exigences'
     else:
         doc.add_paragraph("Aucun candidat retenu pour le moment.")
@@ -3402,7 +3444,10 @@ def generate_word_report(candidats_data, poste_filter=None):
             nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
             
             score = int(c.get('score', 0))
-            motif = f"Score insuffisant ({score}/10). "
+            poste_cand = c.get('poste', '')
+            est_nouveau = poste_cand in NOUVEAUX_POSTES
+            score_label = f"{score}/100" if est_nouveau else f"{score}/10"
+            motif = f"Score insuffisant ({score_label}). "
             
             # Motifs d'exclusion détaillés
             if c.get('flags_eliminatoires'):
@@ -3420,7 +3465,7 @@ def generate_word_report(candidats_data, poste_filter=None):
             row_cells[1].text = c.get('nom', '') or '–'
             row_cells[2].text = c.get('prenom', '') or '–'
             row_cells[3].text = c.get('poste', '') or '–'
-            row_cells[4].text = f"{score}/10"
+            row_cells[4].text = score_label
             row_cells[5].text = motif[:200] if motif else 'Ne correspond pas aux exigences'
     else:
         doc.add_paragraph("Aucun candidat exclu.")
@@ -3443,6 +3488,11 @@ def generate_word_report(candidats_data, poste_filter=None):
             row_cells = table_all.add_row().cells
             num_dos = c.get('numero_dossier', '') or '–'
             
+            score = int(c.get('score', 0))
+            poste_cand = c.get('poste', '')
+            est_nouveau = poste_cand in NOUVEAUX_POSTES
+            score_label = f"{score}/100" if est_nouveau else f"{score}/10"
+            
             row_cells[0].text = str(idx)
             row_cells[1].text = str(num_dos)
             row_cells[2].text = c.get('nom', '') or '–'
@@ -3450,7 +3500,7 @@ def generate_word_report(candidats_data, poste_filter=None):
             row_cells[4].text = c.get('email', '') or '–'
             row_cells[5].text = c.get('poste', '') or '–'
             row_cells[6].text = c.get('statut', 'en_attente')
-            row_cells[7].text = f"{c.get('score', 0)}/10"
+            row_cells[7].text = score_label
     
     doc.add_paragraph()
     
