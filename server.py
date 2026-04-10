@@ -2997,7 +2997,18 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     }
 
 
-def normalize_text_for_matching(text):
+def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
+    """Analyse détaillée avec grille complète (eliminatoire, a_verifier, signaux_forts)"""
+    
+    if not cv_text or len(cv_text.strip()) < 50:
+        return {
+            'score': 0,
+            'checklist': {},
+            'flags_eliminatoires': ['CV vide ou non analysable'],
+            'signaux_detectes': [],
+            'details': {},
+            'score_breakdown': {
+                'bloc1_eliminatoire': True,
                 'note': 'CV non analysable'
             }
         }
