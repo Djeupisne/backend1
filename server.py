@@ -1425,7 +1425,773 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
     print(f"    [EXP] Total années: {total_years} | Requis: {min_years} | Validé: {result}")
     return result
 # ══════════════════════════════════════════════════════════════════════════
-# 🧠 MAPPING MOTS-CLÉS
+# 🧠 MOTEUR D'ANALYSE SÉMANTIQUE POUR NOUVEAUX POSTES (100 points)
+# ══════════════════════════════════════════════════════════════════════════
+
+def analyze_cv_semantic_100pts(cv_text, lettre_text, attestation_texts_list, poste):
+    """
+    🎯 Moteur d'analyse intelligent pour les 6 nouveaux postes
+    Comprend le sens des phrases et les termes anglais/français comme un être humain
+    
+    Structure: CV (70pts) + Lettre (20pts) + Diplôme (10pts)
+    
+    Composantes CV:
+    - CV_Exp (20pts): Alignement expérience avec le poste
+    - CV_Niveau (10pts): Volume + séniorité
+    - CV_Secteur (10pts): Expérience sectorielle (banque/finance)
+    - CV_Tech (15pts): Hard skills spécifiques
+    - CV_Progression (5pts): Dynamique de carrière
+    - CV_Management (5pts): Capacité managériale
+    - CV_Stabilité (5pts): Cohérence du parcours
+    """
+    
+    # Combiner tous les textes pour analyse complète
+    all_text = cv_text + "\n" + (lettre_text or "") + "\n" + "\n".join(attestation_texts_list or [])
+    normalized = normalize_for_matching(all_text)[0]
+    
+    resultats = {
+        'cv_exp': 0,
+        'cv_niveau': 0,
+        'cv_secteur': 0,
+        'cv_tech': 0,
+        'cv_progression': 0,
+        'cv_management': 0,
+        'cv_stabilite': 0,
+        'lettre_comprehension': 0,
+        'lettre_coherence': 0,
+        'lettre_motivation': 0,
+        'lettre_qualite': 0,
+        'diplome_niveau': 0,
+        'diplome_specialisation': 0,
+        'diplome_certifications': 0,
+        'details': {},
+        'flags_eliminatoires': []
+    }
+    
+    # ── 1. CV_EXP (20 points) - Alignement expérience avec le poste ─────────
+    resultats['cv_exp'], exp_details = score_experience_alignement(cv_text, poste, normalized)
+    resultats['details']['experience'] = exp_details
+    
+    # ── 2. CV_NIVEAU (10 points) - Volume + Séniorité ───────────────────────
+    resultats['cv_niveau'], niveau_details = score_niveau_seniorite(cv_text, poste)
+    resultats['details']['niveau'] = niveau_details
+    
+    # ── 3. CV_SECTEUR (10 points) - Expérience sectorielle ──────────────────
+    resultats['cv_secteur'], secteur_details = score_experience_sectorielle(cv_text, all_text)
+    resultats['details']['secteur'] = secteur_details
+    
+    # ── 4. CV_TECH (15 points) - Compétences techniques spécifiques ─────────
+    resultats['cv_tech'], tech_details = score_competences_techniques(cv_text, lettre_text, poste, normalized)
+    resultats['details']['technique'] = tech_details
+    
+    # ── 5. CV_PROGRESSION (5 points) - Dynamique de carrière ────────────────
+    resultats['cv_progression'], progression_details = score_progression_carriere(cv_text)
+    resultats['details']['progression'] = progression_details
+    
+    # ── 6. CV_MANAGEMENT (5 points) - Capacité managériale ──────────────────
+    resultats['cv_management'], management_details = score_capacite_management(cv_text, lettre_text, poste)
+    resultats['details']['management'] = management_details
+    
+    # ── 7. CV_STABILITÉ (5 points) - Cohérence du parcours ──────────────────
+    resultats['cv_stabilite'], stabilite_details = score_stabilite_coherence(cv_text)
+    resultats['details']['stabilite'] = stabilite_details
+    
+    # ── 8. LETTRE (20 points) ───────────────────────────────────────────────
+    lettre_scores = analyser_lettre_motivation(lettre_text, cv_text, poste)
+    resultats['lettre_comprehension'] = lettre_scores['comprehension']
+    resultats['lettre_coherence'] = lettre_scores['coherence']
+    resultats['lettre_motivation'] = lettre_scores['motivation']
+    resultats['lettre_qualite'] = lettre_scores['qualite']
+    resultats['details']['lettre'] = lettre_scores
+    
+    # ── 9. DIPLÔME (10 points) ──────────────────────────────────────────────
+    diplome_scores = score_diplomes_certifications(cv_text, attestation_texts_list, poste)
+    resultats['diplome_niveau'] = diplome_scores['niveau']
+    resultats['diplome_specialisation'] = diplome_scores['specialisation']
+    resultats['diplome_certifications'] = diplome_scores['certifications']
+    resultats['details']['diplome'] = diplome_scores
+    
+    # ── CALCUL SCORE FINAL ──────────────────────────────────────────────────
+    score_cv = (resultats['cv_exp'] + resultats['cv_niveau'] + resultats['cv_secteur'] + 
+                resultats['cv_tech'] + resultats['cv_progression'] + resultats['cv_management'] + 
+                resultats['cv_stabilite'])
+    
+    score_lettre = (resultats['lettre_comprehension'] + resultats['lettre_coherence'] + 
+                    resultats['lettre_motivation'] + resultats['lettre_qualite'])
+    
+    score_diplome = (resultats['diplome_niveau'] + resultats['diplome_specialisation'] + 
+                     resultats['diplome_certifications'])
+    
+    score_final = min(100, score_cv + score_lettre + score_diplome)
+    
+    # ── VÉRIFICATION CRITÈRES ÉLIMINATOIRES ─────────────────────────────────
+    grille = GRILLE.get(poste, {})
+    for crit in grille.get('eliminatoire', []):
+        if not verifier_critere_eliminatoire(crit, all_text, poste):
+            resultats['flags_eliminatoires'].append(f"❌ {crit}")
+    
+    # ── RECOMMANDATION ──────────────────────────────────────────────────────
+    if len(resultats['flags_eliminatoires']) > 0:
+        recommandation = "Rejet - Critère éliminatoire non satisfait"
+        score_final = max(0, min(score_final, 59))  # Force < 60 si éliminatoire
+    elif score_final >= 80:
+        recommandation = "Shortlist prioritaire"
+    elif score_final >= 70:
+        recommandation = "À considérer"
+    elif score_final >= 60:
+        recommandation = "Faible"
+    else:
+        recommandation = "Rejet"
+    
+    return {
+        'score': score_final,
+        'score_breakdown': {
+            'cv_total': score_cv,
+            'cv_exp': resultats['cv_exp'],
+            'cv_niveau': resultats['cv_niveau'],
+            'cv_secteur': resultats['cv_secteur'],
+            'cv_tech': resultats['cv_tech'],
+            'cv_progression': resultats['cv_progression'],
+            'cv_management': resultats['cv_management'],
+            'cv_stabilite': resultats['cv_stabilite'],
+            'lettre_total': score_lettre,
+            'lettre_comprehension': resultats['lettre_comprehension'],
+            'lettre_coherence': resultats['lettre_coherence'],
+            'lettre_motivation': resultats['lettre_motivation'],
+            'lettre_qualite': resultats['lettre_qualite'],
+            'diplome_total': score_diplome,
+            'diplome_niveau': resultats['diplome_niveau'],
+            'diplome_specialisation': resultats['diplome_specialisation'],
+            'diplome_certifications': resultats['diplome_certifications'],
+            'score_final': score_final
+        },
+        'details': resultats['details'],
+        'flags_eliminatoires': resultats['flags_eliminatoires'],
+        'recommandation': recommandation
+    }
+
+
+def score_experience_alignement(cv_text, poste, normalized_text):
+    """
+    🔍 CV_Exp (20 points) - Évalue le degré d'alignement avec le poste
+    Analyse sémantique pour comprendre si les missions sont réellement similaires
+    """
+    score = 0
+    details = {'missions_similaires': [], 'exposition_problematiques': [], 'responsabilites': []}
+    
+    # Mapping des compétences clés par poste (anglais + français)
+    COMPETENCES_PAR_POSTE = {
+        "Auditeur interne": {
+            'mots_cles_audit': ['audit', 'internal audit', 'mission d\'audit', 'audit interne', 
+                               'contrôle interne', 'internal control', 'commissaire aux comptes',
+                               'auditeur', 'audit mission', 'audit report', 'audit findings',
+                               'risk assessment', 'control testing', 'audit plan'],
+            'secteurs_requis': ['cabinet d\'audit', 'big four', 'deloitte', 'ey', 'kpmg', 'pwc',
+                               'banque', 'banking', 'institution financière'],
+            'niveaux_responsabilite': ['senior auditor', 'audit manager', 'lead auditor',
+                                      'chef de mission', 'responsable audit']
+        },
+        "Chef service contrôle des engagements": {
+            'mots_cles_credit': ['analyse crédit', 'credit analysis', 'risque crédit', 'credit risk',
+                                'scoring crédit', 'validation crédit', 'credit approval',
+                                'dossier crédit', 'loan analysis', 'credit assessment',
+                                'engagement', 'commitment', 'credit committee'],
+            'competences_analyse': ['analyse financière', 'financial analysis', 'états financiers',
+                                   'bilan', 'compte de résultat', 'cash flow', 'ratios financiers',
+                                   'balance sheet', 'income statement', 'financial statements'],
+            'niveaux_responsabilite': ['responsable crédit', 'credit manager', 'chef de service',
+                                      'head of credit', 'credit supervisor']
+        },
+        "Chef service IT (maintenance/support)": {
+            'mots_cles_it': ['maintenance', 'support', 'it support', 'technical support',
+                            'helpdesk', 'service desk', 'incident management', 'problem management',
+                            'maintenance système', 'maintenance réseau', 'system maintenance'],
+            'competences_techniques': ['windows server', 'linux', 'vmware', 'active directory',
+                                      'réseau', 'network', 'cisco', 'microsoft', 'azure', 'aws',
+                                      'virtualization', 'cloud', 'cybersecurity'],
+            'niveaux_responsabilite': ['responsable it', 'it manager', 'chef de service it',
+                                      'head of it', 'it supervisor', 'it team lead']
+        },
+        "Chef service finance": {
+            'mots_cles_finance': ['reporting financier', 'financial reporting', 'finance',
+                                 'comptabilité', 'accounting', 'ifrs', 'consolidation',
+                                 'états financiers', 'financial statements', 'group reporting'],
+            'competences_reglementaires': ['cobac', 'beac', 'spectra', 'cerber', 'bâle', 'basel',
+                                          'réglementation bancaire', 'banking regulation',
+                                          'compliance', 'prudential requirements'],
+            'niveaux_responsabilite': ['directeur financier', 'cfo', 'finance director',
+                                      'chef de service finance', 'head of finance',
+                                      'responsable finance', 'finance manager']
+        },
+        "Chef service risques de marché": {
+            'mots_cles_risque': ['risque de marché', 'market risk', 'risques de marché',
+                                'trésorerie', 'treasury', 'alm', 'asset liability management',
+                                'var', 'value at risk', 'stress testing', 'backtesting'],
+            'competences_marches': ['fx', 'forex', 'change', 'taux', 'interest rate',
+                                   'liquidité', 'liquidity', 'produits dérivés', 'derivatives',
+                                   'ficc', 'trading', 'salle de marchés', 'trading floor'],
+            'niveaux_responsabilite': ['responsable risque', 'risk manager', 'chef de service risque',
+                                      'head of market risk', 'risk director', 'chief risk officer']
+        },
+        "Chef service reporting réglementaire": {
+            'mots_cles_reporting': ['reporting réglementaire', 'regulatory reporting',
+                                   'reporting prudentiel', 'prudential reporting',
+                                   'cobac', 'beac', 'spectra', 'banque centrale'],
+            'competences_comptables': ['comptabilité bancaire', 'banking accounting',
+                                      'normes comptables', 'accounting standards',
+                                      'ifrs', 'gaap', 'consolidation'],
+            'niveaux_responsabilite': ['responsable reporting', 'reporting manager',
+                                      'chef de service reporting', 'head of regulatory reporting']
+        }
+    }
+    
+    competences_poste = COMPETENCES_PAR_POSTE.get(poste, {})
+    
+    # Analyse des missions similaires (0-8 points)
+    mots_cles = competences_poste.get('mots_cles_audit' if poste == 'Auditeur interne' else 
+                                      'mots_cles_credit' if 'contrôle des engagements' in poste else
+                                      'mots_cles_it' if 'it' in poste.lower() else
+                                      'mots_cles_finance' if 'finance' in poste.lower() else
+                                      'mots_cles_risque' if 'risque' in poste.lower() else
+                                      'mots_cles_reporting', [])
+    
+    matches_missions = sum(1 for mot in mots_cles if mot.lower() in normalized_text)
+    ratio_missions = min(1.0, matches_missions / max(5, len(mots_cles) * 0.4))
+    points_missions = round(ratio_missions * 8)
+    score += points_missions
+    details['missions_similaires'] = f"{matches_missions}/{len(mots_cles)} compétences clés détectées"
+    
+    # Analyse de l'exposition aux problématiques (0-6 points)
+    secteurs_requis = competences_poste.get('secteurs_requis', ['banque', 'finance'])
+    exposition_secteur = any(any(s.lower() in normalized_text for s in secteurs_requis[:i+1]) 
+                            for i in range(len(secteurs_requis)))
+    points_exposition = 6 if exposition_secteur else 2
+    score += points_exposition
+    details['exposition_problematiques'] = f"Secteur {'identifié' if exposition_secteur else 'non identifié'}"
+    
+    # Analyse du niveau de responsabilité (0-6 points)
+    niveaux = competences_poste.get('niveaux_responsabilite', [])
+    responsabilite_detectee = any(niv.lower() in normalized_text for niv in niveaux)
+    points_responsabilite = 6 if responsabilite_detectee else 3
+    score += points_responsabilite
+    details['responsabilites'] = f"Niveau responsabilité {'confirmé' if responsabilite_detectee else 'intermédiaire'}"
+    
+    return min(20, score), details
+
+
+def score_niveau_seniorite(cv_text, poste):
+    """
+    📊 CV_Niveau (10 points) - Évalue le volume d'années et la séniorité
+    """
+    score = 0
+    details = {'annees_experience': 0, 'niveau_poste': '', 'progression_detectee': False}
+    
+    # Extraire les années d'expérience
+    annees = extraire_annees_experience(cv_text)
+    details['annees_experience'] = annees
+    
+    # Seuils par poste
+    seuils_par_poste = {
+        "Chef service finance": 7,
+        "Chef service contrôle des engagements": 5,
+        "Chef service risques de marché": 5,
+        "Chef service reporting réglementaire": 5,
+        "Chef service IT (maintenance/support)": 5,
+        "Auditeur interne": 3
+    }
+    
+    seuil_requis = seuils_par_poste.get(poste, 5)
+    
+    # Scoring basé sur les années
+    if annees >= seuil_requis + 3:
+        points_annees = 6
+    elif annees >= seuil_requis:
+        points_annees = 4
+    elif annees >= seuil_requis - 2:
+        points_annees = 2
+    else:
+        points_annees = 0
+    
+    score += points_annees
+    
+    # Détecter le niveau de poste (junior/senior/manager)
+    text_lower = cv_text.lower()
+    if any(term in text_lower for term in ['directeur', 'head of', 'chief', 'manager', 'responsable', 'chef de']):
+        niveau = 'manager/directeur'
+        points_niveau = 4
+    elif any(term in text_lower for term in ['senior', 'lead', 'principal', 'supervisor']):
+        niveau = 'senior'
+        points_niveau = 2
+    else:
+        niveau = 'junior'
+        points_niveau = 0
+    
+    score += points_niveau
+    details['niveau_poste'] = niveau
+    
+    return min(10, score), details
+
+
+def score_experience_sectorielle(cv_text, full_text):
+    """
+    🏦 CV_Secteur (10 points) - Évalue l'expérience dans le bon environnement
+    """
+    score = 0
+    details = {'secteur_principal': '', 'annees_banque': 0, 'pertinence': ''}
+    
+    text_lower = full_text.lower()
+    
+    # Détection secteur banque/finance
+    termes_banque = ['banque', 'banking', 'bank', 'institution financière', 'financial institution',
+                    'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'microfinance', 'mfb']
+    termes_finance = ['finance', 'comptabilité', 'accounting', 'audit', 'cabinet', 'deloitte', 'ey', 'kpmg', 'pwc']
+    
+    score_banque = sum(1 for t in termes_banque if t in text_lower)
+    score_finance = sum(1 for t in termes_finance if t in text_lower)
+    
+    if score_banque >= 5:
+        score = 10
+        details['secteur_principal'] = 'Banque - Carrière majoritairement bancaire'
+    elif score_banque >= 3:
+        score = 8
+        details['secteur_principal'] = 'Banque - Expérience significative'
+    elif score_banque >= 1 or score_finance >= 3:
+        score = 6
+        details['secteur_principal'] = 'Finance/Banque - Expérience partielle'
+    elif score_finance >= 1:
+        score = 4
+        details['secteur_principal'] = 'Secteur connexe (cabinet, audit)'
+    else:
+        score = 2
+        details['secteur_principal'] = 'Secteur éloigné'
+    
+    details['pertinence'] = 'Haute' if score >= 8 else 'Moyenne' if score >= 5 else 'Faible'
+    
+    return score, details
+
+
+def score_competences_techniques(cv_text, lettre_text, poste, normalized_text):
+    """
+    💼 CV_Tech (15 points) - Évalue les hard skills spécifiques au poste
+    """
+    score = 0
+    details = {'competences_identifiees': [], 'niveau_maitrise': '', 'outils_connus': []}
+    
+    # Compétences techniques par poste
+    TECH_SKILLS = {
+        "Auditeur interne": [
+            'audit interne', 'internal audit', 'contrôle interne', 'internal control',
+            'ifrs 9', 'ias 39', 'coso', 'amf', 'normes audit', 'audit standards',
+            'cia', 'acca', 'cpa', 'risk assessment', 'control testing'
+        ],
+        "Chef service contrôle des engagements": [
+            'analyse crédit', 'credit analysis', 'scoring', 'rating', 'pd', 'lgd',
+            'analyse financière', 'financial analysis', 'cash flow', 'bilan',
+            'cobac', 'bâle', 'basel', 'credit risk', 'risk management'
+        ],
+        "Chef service IT (maintenance/support)": [
+            'windows server', 'linux', 'vmware', 'hyper-v', 'active directory',
+            'cisco', 'ccna', 'ccnp', 'microsoft certified', 'itil', 'azure', 'aws',
+            'réseau', 'network', 'firewall', 'cybersecurity', 'backup', 'pra', 'pca'
+        ],
+        "Chef service finance": [
+            'ifrs', 'ias', 'consolidation', 'reporting financier', 'financial reporting',
+            'spectra', 'cerber', 'sap', 'oracle', 'excel avancé', 'vba',
+            'cobac', 'beac', 'accra', 'ohada', 'expert-comptable', 'acca', 'cpa'
+        ],
+        "Chef service risques de marché": [
+            'var', 'value at risk', 'stress testing', 'backtesting', 'alm',
+            'fx', 'forex', 'dérivés', 'derivatives', 'swaps', 'options', 'futures',
+            'python', 'vba', 'r', 'matlab', 'bloomberg', 'reuters', 'murex'
+        ],
+        "Chef service reporting réglementaire": [
+            'reporting réglementaire', 'regulatory reporting', 'cobac', 'beac',
+            'spectra', 'cerber', 'bâle', 'basel', 'ratio prudentiel', 'capital adequacy',
+            'ifrs', 'comptabilité bancaire', 'banking accounting', 'consolidation'
+        ]
+    }
+    
+    competences_requises = TECH_SKILLS.get(poste, [])
+    
+    # Compter les compétences détectées
+    competences_trouvees = [comp for comp in competences_requises if comp.lower() in normalized_text]
+    ratio = len(competences_trouvees) / max(5, len(competences_requises))
+    
+    if ratio >= 0.6:
+        score = 15
+        details['niveau_maitrise'] = 'Expertise reconnue'
+    elif ratio >= 0.4:
+        score = 12
+        details['niveau_maitrise'] = 'Maîtrise solide'
+    elif ratio >= 0.25:
+        score = 10
+        details['niveau_maitrise'] = 'Compétences opérationnelles'
+    elif ratio >= 0.1:
+        score = 6
+        details['niveau_maitrise'] = 'Compétences déclarées'
+    else:
+        score = 3
+        details['niveau_maitrise'] = 'Notions basiques'
+    
+    details['competences_identifiees'] = competences_trouvees[:10]  # Top 10
+    details['outils_connus'] = [o for o in ['excel', 'vba', 'python', 'sap', 'spectra', 'bloomberg'] 
+                                if o.lower() in normalized_text]
+    
+    return score, details
+
+
+def score_progression_carriere(cv_text):
+    """
+    📈 CV_Progression (5 points) - Mesure la dynamique du profil
+    """
+    score = 0
+    details = {'evolution_detectee': '', 'promotions_identifiees': []}
+    
+    text_lower = cv_text.lower()
+    
+    # Indicateurs de progression
+    indicateurs_promotion = [
+        ('junior', 'senior'), ('analyste', 'senior'), ('senior', 'manager'),
+        ('manager', 'directeur'), ('chargé', 'responsable'), ('responsable', 'chef'),
+        ('assistant', 'officer'), ('officer', 'manager')
+    ]
+    
+    promotions = sum(1 for avant, apres in indicateurs_promotion 
+                     if avant in text_lower and apres in text_lower)
+    
+    # Vérifier évolution salariale ou responsabilités
+    evolution_resp = any(term in text_lower for term in 
+                        ['promotion', 'avancement', 'évolution', 'nouvelle responsabilité',
+                         'team lead', 'managed', 'responsable de', 'encadrement'])
+    
+    if promotions >= 2 or (promotions >= 1 and evolution_resp):
+        score = 5
+        details['evolution_detectee'] = 'Progression rapide et cohérente'
+    elif promotions >= 1 or evolution_resp:
+        score = 4
+        details['evolution_detectee'] = 'Bonne évolution'
+    elif evolution_resp:
+        score = 3
+        details['evolution_detectee'] = 'Progression normale'
+    else:
+        # Vérifier stagnation
+        if 'depuis' in text_lower and any(f'{i} ans' in text_lower for i in range(5, 15)):
+            score = 2
+            details['evolution_detectee'] = 'Stagnation détectée'
+        else:
+            score = 3
+            details['evolution_detectee'] = 'Progression normale'
+    
+    return score, details
+
+
+def score_capacite_management(cv_text, lettre_text, poste):
+    """
+    👥 CV_Management (5 points) - Évalue la capacité managériale
+    Seulement important pour les postes de Chef service
+    """
+    score = 0
+    details = {'taille_equipe': '', 'type_management': '', 'responsabilite_hierarchique': False}
+    
+    if not poste.startswith('Chef service'):
+        return 3, {'note': 'Management non critique pour ce poste'}
+    
+    text_lower = (cv_text + ' ' + (lettre_text or '')).lower()
+    
+    # Détecter le management réel
+    termes_management = [
+        'management', 'managing', 'managed', 'encadrement', 'supervision',
+        'équipe', 'team', 'collaborateurs', 'reports', 'subordonnés',
+        'chef de', 'responsable de', 'head of', 'director'
+    ]
+    
+    # Détecter taille d'équipe
+    taille_match = re.search(r'(\d+)\s*(personnes|collaborateurs|membres|equipe|team|people)', text_lower)
+    taille_equipe = int(taille_match.group(1)) if taille_match else 0
+    
+    # Type de management
+    if any(term in text_lower for term in ['directeur', 'head of', 'chief']):
+        if taille_equipe >= 5:
+            score = 5
+            details['type_management'] = 'Management confirmé avec résultats'
+        else:
+            score = 4
+            details['type_management'] = 'Management structuré'
+    elif any(term in text_lower for term in ['manager', 'responsable', 'chef de']):
+        if taille_equipe >= 3:
+            score = 4
+            details['type_management'] = 'Management structuré'
+        else:
+            score = 3
+            details['type_management'] = 'Encadrement d\'équipe réduite'
+    elif any(term in text_lower for term in ['superviseur', 'coordinateur', 'lead']):
+        score = 2
+        details['type_management'] = 'Supervision informelle'
+    elif any(term in text_lower for term in termes_management):
+        score = 1
+        details['type_management'] = 'Coordination ponctuelle'
+    else:
+        score = 0
+        details['type_management'] = 'Aucun management détecté'
+    
+    details['taille_equipe'] = f"~{taille_equipe} personnes" if taille_equipe else 'Non spécifié'
+    details['responsabilite_hierarchique'] = score >= 3
+    
+    return score, details
+
+
+def score_stabilite_coherence(cv_text):
+    """
+    🔄 CV_Stabilité (5 points) - Évalue la cohérence du parcours
+    """
+    score = 0
+    details = {'duree_moyenne_postes': '', 'changements_frequents': False, 'coherence_globale': ''}
+    
+    # Analyser la durée des expériences
+    durees = re.findall(r'(\d+)\s*(ans?|années?|years?)', cv_text.lower())
+    if durees:
+        duree_moyenne = sum(int(d[0]) for d in durees) / len(durees)
+        details['duree_moyenne_postes'] = f"{duree_moyenne:.1f} ans"
+        
+        if duree_moyenne >= 3:
+            score = 5
+            details['coherence_globale'] = 'Parcours très structuré et logique'
+        elif duree_moyenne >= 2:
+            score = 4
+            details['coherence_globale'] = 'Bonne stabilité'
+        elif duree_moyenne >= 1.5:
+            score = 3
+            details['coherence_globale'] = 'Parcours globalement cohérent'
+        else:
+            score = 2
+            details['coherence_globale'] = 'Instabilité modérée'
+    else:
+        # Vérifier changements fréquents
+        nb_postes = len(re.findall(r'(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{4}', cv_text.lower()))
+        
+        if nb_postes <= 3:
+            score = 4
+            details['coherence_globale'] = 'Bonne stabilité'
+        elif nb_postes <= 5:
+            score = 3
+            details['coherence_globale'] = 'Parcours globalement cohérent'
+        else:
+            score = 2
+            details['coherence_globale'] = 'Changements fréquents'
+            details['changements_frequents'] = True
+    
+    return score, details
+
+
+def analyser_lettre_motivation(lettre_text, cv_text, poste):
+    """
+    ✍️ Analyse la lettre de motivation (20 points)
+    """
+    scores = {
+        'comprehension': 0,
+        'coherence': 0,
+        'motivation': 0,
+        'qualite': 0
+    }
+    
+    if not lettre_text or len(lettre_text.strip()) < 50:
+        return {k: 2 for k in scores}  # Score minimal si lettre absente/courte
+    
+    lettre_lower = lettre_text.lower()
+    
+    # 1. Compréhension du poste (/5)
+    termes_poste_specifiques = {
+        'Auditeur interne': ['audit', 'contrôle interne', 'mission', 'rapport'],
+        'Chef service': ['management', 'équipe', 'responsabilité', 'pilotage'],
+        'finance': ['reporting', 'ifrs', 'comptabilité', 'finance'],
+        'risque': ['risque', 'analyse', 'modélisation', 'mesure'],
+        'IT': ['technique', 'infrastructure', 'système', 'réseau'],
+        'reporting': ['reporting', 'réglementaire', 'cobac', 'données']
+    }
+    
+    mots_pertinents = []
+    for key, terms in termes_poste_specifiques.items():
+        if key.lower() in poste.lower():
+            mots_pertinents = terms
+            break
+    
+    comprehension_score = sum(1 for m in mots_pertinents if m.lower() in lettre_lower)
+    scores['comprehension'] = min(5, max(2, comprehension_score))
+    
+    # 2. Cohérence profil/poste (/5)
+    cv_lower = cv_text.lower()
+    coherence_indicators = [
+        terme for terme in lettre_lower.split() 
+        if terme in cv_lower and len(terme) > 4
+    ]
+    
+    if len(coherence_indicators) >= 5:
+        scores['coherence'] = 5
+    elif len(coherence_indicators) >= 3:
+        scores['coherence'] = 4
+    elif len(coherence_indicators) >= 2:
+        scores['coherence'] = 3
+    else:
+        scores['coherence'] = 2
+    
+    # 3. Motivation réelle (/5)
+    motivation_patterns = [
+        r'motivé', r'passion', r'intéressé', r'enthousiasme',
+        r'souhaite', r'désire', r'ambition', r'objectif',
+        r'projet professionnel', r'évolution', r'défi'
+    ]
+    
+    motivation_count = sum(1 for pattern in motivation_patterns if re.search(pattern, lettre_lower))
+    
+    if motivation_count >= 4:
+        scores['motivation'] = 5
+    elif motivation_count >= 2:
+        scores['motivation'] = 4
+    elif motivation_count >= 1:
+        scores['motivation'] = 3
+    else:
+        scores['motivation'] = 2
+    
+    # 4. Qualité rédactionnelle (/5)
+    # Vérifier structure, longueur, fautes
+    nb_paragraphes = len(lettre_text.split('\n\n'))
+    nb_mots = len(lettre_text.split())
+    
+    # Détection fautes basique (majuscules manquantes, etc.)
+    fautes_potentielles = 0
+    if lettre_text[0].islower():
+        fautes_potentielles += 1
+    if lettre_text.count('  ') > 3:  # Espaces doubles
+        fautes_potentielles += 1
+    
+    if nb_paragraphes >= 3 and nb_mots >= 150 and fautes_potentielles == 0:
+        scores['qualite'] = 5
+    elif nb_paragraphes >= 2 and nb_mots >= 100:
+        scores['qualite'] = 4
+    elif nb_mots >= 80:
+        scores['qualite'] = 3
+    else:
+        scores['qualite'] = 2
+    
+    return scores
+
+
+def score_diplomes_certifications(cv_text, attestation_texts, poste):
+    """
+    🎓 Diplôme (10 points) - Niveau académique + Spécialisation + Certifications
+    """
+    scores = {
+        'niveau': 0,
+        'specialisation': 0,
+        'certifications': 0
+    }
+    
+    text_lower = (cv_text + ' ' + ' '.join(attestation_texts or [])).lower()
+    
+    # 1. Niveau académique (/4)
+    if any(term in text_lower for term in ['bac+5', 'master', 'maîtrise', 'mba', 'doctorat', 'phd']):
+        scores['niveau'] = 4
+    elif any(term in text_lower for term in ['bac+4', 'licence', 'bachelor', 'graduate']):
+        scores['niveau'] = 3
+    elif any(term in text_lower for term in ['bac+3', 'bts', 'dut', 'associate']):
+        scores['niveau'] = 2
+    else:
+        scores['niveau'] = 1
+    
+    # 2. Spécialisation pertinente (/3)
+    specialisations_par_poste = {
+        'Auditeur': ['audit', 'comptabilité', 'finance', 'accounting'],
+        'finance': ['finance', 'comptabilité', 'gestion', 'ifrs'],
+        'risque': ['finance', 'économie', 'mathématiques', 'risk management'],
+        'IT': ['informatique', 'computer science', 'it', 'réseau', 'télécom'],
+        'reporting': ['comptabilité', 'finance', 'audit', 'gestion']
+    }
+    
+    specialisations = []
+    for key, specs in specialisations_par_poste.items():
+        if key.lower() in poste.lower():
+            specialisations = specs
+            break
+    
+    if specialisations and any(spec in text_lower for spec in specialisations):
+        scores['specialisation'] = 3
+    elif any(spec in text_lower for spec in ['gestion', 'commerce', 'économie']):
+        scores['specialisation'] = 2
+    else:
+        scores['specialisation'] = 1
+    
+    # 3. Certifications (/3)
+    certifications_reconnues = [
+        'acca', 'cpa', 'cia', 'cfa', 'frm', 'prince2', 'pmp',
+        'ccna', 'ccnp', 'ccie', 'microsoft certified', 'itil',
+        'expert-comptable', 'commissaire aux comptes'
+    ]
+    
+    nb_certifs = sum(1 for cert in certifications_reconnues if cert.lower() in text_lower)
+    
+    if nb_certifs >= 2:
+        scores['certifications'] = 3
+    elif nb_certifs >= 1:
+        scores['certifications'] = 2
+    else:
+        scores['certifications'] = 1
+    
+    return scores
+
+
+def extraire_annees_experience(cv_text):
+    """Extrait le nombre total d'années d'expérience du CV"""
+    # Méthode 1: Durée explicite
+    match = re.search(r'(\d+)\s*(?:ans?|années?|years?)\s+(?:d\'?expérience|dans|en)', cv_text.lower())
+    if match:
+        return int(match.group(1))
+    
+    # Méthode 2: Calculer à partir des dates
+    annees_pattern = re.findall(r'(20\d{2}|19\d{2})\s*[-–àau]+\s*(20\d{2}|19\d{2}|présent|aujourd\'hui|current)', cv_text.lower())
+    
+    if annees_pattern:
+        total = 0
+        for debut, fin in annees_pattern:
+            try:
+                annee_debut = int(debut)
+                if fin.lower() in ['présent', 'aujourd\'hui', 'current']:
+                    annee_fin = datetime.datetime.now().year
+                else:
+                    annee_fin = int(fin)
+                total += max(0, annee_fin - annee_debut)
+            except:
+                continue
+        return min(total, 30)  # Plafonner à 30 ans
+    
+    return 0
+
+
+def verifier_critere_eliminatoire(critere, text, poste):
+    """Vérifie si un critère éliminatoire est satisfait"""
+    text_lower = text.lower()
+    
+    # Mapping des critères vers vérifications
+    verifications = {
+        "Minimum 3 ans expérience réelle en audit": lambda: extraire_annees_experience(text) >= 3 and 'audit' in text_lower,
+        "Expérience cabinet d'audit ou banque": lambda: any(x in text_lower for x in ['cabinet', 'deloitte', 'ey', 'kpmg', 'pwc', 'banque', 'bank']),
+        "Background IT solide": lambda: any(x in text_lower for x in ['informatique', 'computer', 'it', 'réseau', 'network', 'développement']),
+        "Minimum 7 ans expérience finance bancaire": lambda: extraire_annees_experience(text) >= 7 and any(x in text_lower for x in ['finance', 'banque', 'banking']),
+        "Expérience réelle marchés financiers": lambda: any(x in text_lower for x in ['marché', 'trading', 'trésorerie', 'treasury', 'fx', 'forex']),
+        "Comptabilité bancaire approfondie": lambda: any(x in text_lower for x in ['comptabilité bancaire', 'banking accounting', 'spectra', 'cobac'])
+    }
+    
+    for key, func in verifications.items():
+        if key.lower() in critere.lower():
+            return func()
+    
+    # Fallback: recherche basique
+    mots_cles_critere = critere.lower().split()
+    matches = sum(1 for mot in mots_cles_critere if len(mot) > 3 and mot in text_lower)
+    return matches >= 2
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 🧠 MAPPING MOTS-CLÉS (EXISTANT - À conserver pour rétrocompatibilité)
 # ══════════════════════════════════════════════════════════════════════════
 
 KEYWORD_MAPPING = {
@@ -2088,44 +2854,29 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
 
     # ── SYSTÈME DE SCORING DIFFÉRENCIÉ SELON LE TYPE DE POSTE ──────────────
     if est_nouveau_poste:
-        # NOUVEAU SYSTÈME : Grille 100 points détaillée
-        # CV (70pts) + Lettre (20pts) + Diplôme (10pts)
+        # NOUVEAU SYSTÈME : Utiliser le moteur d'analyse sémantique intelligent (100 points)
+        # Ce moteur comprend le sens des phrases et les termes anglais/français comme un être humain
+        result_semantic = analyze_cv_semantic_100pts(cv_text, lettre_text, attestation_texts_list, poste)
         
-        # CV - 70 points
-        cv_exp       = min(20, len([k for k, v in checklist.items() if k.startswith('elim_') and v]) * 7)
-        cv_niveau    = min(10, points_bloc2 * 2)
-        cv_secteur   = 10 if any('banque' in str(v).lower() or 'financ' in str(v).lower() for v in checklist.values()) else 5
-        cv_tech      = min(15, points_bloc3 * 3)
-        cv_progression = 5 if len(signaux) >= 2 else 3
-        cv_management = 5 if poste.startswith('Chef service') and len(signaux) >= 1 else 3
-        cv_stabilite = 5 if not any('instabilit' in str(a).lower() for a in details.get('alertes_attention', [])) else 3
+        score_final = result_semantic['score']
+        recommandation = result_semantic['recommandation']
+        note = f"Score IA sémantique: {score_final}/100 - {recommandation}"
         
-        score_cv = cv_exp + cv_niveau + cv_secteur + cv_tech + cv_progression + cv_management + cv_stabilite
+        # Fusionner les résultats avec la structure existante
+        checklist.update({f"semantic_{k}": v for k, v in result_semantic.get('details', {}).items()})
+        if result_semantic.get('flags_eliminatoires'):
+            flags_elim.extend(result_semantic['flags_eliminatoires'])
         
-        # Lettre - 20 points
-        lettre_comprehension = 5 if lettre_text and len(lettre_text) > 200 else 2
-        lettre_coherence     = 5 if lettre_text and len(lettre_text) > 150 else 2
-        lettre_motivation    = 5 if lettre_text and len(lettre_text) > 100 else 2
-        lettre_qualite       = 5 if lettre_text and len(lettre_text) > 80 else 2
-        
-        score_lettre = lettre_comprehension + lettre_coherence + lettre_motivation + lettre_qualite
-        
-        # Diplôme - 10 points (simplifié, basé sur attestations)
-        score_diplome = min(10, len(attestation_texts_list) * 5) if attestation_texts_list else 5
-        
-        score_final = min(100, score_cv + score_lettre + score_diplome)
-        
-        note = f"Score détaillé: {score_final}/100 (CV:{score_cv}/70 + Lettre:{score_lettre}/20 + Diplôme:{score_diplome}/10)"
-        
-        # Seuils de décision pour nouveaux postes
-        if score_final >= 80:
-            recommandation = "Shortlist prioritaire"
-        elif score_final >= 70:
-            recommandation = "À considérer"
-        elif score_final >= 60:
-            recommandation = "Faible"
-        else:
-            recommandation = "Rejet"
+        score_cv = result_semantic['score_breakdown'].get('cv_total', 0)
+        score_lettre = result_semantic['score_breakdown'].get('lettre_total', 0)
+        score_diplome = result_semantic['score_breakdown'].get('diplome_total', 0)
+        cv_exp = result_semantic['score_breakdown'].get('cv_exp', 0)
+        cv_niveau = result_semantic['score_breakdown'].get('cv_niveau', 0)
+        cv_secteur = result_semantic['score_breakdown'].get('cv_secteur', 0)
+        cv_tech = result_semantic['score_breakdown'].get('cv_tech', 0)
+        cv_progression = result_semantic['score_breakdown'].get('cv_progression', 0)
+        cv_management = result_semantic['score_breakdown'].get('cv_management', 0)
+        cv_stabilite = result_semantic['score_breakdown'].get('cv_stabilite', 0)
     else:
         # ANCIEN SYSTÈME : Grille 10 points (postes historiques)
         adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
