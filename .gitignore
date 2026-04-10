@@ -1,28 +1,3 @@
-```
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+server.py appears to be a source code file and should not be added to .gitignore. Since there are no build artifacts, dependency directories, temporary files, or other ignorable items in the provided file changes, no entries need to be added to the .gitignore file.
 
-# Environment
-.venv/
-venv/
-.env
-.env.local
-*.env.*
-
-# Logs and temporary files
-*.log
-*.tmp
-*.swp
-
-# Editors
-.vscode/
-.idea/
-
-# Build artifacts
-dist/
-build/
-target/
-```
+The optimized .gitignore content remains empty.
