@@ -3492,22 +3492,48 @@ def generate_excel_report(candidats_data, poste_filter=None):
 
             for row_i, cand in enumerate(candidats_poste, 4):
                 sb = cand.get('score_breakdown_parsed', {})
-                elim = sb.get('bloc1_eliminatoire', False)
-                adeq = sb.get('adequation_experience', 0) if not elim else 0
-                cohe = sb.get('coherence_parcours', 0) if not elim else 0
-                risq = sb.get('exposition_risque_metier', 0) if not elim else 0
-                qcv = sb.get('qualite_cv', 0) if not elim else 0
-                lm = sb.get('lettre_motivation', 0) if not elim else 0
-                total = adeq + cohe + risq + qcv + lm
+                poste_cand = cand.get('poste', '')
+                
+                # Vérifier si le poste utilise le scoring sur 100 points
+                if poste_cand in POSTES_AVEC_SCORING_100:
+                    # Nouveau système : scoring sur 100 points avec détails des blocs
+                    elim = sb.get('bloc1_eliminatoire', False)
+                    
+                    # Récupérer les scores détaillés du bloc CV (sur 70)
+                    bloc_cv = sb.get('bloc_cv', {})
+                    cv_details = bloc_cv.get('details', {})
+                    
+                    adeq = cv_details.get('CV_Exp', 0) if not elim else 0
+                    cohe = cv_details.get('CV_Niveau', 0) + cv_details.get('CV_Secteur', 0) if not elim else 0
+                    risq = cv_details.get('CV_Tech', 0) if not elim else 0
+                    qcv = cv_details.get('CV_Progression', 0) + cv_details.get('CV_Stabilite', 0) if not elim else 0
+                    
+                    # Récupérer le score LM (sur 20)
+                    bloc_lm = sb.get('bloc_lm', {})
+                    lm_details = bloc_lm.get('details', {})
+                    lm_score = lm_details.get('LM_Comprehension', 0) + lm_details.get('LM_Motivation', 0) if not elim else 0
+                    
+                    # Score total sur 100
+                    total = int(cand.get('score', 0)) if not elim else 0
+                else:
+                    # Ancien système sur 10 points
+                    elim = sb.get('bloc1_eliminatoire', False)
+                    adeq = sb.get('adequation_experience', 0) if not elim else 0
+                    cohe = sb.get('coherence_parcours', 0) if not elim else 0
+                    risq = sb.get('exposition_risque_metier', 0) if not elim else 0
+                    qcv = sb.get('qualite_cv', 0) if not elim else 0
+                    lm = sb.get('lettre_motivation', 0) if not elim else 0
+                    total = adeq + cohe + risq + qcv + lm
+                
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_c = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip()
-                reco = cand.get('ranking_recommendation', get_recommandation_from_score(total))
+                reco = cand.get('ranking_recommendation', get_recommandation_from_score(total, poste_cand))
                 num_dos = cand.get('numero_dossier', '') or '–'
 
                 row_data = [
                     rang, num_dos, cand.get('email', '') or '–', nom_c,
                     cand.get('telephone', '') or '–',
-                    adeq, cohe, risq, qcv, lm, total, reco
+                    round(adeq, 1), round(cohe, 1), round(risq, 1), round(qcv, 1), round(lm_score if poste_cand in POSTES_AVEC_SCORING_100 else lm, 1), total, reco
                 ]
 
                 for col, val in enumerate(row_data, 1):
@@ -3639,11 +3665,12 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                            spaceAfter=10, alignment=TA_LEFT)
         ))
 
-        data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
+        data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /100', 'Recommandation']]
         for idx, c in enumerate(candidats_poste, 1):
+            poste_cand = c.get('poste', '')
             score = int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
-            reco = get_recommandation_from_score(score)
+            reco = get_recommandation_from_score(score, poste_cand)
             data.append([
                 str(idx),
                 num_dos,
@@ -3651,7 +3678,7 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 f"{c.get('prenom', '')} {c.get('nom', '')}",
                 c.get('telephone', '') or '–',
                 poste,
-                f"{score}/10",
+                str(score) if poste_cand in POSTES_AVEC_SCORING_100 else f"{score}/10",
                 reco
             ])
 
@@ -3668,12 +3695,27 @@ def generate_pdf_report(candidats_data, poste_filter=None):
 
         for row_idx in range(1, len(data)):
             score = int(candidats_poste[row_idx-1].get('score', 0)) if row_idx <= len(candidats_poste) else 0
-            if score >= 8:
-                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
-            elif score >= 6:
-                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
+            poste_cand = candidats_poste[row_idx-1].get('poste', '') if row_idx <= len(candidats_poste) else ''
+            
+            # Utiliser les seuils appropriés selon le type de scoring
+            if poste_cand in POSTES_AVEC_SCORING_100:
+                # Scoring sur 100 points : seuils 80/70/60
+                if score >= 80:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
+                elif score >= 70:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.9, 0.95, 0.9)))
+                elif score >= 60:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
+                else:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
             else:
-                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
+                # Ancien scoring sur 10 points : seuils 8/6
+                if score >= 8:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
+                elif score >= 6:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
+                else:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
 
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
