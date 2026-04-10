@@ -3046,11 +3046,11 @@ def generate_excel_report(candidats_data, poste_filter=None):
     if 'Sheet' in wb.sheetnames:
         del wb['Sheet']
 
-    if poste_filter and poste_filter in POSTES:
+    if poste_filter and poste_filter in TOUS_POSTES:
         postes_to_export = [poste_filter]
     else:
         postes_to_export = list(dict.fromkeys(
-            c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES
+            c.get('poste', '') for c in candidats_data if c.get('poste') in TOUS_POSTES
         ))
 
     if not postes_to_export:
@@ -3154,7 +3154,7 @@ def generate_csv_report(candidats_data, poste_filter=None):
     ]
     w.writerow(headers)
 
-    if poste_filter and poste_filter in POSTES:
+    if poste_filter and poste_filter in TOUS_POSTES:
         candidats_filtered = [c for c in candidats_data if c.get('poste') == poste_filter]
     else:
         candidats_filtered = candidats_data
@@ -3220,11 +3220,11 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     ))
     els.append(Spacer(1, 0.8*cm))
 
-    if poste_filter and poste_filter in POSTES:
+    if poste_filter and poste_filter in TOUS_POSTES:
         postes_to_export = [poste_filter]
     else:
         postes_to_export = list(dict.fromkeys(
-            c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES
+            c.get('poste', '') for c in candidats_data if c.get('poste') in TOUS_POSTES
         ))
 
     for poste in postes_to_export:
@@ -3610,7 +3610,7 @@ def postuler():
         # Le numero_dossier est maintenant généré automatiquement par le backend
         # Ignorer toute valeur envoyée par le frontend
         
-        if not nom or not prenom or not email or poste not in POSTES:
+        if not nom or not prenom or not email or poste not in TOUS_POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 
         for k in redis_client.keys("candidat:*"):
