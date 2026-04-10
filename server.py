@@ -576,8 +576,128 @@ GRILLE = {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# 🏦 BANQUES COMMERCIALES vs MICROFINANCE vs HORS SECTEUR
+# 📊 CONFIGURATION DE SCORING PAR POSTE (Spécifications Excel)
 # ══════════════════════════════════════════════════════════════════════════
+# Structure: {poste: {criterium: max_points, ...}}
+# Total CV doit être normalisé à 70, LM à 20, Diplômes à 10
+
+SCORING_CONFIG = {
+    # Postes existants (garder logique actuelle sur 10 points)
+    "Responsable Administration de Crédit": None,
+    "Analyste Crédit CCB": None,
+    "Archiviste (Administration Crédit)": None,
+    "Senior Finance Officer": None,
+    "Market Risk Officer": None,
+    "IT Réseau & Infrastructure": None,
+    
+    # NOUVEAUX POSTES - Scoring détaillé sur 100 points
+    "Auditeur interne": {
+        "CV_Exp": 25,        # Expérience pertinente
+        "CV_Niveau": 10,     # Niveau d'expérience
+        "CV_Secteur": 10,    # Expérience sectorielle
+        "CV_Tech": 15,       # Compétences techniques
+        "CV_Progression": 5, # Évolution de carrière
+        "CV_Management": 0,  # Capacité managériale
+        "CV_Stabilite": 5,   # Stabilité
+        "LM_Comprehension": 5,  # Compréhension du poste
+        "LM_Coherence": 5,      # Cohérence profil
+        "LM_Motivation": 5,     # Motivation réelle
+        "LM_Qualite": 5,        # Qualité rédactionnelle
+        "D_Niveau": 4,          # Niveau académique
+        "D_Specialisation": 3,  # Spécialisation pertinente
+        "D_Certif": 3           # Certifications
+    },
+    "Chef service contrôle des engagements": {
+        "CV_Exp": 20,
+        "CV_Niveau": 10,
+        "CV_Secteur": 10,
+        "CV_Tech": 20,
+        "CV_Progression": 5,
+        "CV_Management": 5,
+        "CV_Stabilite": 5,
+        "LM_Comprehension": 5,
+        "LM_Coherence": 5,
+        "LM_Motivation": 5,
+        "LM_Qualite": 5,
+        "D_Niveau": 4,
+        "D_Specialisation": 3,
+        "D_Certif": 3
+    },
+    "Chef service IT (maintenance/support)": {
+        "CV_Exp": 15,
+        "CV_Niveau": 10,
+        "CV_Secteur": 10,
+        "CV_Tech": 25,
+        "CV_Progression": 5,
+        "CV_Management": 5,
+        "CV_Stabilite": 5,
+        "LM_Comprehension": 5,
+        "LM_Coherence": 5,
+        "LM_Motivation": 5,
+        "LM_Qualite": 5,
+        "D_Niveau": 4,
+        "D_Specialisation": 3,
+        "D_Certif": 3
+    },
+    "Chef service finance": {
+        "CV_Exp": 25,
+        "CV_Niveau": 10,
+        "CV_Secteur": 10,
+        "CV_Tech": 15,
+        "CV_Progression": 5,
+        "CV_Management": 10,
+        "CV_Stabilite": 5,
+        "LM_Comprehension": 5,
+        "LM_Coherence": 5,
+        "LM_Motivation": 5,
+        "LM_Qualite": 5,
+        "D_Niveau": 4,
+        "D_Specialisation": 3,
+        "D_Certif": 3
+    },
+    "Chef service risques de marché": {
+        "CV_Exp": 20,
+        "CV_Niveau": 10,
+        "CV_Secteur": 10,
+        "CV_Tech": 20,
+        "CV_Progression": 5,
+        "CV_Management": 5,
+        "CV_Stabilite": 5,
+        "LM_Comprehension": 5,
+        "LM_Coherence": 5,
+        "LM_Motivation": 5,
+        "LM_Qualite": 5,
+        "D_Niveau": 4,
+        "D_Specialisation": 3,
+        "D_Certif": 3
+    },
+    "Chef service reporting réglementaire": {
+        "CV_Exp": 20,
+        "CV_Niveau": 10,
+        "CV_Secteur": 10,
+        "CV_Tech": 20,
+        "CV_Progression": 5,
+        "CV_Management": 5,
+        "CV_Stabilite": 5,
+        "LM_Comprehension": 5,
+        "LM_Coherence": 5,
+        "LM_Motivation": 5,
+        "LM_Qualite": 5,
+        "D_Niveau": 4,
+        "D_Specialisation": 3,
+        "D_Certif": 3
+    }
+}
+
+# Liste des postes avec scoring détaillé (100 points)
+POSTES_AVEC_SCORING_100 = [
+    "Auditeur interne",
+    "Chef service contrôle des engagements",
+    "Chef service IT (maintenance/support)",
+    "Chef service finance",
+    "Chef service risques de marché",
+    "Chef service reporting réglementaire"
+]
 
 COMMERCIAL_BANKS = [
     'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
@@ -2232,6 +2352,331 @@ def detect_language(text):
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
 
+def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, poste):
+    """
+    Calcule le score détaillé sur 100 points selon les spécifications Excel.
+    Uniquement pour les 6 nouveaux postes avec SCORING_CONFIG.
+    
+    Bloc A: CV (70 points max)
+    - CV_Exp: Expérience pertinente
+    - CV_Niveau: Niveau d'expérience
+    - CV_Secteur: Expérience sectorielle
+    - CV_Tech: Compétences techniques
+    - CV_Progression: Évolution de carrière
+    - CV_Management: Capacité managériale
+    - CV_Stabilite: Stabilité
+    
+    Bloc B: Lettre de Motivation (20 points max)
+    - LM_Comprehension: Compréhension du poste
+    - LM_Coherence: Cohérence profil
+    - LM_Motivation: Motivation réelle
+    - LM_Qualite: Qualité rédactionnelle
+    
+    Bloc C: Diplômes & Certifications (10 points max)
+    - D_Niveau: Niveau académique (Bac+3/5)
+    - D_Specialisation: Spécialisation pertinente
+    - D_Certif: Certifications (ACCA, CPA, ITIL, etc.)
+    """
+    config = SCORING_CONFIG.get(poste)
+    if not config:
+        return None  # Pas un poste avec scoring 100
+    
+    all_att_raw = "\n".join(attestation_texts_list) if attestation_texts_list else ""
+    raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
+    normalized = normalize_for_matching(raw_full)[0]
+    
+    # Initialisation des scores
+    score_cv = {
+        'CV_Exp': 0, 'CV_Niveau': 0, 'CV_Secteur': 0, 'CV_Tech': 0,
+        'CV_Progression': 0, 'CV_Management': 0, 'CV_Stabilite': 0
+    }
+    score_lm = {'LM_Comprehension': 0, 'LM_Coherence': 0, 'LM_Motivation': 0, 'LM_Qualite': 0}
+    score_diplomes = {'D_Niveau': 0, 'D_Specialisation': 0, 'D_Certif': 0}
+    
+    details = {
+        'cv_scores': {}, 'lm_scores': {}, 'diplomes_scores': {},
+        'justifications': []
+    }
+    
+    # ─── BLOC A: ÉVALUATION DU CV (70 points) ──────────────────────────────
+    
+    # 1. CV_Exp - Expérience pertinente (max: 15-25 selon poste)
+    grille = GRILLE.get(poste, {})
+    max_exp = config.get('CV_Exp', 20)
+    
+    # Vérifier critères éliminatoires liés à l'expérience
+    exp_valid = True
+    for crit in grille.get('eliminatoire', []):
+        if 'expérience' in crit.lower() or 'ans' in crit.lower():
+            is_present, conf, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+            if not is_present:
+                exp_valid = False
+                break
+    
+    if exp_valid:
+        # Calcul basé sur le nombre de critères éliminatoires validés + signaux forts
+        elim_count = sum(1 for k, v in grille.get('eliminatoire', []) 
+                        for _ in [1] if 'expérience' in k.lower() or 'ans' in k.lower())
+        signal_count = 0
+        for crit in grille.get('signaux_forts', []):
+            is_present, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+            if is_present:
+                signal_count += 1
+        
+        # Score proportionnel : base 50% + bonus signaux
+        base_ratio = 0.5 + min(0.5, signal_count / max(1, len(grille.get('signaux_forts', []))))
+        score_cv['CV_Exp'] = round(max_exp * base_ratio)
+    
+    details['cv_scores']['CV_Exp'] = f"{score_cv['CV_Exp']}/{max_exp}"
+    
+    # 2. CV_Niveau - Niveau d'expérience (max: 10 points)
+    max_niveau = config.get('CV_Niveau', 10)
+    # Détecter années d'expérience
+    years_patterns = [
+        r'(\d+)\s*(?:années?|ans|years?)',
+        r'(?:plus\s*de|over)\s*(\d+)\s*(?:années?|ans|years?)',
+        r'(?:minimum|au\s*moins|at\s*least)\s*(\d+)\s*(?:années?|ans|years?)'
+    ]
+    years_found = 0
+    for pattern in years_patterns:
+        matches = re.findall(pattern, raw_full, re.IGNORECASE)
+        for m in matches:
+            try:
+                y = int(m)
+                years_found = max(years_found, y)
+            except:
+                pass
+    
+    if years_found >= 10:
+        score_cv['CV_Niveau'] = max_niveau
+    elif years_found >= 7:
+        score_cv['CV_Niveau'] = round(max_niveau * 0.8)
+    elif years_found >= 5:
+        score_cv['CV_Niveau'] = round(max_niveau * 0.6)
+    elif years_found >= 3:
+        score_cv['CV_Niveau'] = round(max_niveau * 0.4)
+    elif years_found >= 1:
+        score_cv['CV_Niveau'] = round(max_niveau * 0.2)
+    
+    details['cv_scores']['CV_Niveau'] = f"{score_cv['CV_Niveau']}/{max_niveau} ({years_found} ans)"
+    
+    # 3. CV_Secteur - Expérience sectorielle Banque/Finance (max: 10 points)
+    max_secteur = config.get('CV_Secteur', 10)
+    has_bank_experience = False
+    
+    for bank_pattern in COMMERCIAL_BANKS:
+        if re.search(r'\b' + re.escape(bank_pattern) + r'\b', raw_full, re.IGNORECASE):
+            has_bank_experience = True
+            break
+    
+    # Vérifier mots-clés secteur financier
+    finance_keywords = ['banque', 'bank', 'finance', 'financier', 'crédit', 'credit', 
+                       'assurance', 'investment', 'asset management']
+    finance_count = sum(1 for kw in finance_keywords if kw in raw_full.lower())
+    
+    if has_bank_experience and finance_count >= 3:
+        score_cv['CV_Secteur'] = max_secteur
+    elif has_bank_experience or finance_count >= 2:
+        score_cv['CV_Secteur'] = round(max_secteur * 0.7)
+    elif finance_count >= 1:
+        score_cv['CV_Secteur'] = round(max_secteur * 0.4)
+    
+    details['cv_scores']['CV_Secteur'] = f"{score_cv['CV_Secteur']}/{max_secteur}"
+    
+    # 4. CV_Tech - Compétences techniques (max: 15-25 selon poste)
+    max_tech = config.get('CV_Tech', 20)
+    tech_signals = 0
+    total_tech_criteria = len(grille.get('a_verifier', [])) + len(grille.get('signaux_forts', []))
+    
+    for crit in grille.get('a_verifier', []) + grille.get('signaux_forts', []):
+        is_present, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+        if is_present:
+            tech_signals += 1
+    
+    if total_tech_criteria > 0:
+        tech_ratio = tech_signals / total_tech_criteria
+        score_cv['CV_Tech'] = round(max_tech * tech_ratio)
+    
+    details['cv_scores']['CV_Tech'] = f"{score_cv['CV_Tech']}/{max_tech} ({tech_signals}/{total_tech_criteria})"
+    
+    # 5. CV_Progression - Évolution de carrière (max: 5 points)
+    max_progression = config.get('CV_Progression', 5)
+    progression_keywords = ['promotion', 'évolution', 'avancement', 'senior', 'lead', 
+                           'manager', 'chef', 'responsable', 'head of', 'director']
+    progression_count = sum(1 for kw in progression_keywords if kw in raw_full.lower())
+    
+    if progression_count >= 5:
+        score_cv['CV_Progression'] = max_progression
+    elif progression_count >= 3:
+        score_cv['CV_Progression'] = round(max_progression * 0.6)
+    elif progression_count >= 1:
+        score_cv['CV_Progression'] = round(max_progression * 0.3)
+    
+    details['cv_scores']['CV_Progression'] = f"{score_cv['CV_Progression']}/{max_progression}"
+    
+    # 6. CV_Management - Capacité managériale (max: 0-10 selon poste)
+    max_management = config.get('CV_Management', 5)
+    if max_management > 0:
+        mgmt_keywords = ['management', 'encadrement', 'équipe', 'team', 'supervision',
+                        'collaborateurs', 'direct reports', 'gérer', 'managing']
+        mgmt_count = sum(1 for kw in mgmt_keywords if kw in raw_full.lower())
+        
+        if mgmt_count >= 5:
+            score_cv['CV_Management'] = max_management
+        elif mgmt_count >= 3:
+            score_cv['CV_Management'] = round(max_management * 0.6)
+        elif mgmt_count >= 1:
+            score_cv['CV_Management'] = round(max_management * 0.3)
+    
+    details['cv_scores']['CV_Management'] = f"{score_cv['CV_Management']}/{max_management}"
+    
+    # 7. CV_Stabilite - Stabilité du parcours (max: 5 points)
+    max_stabilite = config.get('CV_Stabilite', 5)
+    # Pénaliser si nombreuses expériences très courtes (< 1 an)
+    short_exp_pattern = r'(?:\d{1,2}\s*(?:mois|months?))|(?:<\s*1\s*(?:an|year))'
+    short_matches = re.findall(short_exp_pattern, raw_full, re.IGNORECASE)
+    
+    if len(short_matches) <= 1:
+        score_cv['CV_Stabilite'] = max_stabilite
+    elif len(short_matches) <= 3:
+        score_cv['CV_Stabilite'] = round(max_stabilite * 0.6)
+    else:
+        score_cv['CV_Stabilite'] = round(max_stabilite * 0.3)
+    
+    details['cv_scores']['CV_Stabilite'] = f"{score_cv['CV_Stabilite']}/{max_stabilite}"
+    
+    # Total Bloc CV (normalisé sur 70)
+    total_cv_raw = sum(score_cv.values())
+    max_cv_raw = sum([config.get(k, 0) for k in score_cv.keys()])
+    score_cv_total = round((total_cv_raw / max_cv_raw * 70)) if max_cv_raw > 0 else 0
+    
+    details['cv_total'] = f"{total_cv_raw}/{max_cv_raw} → {score_cv_total}/70"
+    
+    # ─── BLOC B: LETTRE DE MOTIVATION (20 points) ──────────────────────────
+    
+    lm_text_clean = lettre_text.strip() if lettre_text else ""
+    
+    if lm_text_clean and len(lm_text_clean) > 100:
+        # LM_Comprehension - Compréhension du poste (max: 5)
+        poste_keywords = poste.lower().split()
+        lm_lower = lm_text_clean.lower()
+        comprehension_score = sum(1 for kw in poste_keywords if kw in lm_lower)
+        score_lm['LM_Comprehension'] = min(5, comprehension_score)
+        
+        # LM_Coherence - Cohérence profil (max: 5)
+        coherence_indicators = ['mon profil', 'ma formation', 'mon expérience', 'mes compétences',
+                               'my background', 'my experience', 'mi perfil', 'minha experiência']
+        coherence_count = sum(1 for ind in coherence_indicators if ind in lm_lower)
+        score_lm['LM_Coherence'] = min(5, coherence_count)
+        
+        # LM_Motivation - Motivation réelle (max: 5)
+        motivation_keywords = ['motivé', 'passionné', 'intérêt', 'souhaite', 'désire',
+                              'motivated', 'passionate', 'interested', 'eager',
+                              'rejoindre', 'intégrer', 'contribuer', 'apporter']
+        motivation_count = sum(1 for kw in motivation_keywords if kw in lm_lower)
+        score_lm['LM_Motivation'] = min(5, motivation_count // 2)
+        
+        # LM_Qualite - Qualité rédactionnelle (max: 5)
+        word_count = len(lm_text_clean.split())
+        if word_count >= 200:
+            score_lm['LM_Qualite'] = 5
+        elif word_count >= 150:
+            score_lm['LM_Qualite'] = 4
+        elif word_count >= 100:
+            score_lm['LM_Qualite'] = 3
+        elif word_count >= 50:
+            score_lm['LM_Qualite'] = 2
+        else:
+            score_lm['LM_Qualite'] = 1
+    else:
+        score_lm = {'LM_Comprehension': 0, 'LM_Coherence': 0, 'LM_Motivation': 0, 'LM_Qualite': 0}
+    
+    for k, v in score_lm.items():
+        details['lm_scores'][k] = f"{v}/5"
+    
+    # Total Bloc LM (sur 20)
+    score_lm_total = sum(score_lm.values())
+    details['lm_total'] = f"{score_lm_total}/20"
+    
+    # ─── BLOC C: DIPLÔMES & CERTIFICATIONS (10 points) ─────────────────────
+    
+    # D_Niveau - Niveau académique (max: 4)
+    bac5_patterns = [r'bac\+\s*5', r'master', r'mba', r'dea', r'deug', r'ingénieur',
+                    r'bac\s*5', r'level\s*7', r'postgraduate', r'maîtrise']
+    bac3_patterns = [r'bac\+\s*3', r'licence', r'bachelor', r'lt', r'bac\s*3', r'level\s*6']
+    
+    has_bac5 = any(re.search(p, raw_full, re.IGNORECASE) for p in bac5_patterns)
+    has_bac3 = any(re.search(p, raw_full, re.IGNORECASE) for p in bac3_patterns)
+    
+    if has_bac5:
+        score_diplomes['D_Niveau'] = 4
+    elif has_bac3:
+        score_diplomes['D_Niveau'] = 2
+    else:
+        score_diplomes['D_Niveau'] = 1
+    
+    details['diplomes_scores']['D_Niveau'] = f"{score_diplomes['D_Niveau']}/4"
+    
+    # D_Specialisation - Spécialisation pertinente (max: 3)
+    spec_keywords = ['finance', 'comptabilité', 'audit', 'risque', 'risk', 'management',
+                    'informatique', 'it', 'computer', 'reporting', 'réglementaire']
+    spec_count = sum(1 for kw in spec_keywords if kw in raw_full.lower())
+    score_diplomes['D_Specialisation'] = min(3, spec_count // 2)
+    
+    details['diplomes_scores']['D_Specialisation'] = f"{score_diplomes['D_Specialisation']}/3"
+    
+    # D_Certif - Certifications (max: 3)
+    certifs = ['acca', 'cpa', 'cfa', 'frm', 'prince2', 'itil', 'pmp', 'cia', 'cisa',
+              'iscap', 'microsoft', 'cisco', 'aws', 'azure', 'cobac', 'bâle']
+    certif_count = sum(1 for c in certifs if c in raw_full.lower())
+    score_diplomes['D_Certif'] = min(3, certif_count)
+    
+    details['diplomes_scores']['D_Certif'] = f"{score_diplomes['D_Certif']}/3"
+    
+    # Total Bloc Diplômes (sur 10)
+    score_diplomes_total = sum(score_diplomes.values())
+    details['diplomes_total'] = f"{score_diplomes_total}/10"
+    
+    # ─── SCORE TOTAL SUR 100 ───────────────────────────────────────────────
+    
+    score_total = score_cv_total + score_lm_total + score_diplomes_total
+    score_total = min(100, score_total)  # Plafond à 100
+    
+    # Déterminer la décision finale
+    if score_total >= 80:
+        decision = "Shortlist"
+    elif score_total >= 70:
+        decision = "À considérer"
+    elif score_total >= 60:
+        decision = "Faible"
+    else:
+        decision = "Rejet"
+    
+    return {
+        'score': score_total,
+        'decision': decision,
+        'bloc_cv': {
+            'total': score_cv_total,
+            'max': 70,
+            'details': score_cv,
+            'raw_total': total_cv_raw,
+            'raw_max': max_cv_raw
+        },
+        'bloc_lm': {
+            'total': score_lm_total,
+            'max': 20,
+            'details': score_lm
+        },
+        'bloc_diplomes': {
+            'total': score_diplomes_total,
+            'max': 10,
+            'details': score_diplomes
+        },
+        'details': details,
+        'note': f"Score: {score_total}/100 — {decision}"
+    }
+
+
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
         return {
@@ -2487,7 +2932,32 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         if DEBUG_EXTRACTION and cv_text:
             print(f"🔍 TEXTE EXTRAIT CV ({token}):\n{cv_text[:1500]}")
 
-        result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+        # Pour les 6 nouveaux postes : utiliser le scoring détaillé sur 100 points
+        if poste in POSTES_AVEC_SCORING_100:
+            detailed_result = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
+            if detailed_result:
+                result = {
+                    'score': detailed_result['score'],
+                    'checklist': {},
+                    'flags_eliminatoires': [],
+                    'signaux_detectes': [],
+                    'details': detailed_result['details'],
+                    'score_breakdown': {
+                        'bloc1_eliminatoire': False,
+                        'scoring_type': '100_points',
+                        'bloc_cv': detailed_result['bloc_cv'],
+                        'bloc_lm': detailed_result['bloc_lm'],
+                        'bloc_diplomes': detailed_result['bloc_diplomes'],
+                        'score_final': detailed_result['score'],
+                        'decision': detailed_result['decision'],
+                        'note': detailed_result['note']
+                    }
+                }
+            else:
+                result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+        else:
+            # Anciens postes : garder le système sur 10 points
+            result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
 
         redis_client.hset(key, mapping={
             "score":               str(result['score']),
@@ -2500,8 +2970,12 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             "analyse_status":      "completed"
         })
 
-        tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
-        print(f"{tag} Score {token}: {result['score']}/10 — {result['score_breakdown'].get('note','')}")
+        if poste in POSTES_AVEC_SCORING_100:
+            tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
+            print(f"{tag} Score {token}: {result['score']}/100 — {result['score_breakdown'].get('note','')}")
+        else:
+            tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
+            print(f"{tag} Score {token}: {result['score']}/10 — {result['score_breakdown'].get('note','')}")
 
     except Exception as e:
         import traceback
@@ -2516,28 +2990,97 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
 # 🏆 CLASSEMENT
 # ══════════════════════════════════════════════════════════════════════════
 
-def get_recommandation_from_score(score):
+def get_recommandation_from_score(score, poste=None):
+    """
+    Retourne la recommandation selon le score.
+    Pour les 6 nouveaux postes : scoring sur 100 points avec seuils 80/70/60.
+    Pour les autres postes : scoring sur 10 points avec seuils 8/6.
+    """
     s = int(score)
-    if s >= 8: return "🥇 Entretien prioritaire"
-    if s >= 6: return "🥈 Entretien si besoin"
-    return "❌ Rejet"
-
-
-def get_recommandation_color(score):
-    s = int(score)
-    if s >= 8:
-        return "00FF00"
-    elif s >= 6:
-        return "FFA500"
+    
+    # Vérifier si le poste utilise le scoring sur 100 points
+    if poste and poste in POSTES_AVEC_SCORING_100:
+        # Scoring sur 100 points - Spécifications Excel
+        if s >= 80:
+            return "Shortlist"
+        elif s >= 70:
+            return "À considérer"
+        elif s >= 60:
+            return "Faible"
+        else:
+            return "Rejet"
     else:
-        return "FF0000"
+        # Ancien système sur 10 points (postes existants)
+        if s >= 8:
+            return "🥇 Entretien prioritaire"
+        elif s >= 6:
+            return "🥈 Entretien si besoin"
+        else:
+            return "❌ Rejet"
+
+
+def get_decision_from_score(score, poste=None):
+    """
+    Retourne la décision finale selon le barème strict des spécifications.
+    Uniquement pour les 6 nouveaux postes avec scoring sur 100.
+    """
+    if not poste or poste not in POSTES_AVEC_SCORING_100:
+        return None  # Non applicable aux anciens postes
+    
+    s = int(score)
+    if s >= 80:
+        return "Shortlist"
+    elif s >= 70:
+        return "À considérer"
+    elif s >= 60:
+        return "Faible"
+    else:
+        return "Rejet"
+
+
+def get_recommandation_color(score, poste=None):
+    """
+    Retourne la couleur selon le score et le type de poste.
+    """
+    s = int(score)
+    
+    if poste and poste in POSTES_AVEC_SCORING_100:
+        # Scoring sur 100 points
+        if s >= 80:
+            return "00FF00"  # Vert - Shortlist
+        elif s >= 70:
+            return "90EE90"  # Vert clair - À considérer
+        elif s >= 60:
+            return "FFA500"  # Orange - Faible
+        else:
+            return "FF0000"  # Rouge - Rejet
+    else:
+        # Ancien système sur 10 points
+        if s >= 8:
+            return "00FF00"
+        elif s >= 6:
+            return "FFA500"
+        else:
+            return "FF0000"
 
 
 def calculate_ranking_score(c, poste):
+    """
+    Calcule le score de ranking pour un candidat.
+    Pour les 6 nouveaux postes : utilise le score sur 100 points.
+    Pour les autres : utilise l'ancien système sur 10 points avec bonus.
+    """
     sb = c.get('score_breakdown_parsed', {})
     if sb.get('bloc1_eliminatoire'):
         return -999
-    score         = int(c.get('score', 0))
+    
+    score = int(c.get('score', 0))
+    
+    # Pour les nouveaux postes avec scoring 100, retourne directement le score
+    if poste and poste in POSTES_AVEC_SCORING_100:
+        return float(score)
+    
+    # Ancien système : score sur 10 + bonus
     signaux_count = len(c.get('signaux_detectes_parsed', []))
     criteres_ok   = sb.get('bloc2_criteres_valides', 0)
     lettre_bonus  = 0.1 if c.get('lettre_filename') else 0
@@ -2563,7 +3106,7 @@ def generate_ranking_for_poste(poste, candidats_data):
     ))
     for idx, c in enumerate(pool, 1):
         c['ranking_position']       = idx
-        c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0))
+        c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0), poste)
     return pool
 
 # ══════════════════════════════════════════════════════════════════════════
