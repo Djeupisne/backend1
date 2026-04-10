@@ -272,16 +272,7 @@ POSTES = [
     "Archiviste (Administration Crédit)",
     "Senior Finance Officer",
     "Market Risk Officer",
-    "IT Réseau & Infrastructure",
-    # ══════════════════════════════════════════════════════════════════════════
-    # ✅ NOUVEAUX POSTES - Système d'analyse intelligente multilingue
-    # ══════════════════════════════════════════════════════════════════════════
-    "Auditeur interne",
-    "Chef service contrôle des engagements",
-    "Chef service IT (maintenance/support)",
-    "Chef service finance",
-    "Chef service risques de marché",
-    "Chef service reporting réglementaire"
+    "IT Réseau & Infrastructure"
 ]
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -424,153 +415,6 @@ GRILLE = {
             "Profil trop helpdesk",
             "CV sans détail technique",
             "Aucune mention de sécurité"
-        ]
-    },
-    # ══════════════════════════════════════════════════════════════════════════
-    # ✅ NOUVEAUX POSTES - Système d'analyse intelligente multilingue
-    # ══════════════════════════════════════════════════════════════════════════
-    "Auditeur interne": {
-        "eliminatoire": [
-            "Expérience réelle en audit interne ou externe",
-            "Minimum 3 ans en audit bancaire ou cabinet d'audit (hors stage)",
-            "Connaissance des normes d'audit et contrôle interne"
-        ],
-        "a_verifier": [
-            "Missions d'audit sur site",
-            "Évaluation des risques opérationnels",
-            "Rédaction de rapports d'audit",
-            "Suivi des recommandations"
-        ],
-        "signaux_forts": [
-            "Normes IIA / IPPF",
-            "COBAC / réglementation bancaire",
-            "Audit IT ou systèmes d'information",
-            "Certification CIA / CPA / ACCA"
-        ],
-        "points_attention": [
-            "Profil purement comptable sans audit",
-            "Aucune expérience terrain en audit",
-            "CV flou sur les missions réalisées"
-        ]
-    },
-    "Chef service contrôle des engagements": {
-        "eliminatoire": [
-            "Maîtrise du risque crédit et analyse financière",
-            "Expérience significative en octroi de crédits",
-            "Minimum 5 ans en institution financière (hors stage)"
-        ],
-        "a_verifier": [
-            "Analyse financière d'entreprises",
-            "Structuration de crédits complexes",
-            "Animation de comité de crédit",
-            "Management d'équipe"
-        ],
-        "signaux_forts": [
-            "IFRS 9 / classification des risques",
-            "Grande entreprise / Corporate",
-            "Restructuration de dossiers sensibles",
-            "Formation risk management"
-        ],
-        "points_attention": [
-            "Profil purement commercial sans analyse",
-            "Aucune expérience en analyse financière",
-            "CV orienté relation client uniquement"
-        ]
-    },
-    "Chef service IT (maintenance/support)": {
-        "eliminatoire": [
-            "Background IT solide avec expérience technique réelle",
-            "Minimum 5 ans en maintenance et support informatique",
-            "Exposition à environnement critique (banque, datacenter)"
-        ],
-        "a_verifier": [
-            "Maintenance préventive et curative",
-            "Support utilisateurs niveau 2/3",
-            "Gestion de parc informatique",
-            "Supervision d'infrastructures"
-        ],
-        "signaux_forts": [
-            "ITIL / gestion de services IT",
-            "Virtualisation (VMware, Hyper-V)",
-            "Systèmes bancaires core banking",
-            "Certifications Microsoft / Cisco / ITIL"
-        ],
-        "points_attention": [
-            "Profil trop helpdesk niveau 1",
-            "CV sans détail technique précis",
-            "Aucune expérience en maintenance infrastructure"
-        ]
-    },
-    "Chef service finance": {
-        "eliminatoire": [
-            "Expérience significative en finance bancaire (minimum 7 ans)",
-            "Maîtrise du reporting financier et comptabilité bancaire",
-            "Expérience avérée en management d'équipe"
-        ],
-        "a_verifier": [
-            "Production d'états financiers",
-            "Reporting réglementaire (BEAC, COBAC)",
-            "Relations avec auditeurs externes",
-            "Pilotage de la performance financière"
-        ],
-        "signaux_forts": [
-            "IFRS / normes internationales",
-            "Consolidation de comptes",
-            "Outils SPECTRA / CERBER / ERP bancaires",
-            "Bac+5 + Certification (ACCA, CPA, CFA)"
-        ],
-        "points_attention": [
-            "Profil comptable junior sans évolution",
-            "Pas de responsabilité managériale réelle",
-            "Expérience hors secteur bancaire"
-        ]
-    },
-    "Chef service risques de marché": {
-        "eliminatoire": [
-            "Expérience avérée en risques de marché (FX, taux, liquidité)",
-            "Exposition aux produits de trésorerie et ALM",
-            "Minimum 5 ans en institution financière (hors stage)"
-        ],
-        "a_verifier": [
-            "Calcul et suivi de la VaR",
-            "Stress testing et scénarios de crise",
-            "Reporting des risques à la direction",
-            "Maîtrise Excel avancé / VBA"
-        ],
-        "signaux_forts": [
-            "Bâle II / III / réglementation prudentielle",
-            "Gestion ALM (Asset Liability Management)",
-            "Produits FICC (Fixed Income, Currencies, Commodities)",
-            "Python / R pour modélisation financière"
-        ],
-        "points_attention": [
-            "Profil trop théorique académique",
-            "Aucune exposition aux marchés financiers",
-            "CV sans mention d'outils de modélisation"
-        ]
-    },
-    "Chef service reporting réglementaire": {
-        "eliminatoire": [
-            "Comptabilité bancaire approfondie",
-            "Expérience en reporting réglementaire (BEAC, COBAC, SPECTRA)",
-            "Minimum 5 ans en banque ou cabinet d'audit bancaire"
-        ],
-        "a_verifier": [
-            "Production de rapports réglementaires",
-            "Contrôle de cohérence des données",
-            "Veille réglementaire bancaire",
-            "Interaction avec autorités de tutelle"
-        ],
-        "signaux_forts": [
-            "SPECTRA / CERBER / outils BEAC",
-            "Normes COBAC précises",
-            "Reporting prudentiel Bâle",
-            "Formation comptabilité bancaire spécialisée"
-        ],
-        "points_attention": [
-            "Profil généraliste sans spécialisation bancaire",
-            "Aucune expérience reporting réglementaire",
-            "CV flou sur les livrables produits"
         ]
     }
 }
@@ -1745,314 +1589,6 @@ KEYWORD_MAPPING = {
         "mcse", "network+", "certification reseau",
         "cisco certification", "microsoft certification", "encor", "350-401",
         "it certifications", "professional certifications"
-    ],
-    # ══════════════════════════════════════════════════════════════════════════
-    # ✅ NOUVEAUX POSTES - Mots-clés multilingues intelligents (Français/Anglais)
-    # ══════════════════════════════════════════════════════════════════════════
-    "Expérience réelle en audit interne ou externe": [
-        "audit interne", "audit externe", "auditeur", "mission d'audit",
-        "internal audit", "external audit", "audit mission", "auditor",
-        "audit bancaire", "banking audit", "financial audit", "compliance audit"
-    ],
-    "Minimum 3 ans en audit bancaire ou cabinet d'audit (hors stage)": ["EXP_AUDIT_3ANS"],
-    "Connaissance des normes d'audit et contrôle interne": [
-        "normes audit", "controle interne", "internal control", "audit standards",
-        "iia", "ippf", "coso", "normes ifrs", "audit procedures",
-        "methodologie audit", "audit methodology", "risk assessment"
-    ],
-    "Missions d'audit sur site": [
-        "audit sur site", "mission terrain", "on-site audit", "fieldwork",
-        "audit visite", "site visit", "physical audit", "inspection sur place"
-    ],
-    "Évaluation des risques opérationnels": [
-        "risques operationnels", "risk assessment", "operational risk",
-        "evaluation risques", "cartographie risques", "risk mapping",
-        "analyse risques", "risk analysis", "internal control review"
-    ],
-    "Rédaction de rapports d'audit": [
-        "rapport audit", "rapports d'audit", "audit report", "audit findings",
-        "redaction rapport", "writing audit reports", "audit documentation",
-        "recommandations audit", "audit recommendations"
-    ],
-    "Suivi des recommandations": [
-        "suivi recommandations", "follow-up", "plan action", "action plan",
-        "tracking recommendations", "remediation", "corrective actions",
-        "mise en oeuvre", "implementation"
-    ],
-    "Normes IIA / IPPF": [
-        "iia", "ippf", "institute internal auditors", "normes internationales",
-        "international standards", "professional practices framework",
-        "cia certification", "certified internal auditor"
-    ],
-    "COBAC / réglementation bancaire": [
-        "cobac", "bceao", "bcac", "reglementation bancaire", "banking regulation",
-        "conformite", "compliance", "commission bancaire", "central bank",
-        "prudential regulation", "banking authority"
-    ],
-    "Audit IT ou systèmes d'information": [
-        "audit it", "audit informatique", "it audit", "is audit",
-        "systemes information", "information systems", "itgc", "it general controls",
-        "cybersecurity audit", "application controls", "it risk"
-    ],
-    "Certification CIA / CPA / ACCA": [
-        "cia", "cpa", "acca", "certified internal auditor", "certified public accountant",
-        "association chartered certified accountants", "audit certification",
-        "professional qualification", "ifrs certification"
-    ],
-    "Maîtrise du risque crédit et analyse financière": [
-        "risque credit", "credit risk", "analyse financiere", "financial analysis",
-        "credit analysis", "evaluation credit", "credit assessment",
-        "scoring credit", "credit scoring", "loan analysis"
-    ],
-    "Expérience significative en octroi de crédits": [
-        "octroi credit", "credit granting", "loan approval", "approval credit",
-        "dossier credit", "credit file", "loan origination", "credit decision",
-        "validation credit", "credit validation"
-    ],
-    "Minimum 5 ans en institution financière (hors stage)": ["EXP_FIN_5ANS"],
-    "Analyse financière d'entreprises": [
-        "analyse financiere", "financial analysis", "etats financiers",
-        "financial statements", "ratios financiers", "financial ratios",
-        "bilan", "balance sheet", "compte resultat", "income statement",
-        "cash flow", "flux tresorerie"
-    ],
-    "Structuration de crédits complexes": [
-        "structuration credit", "credit structuring", "montage credit",
-        "complex loans", "corporate credit", "structured finance",
-        "financement complexe", "deal structuring", "credit facilities"
-    ],
-    "Animation de comité de crédit": [
-        "comite credit", "credit committee", "commission credit",
-        "credit approval committee", "loan committee", "validation comite",
-        "presentation comite", "committee presentation"
-    ],
-    "Management d'équipe": [
-        "management", "encadrement", "team management", "team leader",
-        "chef equipe", "supervision", "managing team", "team supervision",
-        "responsable equipe", "head of"
-    ],
-    "IFRS 9 / classification des risques": [
-        "ifrs 9", "ias 39", "classification risques", "risk classification",
-        "impairment", "provisionnement", "expected credit loss", "ecl",
-        "stage 1 stage 2", "credit risk grading"
-    ],
-    "Grande entreprise / Corporate": [
-        "grande entreprise", "corporate", "corporate banking", "large corporates",
-        "clients corporate", "enterprise clients", "wholesale banking",
-        "institutional clients"
-    ],
-    "Restructuration de dossiers sensibles": [
-        "restructuration", "dossiers sensibles", "distressed assets",
-        "non-performing loans", "npl", "creances douteuses", "impayes",
-        "workout", "debt restructuring", "problem loans"
-    ],
-    "Formation risk management": [
-        "risk management", "gestion risques", "formation risque",
-        "risk training", "frm", "financial risk manager", "prmie",
-        "certification risque"
-    ],
-    "Background IT solide avec expérience technique réelle": [
-        "background it", "experience technique", "technical expertise",
-        "it professional", "ingenieur it", "it engineer", "technical skills",
-        "competences techniques", "it specialist"
-    ],
-    "Minimum 5 ans en maintenance et support informatique": ["EXP_IT_MAINT_5ANS"],
-    "Exposition à environnement critique (banque, datacenter)": [
-        "environnement critique", "critical environment", "datacenter",
-        "centre donnees", "high availability", "mission critical",
-        "banque", "banking", "financial services", "telecom"
-    ],
-    "Maintenance préventive et curative": [
-        "maintenance preventive", "maintenance curative", "preventive maintenance",
-        "corrective maintenance", "troubleshooting", "depannages",
-        "repair", "fix", "resolution incidents"
-    ],
-    "Support utilisateurs niveau 2/3": [
-        "support niveau 2", "support niveau 3", "level 2 support",
-        "level 3 support", "support technique", "technical support",
-        "helpdesk", "user support", "end user support"
-    ],
-    "Gestion de parc informatique": [
-        "gestion parc", "parc informatique", "fleet management",
-        "asset management", "gestion actifs", "inventory management",
-        "computer fleet", "device management"
-    ],
-    "Supervision d'infrastructures": [
-        "supervision", "monitoring", "infrastructure monitoring",
-        "nagios", "zabbix", "prtg", "supervision reseau",
-        "infrastructure oversight"
-    ],
-    "ITIL / gestion de services IT": [
-        "itil", "itsm", "service management", "gestion services it",
-        "incident management", "change management", "problem management",
-        "service desk", "it service delivery"
-    ],
-    "Virtualisation (VMware, Hyper-V)": [
-        "virtualisation", "vmware", "hyper-v", "vsphere", "esxi",
-        "virtualization", "vcenter", "virtual machines", "vm",
-        "containers", "docker", "kubernetes"
-    ],
-    "Systèmes bancaires core banking": [
-        "core banking", "systemes bancaires", "banking systems",
-        "temenos", "flexcube", "t24", "spectrum", "amplitude",
-        "banking software", "financial systems"
-    ],
-    "Certifications Microsoft / Cisco / ITIL": [
-        "microsoft certified", "cisco certification", "itil foundation",
-        "mcse", "ccna", "ccnp", "itil v4", "azure certified",
-        "microsoft 365", "windows server certification"
-    ],
-    "Expérience significative en finance bancaire (minimum 7 ans)": ["EXP_FINANCE_7ANS"],
-    "Maîtrise du reporting financier et comptabilité bancaire": [
-        "reporting financier", "financial reporting", "comptabilite bancaire",
-        "banking accounting", "etats financiers", "financial statements",
-        "consolidation", "group reporting", "management reporting"
-    ],
-    "Expérience avérée en management d'équipe": [
-        "management equipe", "team management", "leadership",
-        "encadrement", "supervision equipe", "managing staff",
-        "head of department", "department head", "team lead"
-    ],
-    "Production d'états financiers": [
-        "production etats financiers", "financial statements preparation",
-        "elaboration bilans", "closing accounts", "cloture comptable",
-        "month end close", "year end close", "financial close"
-    ],
-    "Reporting réglementaire (BEAC, COBAC)": [
-        "reporting reglementaire", "beac", "cobac", "spectra",
-        "regulatory reporting", "central bank reporting", "prudential reporting",
-        "rapports bancaires", "banking returns"
-    ],
-    "Relations avec auditeurs externes": [
-        "auditeurs externes", "external auditors", "commissaires aux comptes",
-        "cac", "statutory audit", "audit externe", "big four",
-        "deloitte", "pwc", "ey", "kpmg"
-    ],
-    "Pilotage de la performance financière": [
-        "performance financiere", "financial performance", "kpis",
-        "tableau bord", "dashboard", "budgeting", "forecasting",
-        "variance analysis", "financial planning"
-    ],
-    "IFRS / normes internationales": [
-        "ifrs", "ias", "normes internationales", "international standards",
-        "accounting standards", "gaap", "consolidation ifrs",
-        "ifrs compliance"
-    ],
-    "Consolidation de comptes": [
-        "consolidation", "comptes consolides", "consolidated accounts",
-        "group consolidation", "scope consolidation", "perimetre",
-        "eliminations intra-groupe", "intercompany eliminations"
-    ],
-    "Outils SPECTRA / CERBER / ERP bancaires": [
-        "spectra", "cerber", "erp", "sap", "oracle financials",
-        "core banking", "systemes integres", "banking erp",
-        "financial systems", "enterprise software"
-    ],
-    "Bac+5 + Certification (ACCA, CPA, CFA)": [
-        "bac 5", "master", "mba", "acca", "cpa", "cfa",
-        "chartered accountant", "certified financial analyst",
-        "diplome superieur", "graduate degree"
-    ],
-    "Expérience avérée en risques de marché (FX, taux, liquidité)": [
-        "risques marche", "market risk", "fx", "forex", "change",
-        "taux", "interest rates", "liquidite", "liquidity",
-        "trading risk", "treasury risk", "alm"
-    ],
-    "Exposition aux produits de trésorerie et ALM": [
-        "tresorerie", "treasury", "alm", "asset liability management",
-        "gestion actif passif", "cash management", "funding",
-        "money market", "marche monetaire"
-    ],
-    "Minimum 5 ans en institution financière (hors stage)": ["EXP_RISK_5ANS"],
-    "Calcul et suivi de la VaR": [
-        "var", "value at risk", "value a risque", "var calculation",
-        "risk metrics", "market risk measurement", "backtesting",
-        "stress testing", "scenario analysis"
-    ],
-    "Stress testing et scénarios de crise": [
-        "stress testing", "tests resistance", "scenarios crise",
-        "crisis scenarios", "what-if analysis", "sensitivity analysis",
-        "shock scenarios", "adverse scenarios"
-    ],
-    "Reporting des risques à la direction": [
-        "reporting risques", "risk reporting", "rapport direction",
-        "management reporting", "risk committee", "board reporting",
-        "risk dashboard", "risk metrics"
-    ],
-    "Maîtrise Excel avancé / VBA": [
-        "excel avance", "advanced excel", "vba", "macros",
-        "excel modeling", "spreadsheet", "power query", "pivot tables",
-        "financial modeling excel"
-    ],
-    "Bâle II / III / réglementation prudentielle": [
-        "bale ii", "bale iii", "basel ii", "basel iii",
-        "reglementation prudentielle", "prudential regulation",
-        "capital requirements", "ratio fonds propres", "tier 1"
-    ],
-    "Gestion ALM (Asset Liability Management)": [
-        "alm", "asset liability", "gestion actif-passif", "gap analysis",
-        "duration", "convexity", "interest rate risk", "irrbb",
-        "liquidity coverage ratio", "lcr", "nsfr"
-    ],
-    "Produits FICC (Fixed Income, Currencies, Commodities)": [
-        "ficc", "fixed income", "currencies", "commodities",
-        "produits derives", "derivatives", "swaps", "options",
-        "bonds", "obligations", "matieres premieres"
-    ],
-    "Python / R pour modélisation financière": [
-        "python", "r statistical", "programming", "quantitative",
-        "financial modeling", "data analysis", "pandas", "numpy",
-        "scikit-learn", "tensorflow", "machine learning"
-    ],
-    "Comptabilité bancaire approfondie": [
-        "comptabilite bancaire", "banking accounting", "plan comptable banque",
-        "banking chart accounts", "operations bancaires", "banking operations",
-        "ecriture comptable", "journal entries", "general ledger"
-    ],
-    "Expérience en reporting réglementaire (BEAC, COBAC, SPECTRA)": [
-        "reporting reglementaire", "beac", "cobac", "spectra", "cerber",
-        "regulatory reporting", "prudential returns", "central bank",
-        "surveillant bancaire", "banking supervision"
-    ],
-    "Minimum 5 ans en banque ou cabinet d'audit bancaire": ["EXP_BANKING_5ANS"],
-    "Production de rapports réglementaires": [
-        "rapports reglementaires", "regulatory reports", "rapports cobac",
-        "beac returns", "spectra filings", "prudential reports",
-        "compliance reports", "regulatory filings"
-    ],
-    "Contrôle de cohérence des données": [
-        "controle coherence", "data quality", "verification donnees",
-        "data validation", "reconciliation", "rapprochement",
-        "data integrity", "quality checks"
-    ],
-    "Veille réglementaire bancaire": [
-        "veille reglementaire", "regulatory watch", "monitoring reglementaire",
-        "compliance monitoring", "regulatory updates", "nouvelles normes",
-        "new regulations", "regulatory changes"
-    ],
-    "Interaction avec autorités de tutelle": [
-        "autorites tutelle", "regulatory authorities", "beac", "cobac",
-        "commission bancaire", "central bank", "supervisor",
-        "regulatory liaison", "authority communication"
-    ],
-    "SPECTRA / CERBER / outils BEAC": [
-        "spectra", "cerber", "beac", "outils beac", "plateforme beac",
-        "regulatory platform", "reporting system", "electronic filing"
-    ],
-    "Normes COBAC précises": [
-        "normes cobac", "cobac regulations", "instructions cobac",
-        "reglementation cobac", "cobac circulars", "directives cobac",
-        "banking standards", "prudential norms"
-    ],
-    "Reporting prudentiel Bâle": [
-        "reporting prudentiel", "basel reporting", "fonds propres",
-        "capital adequacy", "pillar 1", "pillar 2", "pillar 3",
-        "risk weighted assets", "rwa"
-    ],
-    "Formation comptabilité bancaire spécialisée": [
-        "formation comptabilite bancaire", "banking accounting training",
-        "specialisation bancaire", "banking qualification",
-        "institut bancaire", "banking institute", "cfob"
     ]
 }
 
@@ -2075,39 +1611,6 @@ DOMAIN_KEYWORDS_MAP = {
         "network", "serveur", "technicien", "ingenieur", "networking",
         "cisco", "admin", "administrateur"
     ],
-    # ══════════════════════════════════════════════════════════════════════════
-    # ✅ NOUVEAUX POSTES - Domaines pour vérification expérience
-    # ══════════════════════════════════════════════════════════════════════════
-    "EXP_AUDIT_3ANS": [
-        "audit", "auditeur", "controle interne", "internal audit",
-        "cabinet audit", "big four", "deloitte", "pwc", "ey", "kpmg",
-        "banking audit", "commissaire aux comptes"
-    ],
-    "EXP_FIN_5ANS": [
-        "finance", "credit", "risque", "banque", "bancaire",
-        "financial institution", "credit analysis", "loan officer",
-        "corporate banking", "investment banking"
-    ],
-    "EXP_IT_MAINT_5ANS": [
-        "maintenance", "support", "it", "informatique", "reseau",
-        "infrastructure", "systemes", "technical support", "helpdesk",
-        "it maintenance", "system administration"
-    ],
-    "EXP_FINANCE_7ANS": [
-        "finance", "comptabilite", "reporting", "banque", "bancaire",
-        "financial reporting", "accounting", "consolidation",
-        "ifrs", "controller", "finance manager", "cfo"
-    ],
-    "EXP_RISK_5ANS": [
-        "risque", "risk", "marche", "market risk", "alm", "tresorerie",
-        "treasury", "trading", "var", "risk management",
-        "financial markets", "investment"
-    ],
-    "EXP_BANKING_5ANS": [
-        "banque", "bancaire", "banking", "comptabilite bancaire",
-        "reporting reglementaire", "beac", "cobac", "spectra",
-        "central bank", "regulatory reporting", "banking supervision"
-    ]
 }
 
 EXP_MIN_YEARS_MAP = {
@@ -2115,13 +1618,6 @@ EXP_MIN_YEARS_MAP = {
     "EXP_FIN_3ANS":      3.0,
     "EXP_FINANCE_3ANS":  3.0,
     "EXP_IT_2ANS":       2.0,
-    # ✅ NOUVEAUX POSTES - Années minimales d'expérience
-    "EXP_AUDIT_3ANS":    3.0,
-    "EXP_FIN_5ANS":      5.0,
-    "EXP_IT_MAINT_5ANS": 5.0,
-    "EXP_FINANCE_7ANS":  7.0,
-    "EXP_RISK_5ANS":     5.0,
-    "EXP_BANKING_5ANS":  5.0
 }
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2232,18 +1728,6 @@ def detect_language(text):
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 📋 POSTES AVEC NOUVELLE GRILLE DE NOTATION (SUR 100 POINTS)
-# ══════════════════════════════════════════════════════════════════════════
-NOUVELLE_GRILLE_POSTES = [
-    "Auditeur interne",
-    "Chef service contrôle des engagements",
-    "Chef service IT (maintenance/support)",
-    "Chef service finance",
-    "Chef service risques de marché",
-    "Chef service reporting réglementaire"
-]
-
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
         return {
@@ -2270,19 +1754,12 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'score_breakdown': {}
         }
 
-    # Vérifier si le poste utilise la nouvelle grille (sur 100 points)
-    utilise_nouvelle_grille = poste in NOUVELLE_GRILLE_POSTES
-
     all_att_raw  = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full     = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
     normalized   = normalize_for_matching(raw_full)[0]
     detected_lang = detect_language(cv_text[:500]) if cv_text else None
 
     print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
-    if utilise_nouvelle_grille:
-        print(f"📊 Utilisation de la NOUVELLE GRILLE (100 points) pour {poste}")
-    else:
-        print(f"📊 Utilisation de l'ANCIENNE GRILLE (10 points) pour {poste}")
 
     intelligent_flags = []
 
@@ -2326,8 +1803,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'cv':          len(cv_text) > 0,
             'lettre':      len(lettre_text or "") > 0,
             'certificats': len(attestation_texts_list) if attestation_texts_list else 0
-        },
-        'utilise_nouvelle_grille': utilise_nouvelle_grille
+        }
     }
 
     eliminatoire_failed = False
@@ -2391,8 +1867,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
                 'total_raw_points': 0,
                 'score_final': 0,
                 'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s) éliminatoire(s) non vérifié(s)",
-                'documents_analyses': details['documents_analyses'],
-                'utilise_nouvelle_grille': utilise_nouvelle_grille
+                'documents_analyses': details['documents_analyses']
             }
         }
 
@@ -2442,50 +1917,12 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         if is_present:
             details['alertes_attention'].append(f"⚠️ Attention: {crit}")
 
-    # Calcul du score selon le système de grille
-    if utilise_nouvelle_grille:
-        # NOUVELLE GRILLE - Système sur 100 points avec critères détaillés
-        # Bloc 1: Éliminatoire déjà traité (si échec → score 0)
-        
-        # Bloc 2: Critères à vérifier (4 critères × 5 points = 20 points max)
-        bloc2_points = points_bloc2 * 5
-        
-        # Bloc 3: Signaux forts (4 signaux × 5 points = 20 points max)
-        bloc3_points = len(signaux) * 5
-        
-        # Score intermédiaire avant ajustements: 40 points max
-        score_intermediaire = bloc2_points + bloc3_points
-        
-        # Note: Pour la nouvelle grille, on utilise un calcul différent basé sur
-        # les critères spécifiques définis dans la grille de chaque poste
-        # Le score final sera /100 avec les nouveaux critères
-        
-        # Pour l'instant, on garde une compatibilité avec l'ancien système
-        # mais on marque que c'est la nouvelle grille
-        adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
-        coherence     = min(2, points_bloc2)
-        risque_metier = min(3, len(signaux))
-        qualite_cv    = 1 if (points_bloc2 + len(signaux)) >= 5 else 0
-        lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
-        
-        # Score affiché (pour compatibilité UI) mais avec indication nouvelle grille
-        score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
-        
-        # Stocker les informations pour la nouvelle grille dans details
-        details['nouvelle_grille_details'] = {
-            'bloc2_points': bloc2_points,  # /20
-            'bloc3_points': bloc3_points,  # /20
-            'score_intermediaire': score_intermediaire,  # /40
-            'note': 'Nouvelle grille 100 points - En cours d\'implémentation'
-        }
-    else:
-        # ANCIENNE GRILLE - Système sur 10 points
-        adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
-        coherence     = min(2, points_bloc2)
-        risque_metier = min(3, len(signaux))
-        qualite_cv    = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
-        lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
-        score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
+    adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
+    coherence     = min(2, points_bloc2)
+    risque_metier = min(3, len(signaux))
+    qualite_cv    = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
+    lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
+    score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
 
     return {
         'score': score_final,
@@ -2508,8 +1945,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'total_raw_points':         points_bloc2 + points_bloc3,
             'score_final':              score_final,
             'note': f"Score Excel: {score_final}/10",
-            'documents_analyses': details['documents_analyses'],
-            'utilise_nouvelle_grille': utilise_nouvelle_grille
+            'documents_analyses': details['documents_analyses']
         }
     }
 
@@ -2597,32 +2033,17 @@ def calculate_ranking_score(c, poste):
     sb = c.get('score_breakdown_parsed', {})
     if sb.get('bloc1_eliminatoire'):
         return -999
-    
-    # Vérifier si le poste utilise la nouvelle grille
-    utilise_nouvelle_grille = poste in NOUVELLE_GRILLE_POSTES
-    
     score         = int(c.get('score', 0))
     signaux_count = len(c.get('signaux_detectes_parsed', []))
     criteres_ok   = sb.get('bloc2_criteres_valides', 0)
     lettre_bonus  = 0.1 if c.get('lettre_filename') else 0
-    
-    # Bonus pour la nouvelle grille (pour différencier les scores)
-    nouvelle_grille_bonus = 0
-    if utilise_nouvelle_grille:
-        # Pour les postes avec nouvelle grille, on ajoute un bonus basé sur
-        # les détails de la nouvelle grille si disponibles
-        ng_details = c.get('analyse_details_parsed', {}).get('nouvelle_grille_details', {})
-        if ng_details:
-            nouvelle_grille_bonus = ng_details.get('score_intermediaire', 0) * 0.05
-    
     try:
         days = (datetime.datetime.now() -
                 datetime.datetime.fromisoformat(c.get('date_candidature', ''))).days
         date_bonus = max(0, (30 - min(days, 30)) * 0.01)
     except Exception:
         date_bonus = 0
-    
-    return round(score + signaux_count * 0.5 + criteres_ok * 0.2 + lettre_bonus + date_bonus + nouvelle_grille_bonus, 3)
+    return round(score + signaux_count * 0.5 + criteres_ok * 0.2 + lettre_bonus + date_bonus, 3)
 
 
 def generate_ranking_for_poste(poste, candidats_data):
@@ -3166,16 +2587,7 @@ def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
-    
-    # Ajouter l'information sur le système de notation
-    result = dict(g)
-    result['systeme_notation'] = {
-        'utilise_nouvelle_grille': poste in NOUVELLE_GRILLE_POSTES,
-        'note_max': '100 points' if poste in NOUVELLE_GRILLE_POSTES else '10 points',
-        'description': 'Nouvelle grille avec critères détaillés CV (70pts) + Lettre (20pts) + Diplôme (10pts)' if poste in NOUVELLE_GRILLE_POSTES else 'Grille standard avec critères éliminatoires et signaux forts'
-    }
-    
-    return jsonify(result), 200
+    return jsonify(g), 200
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
