@@ -3369,9 +3369,9 @@ def get_recommandation_color(score, poste=None):
     if poste and poste in POSTES_AVEC_SCORING_100:
         # Scoring sur 100 points
         if s >= 80:
-            return "00FF00"  # Vert - Shortlist
+            return "00FF00"  # Vert - Shortlist prioritaire
         elif s >= 70:
-            return "90EE90"  # Vert clair - À considérer
+            return "FFFF00"  # Jaune - À considérer
         elif s >= 60:
             return "FFA500"  # Orange - Faible
         else:
@@ -3379,11 +3379,13 @@ def get_recommandation_color(score, poste=None):
     else:
         # Ancien système sur 10 points
         if s >= 8:
-            return "00FF00"
+            return "00FF00"  # Vert
+        elif s >= 7:
+            return "FFFF00"  # Jaune
         elif s >= 6:
-            return "FFA500"
+            return "FFA500"  # Orange
         else:
-            return "FF0000"
+            return "FF0000"  # Rouge
 
 
 def calculate_ranking_score(c, poste):
