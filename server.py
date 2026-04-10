@@ -2385,6 +2385,42 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
     normalized = normalize_for_matching(raw_full)[0]
     
+    # ── Checklist + champs de compatibilité frontend ─────────────────────
+    grille_data = GRILLE.get(poste, {})
+    checklist = {}
+    flags_eliminatoires = []
+    signaux_detectes = []
+    criteres_valides_bloc2 = []
+    alertes_attention = []
+    points_bloc2 = 0
+    points_bloc3 = 0
+
+    for i, crit in enumerate(grille_data.get('eliminatoire', [])):
+        ok, conf, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+        checklist[f'elim_{i}'] = ok
+        if not ok:
+            flags_eliminatoires.append(f"❌ {crit} (confiance: {conf:.0%})")
+
+    for i, crit in enumerate(grille_data.get('a_verifier', [])):
+        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+        checklist[f'verif_{i}'] = ok
+        if ok:
+            points_bloc2 += 1
+            criteres_valides_bloc2.append(f"🟠 {crit}")
+
+    for i, crit in enumerate(grille_data.get('signaux_forts', [])):
+        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+        checklist[f'signal_{i}'] = ok
+        if ok:
+            points_bloc3 += 2
+            signaux_detectes.append(crit)
+
+    for i, crit in enumerate(grille_data.get('points_attention', [])):
+        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+        checklist[f'attn_{i}'] = ok
+        if ok:
+            alertes_attention.append(f"⚠️ Attention: {crit}")
+    
     # Initialisation des scores
     score_cv = {
         'CV_Exp': 0, 'CV_Niveau': 0, 'CV_Secteur': 0, 'CV_Tech': 0,
@@ -2655,6 +2691,10 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
     return {
         'score': score_total,
         'decision': decision,
+        # ── Champs checklist (Bugfix 1) ──────────────────────────────────
+        'checklist': checklist,
+        'flags_eliminatoires': flags_eliminatoires,
+        'signaux_detectes': signaux_detectes,
         'bloc_cv': {
             'total': score_cv_total,
             'max': 70,
@@ -2672,7 +2712,28 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
             'max': 10,
             'details': score_diplomes
         },
-        'details': details,
+        # ── Champs de compatibilité pour renderAnalyseResume() (Bugfix 2) ─
+        'compat': {
+            'bloc2_criteres_valides': len(criteres_valides_bloc2),
+            'bloc2_points': points_bloc2,
+            'bloc3_signaux_detectes': len(signaux_detectes),
+            'bloc3_points': points_bloc3,
+            'total_raw_points': points_bloc2 + points_bloc3,
+        },
+        'details': {
+            'cv_words': len(cv_text.split()),
+            'lettre_words': len((lettre_text or "").split()),
+            'attestation_words': len(all_att_raw.split()),
+            'criteres_valides_bloc2': criteres_valides_bloc2,
+            'signaux_valides_bloc3': [f"🟡 {s}" for s in signaux_detectes],
+            'alertes_attention': alertes_attention,
+            'matching_details': details.get('matching_details', {}),
+            'documents_analyses': {
+                'cv': len(cv_text) > 0,
+                'lettre': len(lettre_text or "") > 0,
+                'certificats': len(attestation_texts_list) if attestation_texts_list else 0
+            }
+        },
         'note': f"Score: {score_total}/100 — {decision}"
     }
 
@@ -2938,9 +2999,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             if detailed_result:
                 result = {
                     'score': detailed_result['score'],
-                    'checklist': {},
-                    'flags_eliminatoires': [],
-                    'signaux_detectes': [],
+                    'checklist': detailed_result['checklist'],
+                    'flags_eliminatoires': detailed_result['flags_eliminatoires'],
+                    'signaux_detectes': detailed_result['signaux_detectes'],
                     'details': detailed_result['details'],
                     'score_breakdown': {
                         'bloc1_eliminatoire': False,
@@ -2948,6 +3009,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         'bloc_cv': detailed_result['bloc_cv'],
                         'bloc_lm': detailed_result['bloc_lm'],
                         'bloc_diplomes': detailed_result['bloc_diplomes'],
+                        **detailed_result['compat'],
                         'score_final': detailed_result['score'],
                         'decision': detailed_result['decision'],
                         'note': detailed_result['note']
