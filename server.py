@@ -3480,11 +3480,21 @@ def generate_excel_report(candidats_data, poste_filter=None):
             c.fill = hfill
             ws.row_dimensions[1].height = 30
 
-            headers = [
-                'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
-                'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
-                'Qualité CV (0-1)', 'Lettre (0-1)', 'Score /10', 'Recommandation'
-            ]
+            # Déterminer si on utilise le nouveau système (100 points) ou l'ancien (10 points)
+            use_new_system = poste in POSTES_AVEC_SCORING_100
+            
+            if use_new_system:
+                headers = [
+                    'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
+                    'CV Exp. (0-25)', 'CV Niveau+Secteur (0-20)', 'CV Tech (0-25)',
+                    'CV Prog.+Stab. (0-10)', 'LM (0-20)', 'Score /100', 'Recommandation'
+                ]
+            else:
+                headers = [
+                    'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
+                    'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
+                    'Qualité CV (0-1)', 'Lettre (0-1)', 'Score /10', 'Recommandation'
+                ]
             for col, h in enumerate(headers, 1):
                 cell = ws.cell(row=3, column=col, value=h)
                 cell.font = hfont
@@ -3505,18 +3515,21 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     bloc_cv = sb.get('bloc_cv', {})
                     cv_details = bloc_cv.get('details', {})
                     
+                    # Mapping vers les colonnes Excel pour le nouveau système
+                    # CV Exp. (max ~25), CV Niveau+Secteur (max ~20), CV Tech (max ~25), CV Prog.+Stab. (max ~10)
                     adeq = cv_details.get('CV_Exp', 0) if not elim else 0
-                    cohe = cv_details.get('CV_Niveau', 0) + cv_details.get('CV_Secteur', 0) if not elim else 0
+                    cohe = (cv_details.get('CV_Niveau', 0) + cv_details.get('CV_Secteur', 0)) if not elim else 0
                     risq = cv_details.get('CV_Tech', 0) if not elim else 0
-                    qcv = cv_details.get('CV_Progression', 0) + cv_details.get('CV_Stabilite', 0) if not elim else 0
+                    qcv = (cv_details.get('CV_Progression', 0) + cv_details.get('CV_Stabilite', 0)) if not elim else 0
                     
                     # Récupérer le score LM (sur 20)
                     bloc_lm = sb.get('bloc_lm', {})
                     lm_details = bloc_lm.get('details', {})
-                    lm_score = lm_details.get('LM_Comprehension', 0) + lm_details.get('LM_Motivation', 0) if not elim else 0
+                    lm_score = sum(lm_details.values()) if not elim else 0
                     
                     # Score total sur 100
                     total = int(cand.get('score', 0)) if not elim else 0
+                    lm = lm_score  # Pour la colonne LM
                 else:
                     # Ancien système sur 10 points
                     elim = sb.get('bloc1_eliminatoire', False)
@@ -3535,7 +3548,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 row_data = [
                     rang, num_dos, cand.get('email', '') or '–', nom_c,
                     cand.get('telephone', '') or '–',
-                    round(adeq, 1), round(cohe, 1), round(risq, 1), round(qcv, 1), round(lm_score if poste_cand in POSTES_AVEC_SCORING_100 else lm, 1), total, reco
+                    round(adeq, 1), round(cohe, 1), round(risq, 1), round(qcv, 1), round(lm, 1), total, reco
                 ]
 
                 for col, val in enumerate(row_data, 1):
@@ -3555,7 +3568,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         else:  # Rouge - Rejet (<60)
                             cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
-            col_widths = [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
+            col_widths = [8, 20, 35, 35, 20, 18, 22, 18, 20, 18, 14, 25] if use_new_system else [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
             for col, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(col)].width = w
             for row in range(3, ws.max_row + 1):
