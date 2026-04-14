@@ -278,7 +278,7 @@ POSTES = [
     # ══════════════════════════════════════════════════════════════════════════
     "Auditeur interne",
     "Chef service contrôle des engagements",
-    "Chef service IT",
+    "Chef service IT (maintenance/support)",
     "Chef service finance",
     "Chef service risques de marché",
     "Chef service reporting réglementaire"
@@ -477,7 +477,7 @@ GRILLE = {
             "CV orienté relation client uniquement"
         ]
     },
-    "Chef service IT": {
+    "Chef service IT (maintenance/support)": {
         "eliminatoire": [
             "Background IT solide avec expérience technique réelle",
             "Minimum 5 ans en maintenance et support informatique",
@@ -623,7 +623,7 @@ SCORING_CONFIG = {
         "D_Specialisation": 3,
         "D_Certif": 3
     },
-    "Chef service IT": {
+    "Chef service IT (maintenance/support)": {
         "CV_Exp": 15,
         "CV_Niveau": 10,
         "CV_Secteur": 10,
@@ -693,7 +693,7 @@ SCORING_CONFIG = {
 POSTES_AVEC_SCORING_100 = [
     "Auditeur interne",
     "Chef service contrôle des engagements",
-    "Chef service IT",
+    "Chef service IT (maintenance/support)",
     "Chef service finance",
     "Chef service risques de marché",
     "Chef service reporting réglementaire"
@@ -2354,331 +2354,36 @@ DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
 def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, poste):
     """
-    Implémente exactement la formule Excel :
-      Score_bloc = SUMPRODUCT(notes_0_5, poids) / 5
-    Les notes 0–5 sont estimées par analyse automatique du texte.
+    Calcule le score détaillé sur 100 points selon les spécifications Excel.
+    Uniquement pour les 6 nouveaux postes avec SCORING_CONFIG.
+    
+    Bloc A: CV (70 points max)
+    - CV_Exp: Expérience pertinente
+    - CV_Niveau: Niveau d'expérience
+    - CV_Secteur: Expérience sectorielle
+    - CV_Tech: Compétences techniques
+    - CV_Progression: Évolution de carrière
+    - CV_Management: Capacité managériale
+    - CV_Stabilite: Stabilité
+    
+    Bloc B: Lettre de Motivation (20 points max)
+    - LM_Comprehension: Compréhension du poste
+    - LM_Coherence: Cohérence profil
+    - LM_Motivation: Motivation réelle
+    - LM_Qualite: Qualité rédactionnelle
+    
+    Bloc C: Diplômes & Certifications (10 points max)
+    - D_Niveau: Niveau académique (Bac+3/5)
+    - D_Specialisation: Spécialisation pertinente
+    - D_Certif: Certifications (ACCA, CPA, ITIL, etc.)
     """
     config = SCORING_CONFIG.get(poste)
-    if not config:
-        return None
-
-    all_att_raw = "\n".join(attestation_texts_list) if attestation_texts_list else ""
-    raw_full    = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
-    normalized  = normalize_for_matching(raw_full)[0]
-
-    grille_data = GRILLE.get(poste, {})
-
-    # ── Checklist (pour affichage frontend) ──────────────────────────────
-    checklist           = {}
-    flags_eliminatoires = []
-    signaux_detectes    = []
-    criteres_valides_b2 = []
-    alertes_attention   = []
-    pts_b2 = pts_b3 = 0
-
-    for i, crit in enumerate(grille_data.get('eliminatoire', [])):
-        ok, conf, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'elim_{i}'] = ok
-        if not ok:
-            flags_eliminatoires.append(f"❌ {crit} (confiance: {conf:.0%})")
-
-    for i, crit in enumerate(grille_data.get('a_verifier', [])):
-        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'verif_{i}'] = ok
-        if ok:
-            pts_b2 += 1
-            criteres_valides_b2.append(f"🟠 {crit}")
-
-    for i, crit in enumerate(grille_data.get('signaux_forts', [])):
-        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'signal_{i}'] = ok
-        if ok:
-            pts_b3 += 2
-            signaux_detectes.append(crit)
-
-    for i, crit in enumerate(grille_data.get('points_attention', [])):
-        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'attn_{i}'] = ok
-        if ok:
-            alertes_attention.append(f"⚠️ Attention: {crit}")
-
-    # ── HELPER : convertit un ratio 0.0–1.0 en note 0–5 ─────────────────
-    def to_note(ratio):
-        return round(max(0.0, min(5.0, ratio * 5)), 2)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # BLOC A — CV  (notes 0–5 par critère, puis SUMPRODUCT/5 → 0–70)
-    # ─────────────────────────────────────────────────────────────────────
-
-    # CV_Exp — alignement avec le poste (signaux forts + éliminatoires validés)
-    n_elim_ok  = sum(1 for k, v in checklist.items() if k.startswith('elim_')   and v)
-    n_elim_tot = max(1, len(grille_data.get('eliminatoire', [])))
-    n_sig_ok   = len(signaux_detectes)
-    n_sig_tot  = max(1, len(grille_data.get('signaux_forts', [])))
-    note_cv_exp = to_note(0.4 * n_elim_ok / n_elim_tot + 0.6 * n_sig_ok / n_sig_tot)
-
-    # CV_Niveau — années d'expérience détectées
-    years_found = 0
-    for pat in [r'(\d+)\s*(?:années?|ans|years?)',
-                r'(?:plus\s*de|over)\s*(\d+)\s*(?:années?|ans|years?)',
-                r'(?:minimum|au\s*moins)\s*(\d+)\s*(?:années?|ans|years?)']:
-        for m in re.findall(pat, raw_full, re.IGNORECASE):
-            try: years_found = max(years_found, int(m))
-            except: pass
-    note_cv_niveau = to_note(
-        0.0 if years_found < 2  else
-        0.2 if years_found < 3  else
-        0.4 if years_found < 5  else
-        0.6 if years_found < 8  else
-        0.8 if years_found < 12 else 1.0
-    )
-
-    # CV_Secteur — présence banque / finance
-    has_bank  = bool(COMMERCIAL_BANK_PATTERN.search(raw_full))
-    has_micro = bool(MICROFINANCE_PATTERN.search(raw_full))
-    fin_kws   = ['banque', 'bank', 'finance', 'financier', 'crédit', 'credit',
-                 'assurance', 'investment', 'asset management']
-    fin_count = sum(1 for kw in fin_kws if kw in raw_full.lower())
-    note_cv_secteur = to_note(
-        1.0 if has_bank and fin_count >= 3 else
-        0.7 if has_bank or fin_count >= 2 else
-        0.4 if has_micro or fin_count >= 1 else 0.1
-    )
-
-    # CV_Tech — compétences techniques (critères à vérifier + signaux)
-    n_tech_ok  = pts_b2 + n_sig_ok
-    n_tech_tot = max(1, len(grille_data.get('a_verifier', [])) + n_sig_tot)
-    note_cv_tech = to_note(n_tech_ok / n_tech_tot)
-
-    # CV_Progression — mots de progression dans le CV
-    prog_kws = ['promotion', 'évolution', 'avancement', 'senior', 'lead',
-                'manager', 'chef', 'responsable', 'head of', 'director',
-                'directeur', 'upgrade', 'progression']
-    prog_count = sum(1 for kw in prog_kws if kw in raw_full.lower())
-    note_cv_progression = to_note(
-        1.0 if prog_count >= 5 else
-        0.6 if prog_count >= 3 else
-        0.3 if prog_count >= 1 else 0.0
-    )
-
-    # CV_Management — management explicite (seulement si poids > 0)
-    poids_mgmt = config.get('CV_Management', 0)
-    if poids_mgmt > 0:
-        mgmt_kws = ['management', 'encadrement', 'équipe', 'team', 'supervision',
-                    'collaborateurs', 'direct reports', 'gérer', 'managing',
-                    'staff', 'personnel', 'responsable']
-        mgmt_count = sum(1 for kw in mgmt_kws if kw in raw_full.lower())
-        note_cv_management = to_note(
-            1.0 if mgmt_count >= 5 else
-            0.6 if mgmt_count >= 3 else
-            0.3 if mgmt_count >= 1 else 0.0
-        )
-    else:
-        note_cv_management = 0.0
-
-    # CV_Stabilite — peu d'expériences très courtes
-    short_matches = re.findall(
-        r'(?:\d{1,2}\s*(?:mois|months?))|(?:<\s*1\s*(?:an|year))', raw_full, re.IGNORECASE
-    )
-    note_cv_stabilite = to_note(
-        1.0 if len(short_matches) <= 1 else
-        0.6 if len(short_matches) <= 3 else 0.3
-    )
-
-    # ── Calcul Score CV : SUMPRODUCT(notes, poids) / 5 ──────────────────
-    notes_cv = [note_cv_exp, note_cv_niveau, note_cv_secteur, note_cv_tech,
-                note_cv_progression, note_cv_management, note_cv_stabilite]
-    poids_cv = [
-        config['CV_Exp'], config['CV_Niveau'], config['CV_Secteur'],
-        config['CV_Tech'], config['CV_Progression'], config['CV_Management'],
-        config['CV_Stabilite']
-    ]
-    score_cv_raw   = sum(n * p for n, p in zip(notes_cv, poids_cv))
-    score_cv_total = round(score_cv_raw / 5)
-
-    details_cv = {
-        'CV_Exp':         round(note_cv_exp * poids_cv[0] / 5, 1),
-        'CV_Niveau':      round(note_cv_niveau * poids_cv[1] / 5, 1),
-        'CV_Secteur':     round(note_cv_secteur * poids_cv[2] / 5, 1),
-        'CV_Tech':        round(note_cv_tech * poids_cv[3] / 5, 1),
-        'CV_Progression': round(note_cv_progression * poids_cv[4] / 5, 1),
-        'CV_Management':  round(note_cv_management * poids_cv[5] / 5, 1),
-        'CV_Stabilite':   round(note_cv_stabilite * poids_cv[6] / 5, 1),
-    }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # BLOC B — Lettre de motivation (notes 0–5, poids tous = 5, /5 → 0–20)
-    # ─────────────────────────────────────────────────────────────────────
-    lm_text = (lettre_text or "").strip()
-
-    if lm_text and len(lm_text) > 100:
-        lm_lower  = lm_text.lower()
-        word_count = len(lm_text.split())
-
-        poste_kws = [kw for kw in poste.lower().split() if len(kw) > 3]
-        comprehension_hits = sum(1 for kw in poste_kws if kw in lm_lower)
-        note_lm_comprehension = to_note(min(1.0, comprehension_hits / max(1, len(poste_kws))))
-
-        coher_inds = ['mon profil', 'ma formation', 'mon expérience', 'mes compétences',
-                      'my background', 'my experience', 'parcours', 'carrière']
-        note_lm_coherence = to_note(min(1.0, sum(1 for i in coher_inds if i in lm_lower) / 3))
-
-        motiv_kws = ['motivé', 'passionné', 'intérêt', 'souhaite', 'désire',
-                     'motivated', 'passionate', 'eager', 'rejoindre', 'contribuer']
-        note_lm_motivation = to_note(min(1.0, sum(1 for k in motiv_kws if k in lm_lower) / 3))
-
-        note_lm_qualite = to_note(
-            1.0 if word_count >= 200 else
-            0.8 if word_count >= 150 else
-            0.6 if word_count >= 100 else
-            0.4 if word_count >= 50  else 0.2
-        )
-    else:
-        note_lm_comprehension = note_lm_coherence = note_lm_motivation = note_lm_qualite = 0.0
-
-    notes_lm = [note_lm_comprehension, note_lm_coherence, note_lm_motivation, note_lm_qualite]
-    poids_lm = [config['LM_Comprehension'], config['LM_Coherence'],
-                config['LM_Motivation'],    config['LM_Qualite']]
-    score_lm_total = round(sum(n * p for n, p in zip(notes_lm, poids_lm)) / 5)
-
-    details_lm = {
-        'LM_Comprehension': round(note_lm_comprehension * poids_lm[0] / 5, 1),
-        'LM_Coherence':     round(note_lm_coherence     * poids_lm[1] / 5, 1),
-        'LM_Motivation':    round(note_lm_motivation     * poids_lm[2] / 5, 1),
-        'LM_Qualite':       round(note_lm_qualite        * poids_lm[3] / 5, 1),
-    }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # BLOC C — Diplômes (notes 0–5, poids 4+3+3, /5 → 0–10)
-    # ─────────────────────────────────────────────────────────────────────
-    bac5_pats = [r'bac\+?\s*5', r'master', r'mba', r'dea', r'ingénieur',
-                 r'postgraduate', r'maîtrise']
-    bac3_pats = [r'bac\+?\s*3', r'licence', r'bachelor', r'level\s*6']
-    has_bac5  = any(re.search(p, raw_full, re.IGNORECASE) for p in bac5_pats)
-    has_bac3  = any(re.search(p, raw_full, re.IGNORECASE) for p in bac3_pats)
-    note_d_niveau = to_note(1.0 if has_bac5 else 0.5 if has_bac3 else 0.2)
-
-    spec_kws = ['finance', 'comptabilité', 'audit', 'risque', 'risk', 'management',
-                'informatique', 'it', 'computer', 'reporting', 'réglementaire']
-    spec_count = sum(1 for kw in spec_kws if kw in raw_full.lower())
-    note_d_spec = to_note(min(1.0, spec_count / 4))
-
-    certifs = ['acca', 'cpa', 'cfa', 'frm', 'prince2', 'itil', 'pmp', 'cia', 'cisa',
-               'microsoft', 'cisco', 'aws', 'azure', 'cobac']
-    certif_count = sum(1 for c in certifs if c in raw_full.lower())
-    note_d_certif = to_note(min(1.0, certif_count / 2))
-
-    notes_dip = [note_d_niveau, note_d_spec, note_d_certif]
-    poids_dip = [config['D_Niveau'], config['D_Specialisation'], config['D_Certif']]
-    score_dip_total = round(sum(n * p for n, p in zip(notes_dip, poids_dip)) / 5)
-
-    details_dip = {
-        'D_Niveau':         round(note_d_niveau * poids_dip[0] / 5, 1),
-        'D_Specialisation': round(note_d_spec   * poids_dip[1] / 5, 1),
-        'D_Certif':         round(note_d_certif * poids_dip[2] / 5, 1),
-    }
-
-    # ─────────────────────────────────────────────────────────────────────
-    # SCORE TOTAL & DÉCISION
-    # ─────────────────────────────────────────────────────────────────────
-    score_total = min(100, score_cv_total + score_lm_total + score_dip_total)
-
-    decision = (
-        "Shortlist"    if score_total >= 80 else
-        "À considérer" if score_total >= 70 else
-        "Faible"       if score_total >= 60 else
-        "Rejet"
-    )
-
-    return {
-        'score':   score_total,
-        'decision': decision,
-        'checklist':           checklist,
-        'flags_eliminatoires': flags_eliminatoires,
-        'signaux_detectes':    signaux_detectes,
-        'bloc_cv': {
-            'total': score_cv_total, 'max': 70,
-            'details': details_cv,
-            'notes_0_5': dict(zip(
-                ['CV_Exp','CV_Niveau','CV_Secteur','CV_Tech',
-                 'CV_Progression','CV_Management','CV_Stabilite'],
-                [round(n, 2) for n in notes_cv]
-            ))
-        },
-        'bloc_lm': {
-            'total': score_lm_total, 'max': 20,
-            'details': details_lm,
-        },
-        'bloc_diplomes': {
-            'total': score_dip_total, 'max': 10,
-            'details': details_dip,
-        },
-        'compat': {
-            'bloc2_criteres_valides': len(criteres_valides_b2),
-            'bloc2_points':           pts_b2,
-            'bloc3_signaux_detectes': len(signaux_detectes),
-            'bloc3_points':           pts_b3,
-            'total_raw_points':       pts_b2 + pts_b3,
-        },
-        'details': {
-            'cv_words':        len(cv_text.split()),
-            'lettre_words':    len((lettre_text or "").split()),
-            'criteres_valides_bloc2': criteres_valides_b2,
-            'signaux_valides_bloc3':  [f"🟡 {s}" for s in signaux_detectes],
-            'alertes_attention': alertes_attention,
-            'documents_analyses': {
-                'cv':          len(cv_text) > 0,
-                'lettre':      len(lettre_text or "") > 0,
-                'certificats': len(attestation_texts_list) if attestation_texts_list else 0
-            }
-        },
-        'note': f"Score: {score_total}/100 — {decision}"
-    }
-
-
-def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not config:
         return None  # Pas un poste avec scoring 100
     
     all_att_raw = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
     normalized = normalize_for_matching(raw_full)[0]
-    
-    # ── Checklist + champs de compatibilité frontend ─────────────────────
-    grille_data = GRILLE.get(poste, {})
-    checklist = {}
-    flags_eliminatoires = []
-    signaux_detectes = []
-    criteres_valides_bloc2 = []
-    alertes_attention = []
-    points_bloc2 = 0
-    points_bloc3 = 0
-
-    for i, crit in enumerate(grille_data.get('eliminatoire', [])):
-        ok, conf, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'elim_{i}'] = ok
-        if not ok:
-            flags_eliminatoires.append(f"❌ {crit} (confiance: {conf:.0%})")
-
-    for i, crit in enumerate(grille_data.get('a_verifier', [])):
-        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'verif_{i}'] = ok
-        if ok:
-            points_bloc2 += 1
-            criteres_valides_bloc2.append(f"🟠 {crit}")
-
-    for i, crit in enumerate(grille_data.get('signaux_forts', [])):
-        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'signal_{i}'] = ok
-        if ok:
-            points_bloc3 += 2
-            signaux_detectes.append(crit)
-
-    for i, crit in enumerate(grille_data.get('points_attention', [])):
-        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
-        checklist[f'attn_{i}'] = ok
-        if ok:
-            alertes_attention.append(f"⚠️ Attention: {crit}")
     
     # Initialisation des scores
     score_cv = {
@@ -2950,10 +2655,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     return {
         'score': score_total,
         'decision': decision,
-        # ── Champs checklist (Bugfix 1) ──────────────────────────────────
-        'checklist': checklist,
-        'flags_eliminatoires': flags_eliminatoires,
-        'signaux_detectes': signaux_detectes,
         'bloc_cv': {
             'total': score_cv_total,
             'max': 70,
@@ -2971,44 +2672,22 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             'max': 10,
             'details': score_diplomes
         },
-        # ── Champs de compatibilité pour renderAnalyseResume() (Bugfix 2) ─
-        'compat': {
-            'bloc2_criteres_valides': len(criteres_valides_bloc2),
-            'bloc2_points': points_bloc2,
-            'bloc3_signaux_detectes': len(signaux_detectes),
-            'bloc3_points': points_bloc3,
-            'total_raw_points': points_bloc2 + points_bloc3,
-        },
-        'details': {
-            'cv_words': len(cv_text.split()),
-            'lettre_words': len((lettre_text or "").split()),
-            'attestation_words': len(all_att_raw.split()),
-            'criteres_valides_bloc2': criteres_valides_bloc2,
-            'signaux_valides_bloc3': [f"🟡 {s}" for s in signaux_detectes],
-            'alertes_attention': alertes_attention,
-            'matching_details': details.get('matching_details', {}),
-            'documents_analyses': {
-                'cv': len(cv_text) > 0,
-                'lettre': len(lettre_text or "") > 0,
-                'certificats': len(attestation_texts_list) if attestation_texts_list else 0
-            }
-        },
+        'details': details,
         'note': f"Score: {score_total}/100 — {decision}"
     }
 
 
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
-    """Analyse détaillée avec grille complète (eliminatoire, a_verifier, signaux_forts)"""
-    
     if not cv_text or len(cv_text.strip()) < 50:
         return {
             'score': 0,
             'checklist': {},
-            'flags_eliminatoires': ['CV vide ou non analysable'],
+            'flags_eliminatoires': ['CV non analysable (trop court ou vide)'],
             'signaux_detectes': [],
-            'details': {},
+            'details': {'error': 'CV vide ou non parsé'},
             'score_breakdown': {
                 'bloc1_eliminatoire': True,
+                'score_final': 0,
                 'note': 'CV non analysable'
             }
         }
@@ -3259,9 +2938,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             if detailed_result:
                 result = {
                     'score': detailed_result['score'],
-                    'checklist': detailed_result['checklist'],
-                    'flags_eliminatoires': detailed_result['flags_eliminatoires'],
-                    'signaux_detectes': detailed_result['signaux_detectes'],
+                    'checklist': {},
+                    'flags_eliminatoires': [],
+                    'signaux_detectes': [],
                     'details': detailed_result['details'],
                     'score_breakdown': {
                         'bloc1_eliminatoire': False,
@@ -3269,7 +2948,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         'bloc_cv': detailed_result['bloc_cv'],
                         'bloc_lm': detailed_result['bloc_lm'],
                         'bloc_diplomes': detailed_result['bloc_diplomes'],
-                        **detailed_result['compat'],
                         'score_final': detailed_result['score'],
                         'decision': detailed_result['decision'],
                         'note': detailed_result['note']
@@ -3369,9 +3047,9 @@ def get_recommandation_color(score, poste=None):
     if poste and poste in POSTES_AVEC_SCORING_100:
         # Scoring sur 100 points
         if s >= 80:
-            return "00FF00"  # Vert - Shortlist prioritaire
+            return "00FF00"  # Vert - Shortlist
         elif s >= 70:
-            return "FFFF00"  # Jaune - À considérer
+            return "90EE90"  # Vert clair - À considérer
         elif s >= 60:
             return "FFA500"  # Orange - Faible
         else:
@@ -3379,13 +3057,11 @@ def get_recommandation_color(score, poste=None):
     else:
         # Ancien système sur 10 points
         if s >= 8:
-            return "00FF00"  # Vert
-        elif s >= 7:
-            return "FFFF00"  # Jaune
+            return "00FF00"
         elif s >= 6:
-            return "FFA500"  # Orange
+            return "FFA500"
         else:
-            return "FF0000"  # Rouge
+            return "FF0000"
 
 
 def calculate_ranking_score(c, poste):
@@ -3480,21 +3156,11 @@ def generate_excel_report(candidats_data, poste_filter=None):
             c.fill = hfill
             ws.row_dimensions[1].height = 30
 
-            # Déterminer si on utilise le nouveau système (100 points) ou l'ancien (10 points)
-            use_new_system = poste in POSTES_AVEC_SCORING_100
-            
-            if use_new_system:
-                headers = [
-                    'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
-                    'CV Exp. (0-25)', 'CV Niveau+Secteur (0-20)', 'CV Tech (0-25)',
-                    'CV Prog.+Stab. (0-10)', 'LM (0-20)', 'Score /100', 'Recommandation'
-                ]
-            else:
-                headers = [
-                    'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
-                    'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
-                    'Qualité CV (0-1)', 'Lettre (0-1)', 'Score /10', 'Recommandation'
-                ]
+            headers = [
+                'Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone',
+                'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)',
+                'Qualité CV (0-1)', 'Lettre (0-1)', 'Score /10', 'Recommandation'
+            ]
             for col, h in enumerate(headers, 1):
                 cell = ws.cell(row=3, column=col, value=h)
                 cell.font = hfont
@@ -3504,51 +3170,22 @@ def generate_excel_report(candidats_data, poste_filter=None):
 
             for row_i, cand in enumerate(candidats_poste, 4):
                 sb = cand.get('score_breakdown_parsed', {})
-                poste_cand = cand.get('poste', '')
-                
-                # Vérifier si le poste utilise le scoring sur 100 points
-                if poste_cand in POSTES_AVEC_SCORING_100:
-                    # Nouveau système : scoring sur 100 points avec détails des blocs
-                    elim = sb.get('bloc1_eliminatoire', False)
-                    
-                    # Récupérer les scores détaillés du bloc CV (sur 70)
-                    bloc_cv = sb.get('bloc_cv', {})
-                    cv_details = bloc_cv.get('details', {})
-                    
-                    # Mapping vers les colonnes Excel pour le nouveau système
-                    # CV Exp. (max ~25), CV Niveau+Secteur (max ~20), CV Tech (max ~25), CV Prog.+Stab. (max ~10)
-                    adeq = cv_details.get('CV_Exp', 0) if not elim else 0
-                    cohe = (cv_details.get('CV_Niveau', 0) + cv_details.get('CV_Secteur', 0)) if not elim else 0
-                    risq = cv_details.get('CV_Tech', 0) if not elim else 0
-                    qcv = (cv_details.get('CV_Progression', 0) + cv_details.get('CV_Stabilite', 0)) if not elim else 0
-                    
-                    # Récupérer le score LM (sur 20)
-                    bloc_lm = sb.get('bloc_lm', {})
-                    lm_details = bloc_lm.get('details', {})
-                    lm_score = sum(lm_details.values()) if not elim else 0
-                    
-                    # Score total sur 100
-                    total = int(cand.get('score', 0)) if not elim else 0
-                    lm = lm_score  # Pour la colonne LM
-                else:
-                    # Ancien système sur 10 points
-                    elim = sb.get('bloc1_eliminatoire', False)
-                    adeq = sb.get('adequation_experience', 0) if not elim else 0
-                    cohe = sb.get('coherence_parcours', 0) if not elim else 0
-                    risq = sb.get('exposition_risque_metier', 0) if not elim else 0
-                    qcv = sb.get('qualite_cv', 0) if not elim else 0
-                    lm = sb.get('lettre_motivation', 0) if not elim else 0
-                    total = adeq + cohe + risq + qcv + lm
-                
+                elim = sb.get('bloc1_eliminatoire', False)
+                adeq = sb.get('adequation_experience', 0) if not elim else 0
+                cohe = sb.get('coherence_parcours', 0) if not elim else 0
+                risq = sb.get('exposition_risque_metier', 0) if not elim else 0
+                qcv = sb.get('qualite_cv', 0) if not elim else 0
+                lm = sb.get('lettre_motivation', 0) if not elim else 0
+                total = adeq + cohe + risq + qcv + lm
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_c = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip()
-                reco = cand.get('ranking_recommendation', get_recommandation_from_score(total, poste_cand))
+                reco = cand.get('ranking_recommendation', get_recommandation_from_score(total))
                 num_dos = cand.get('numero_dossier', '') or '–'
 
                 row_data = [
                     rang, num_dos, cand.get('email', '') or '–', nom_c,
                     cand.get('telephone', '') or '–',
-                    round(adeq, 1), round(cohe, 1), round(risq, 1), round(qcv, 1), round(lm, 1), total, reco
+                    adeq, cohe, risq, qcv, lm, total, reco
                 ]
 
                 for col, val in enumerate(row_data, 1):
@@ -3556,19 +3193,17 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     cell.border = border
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-                    if col == 12:  # Colonne Recommandation
-                        rec_color = get_recommandation_color(total, poste_cand)
+                    if col == 12:
+                        rec_color = get_recommandation_color(total)
                         cell.font = Font(bold=True, color="000000")
-                        if rec_color == "00FF00":  # Vert - Shortlist prioritaire (≥80)
+                        if rec_color == "00FF00":
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-                        elif rec_color == "FFFF00":  # Jaune - À considérer (70-79)
+                        elif rec_color == "FFA500":
                             cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-                        elif rec_color == "FFA500":  # Orange - Faible (60-69)
-                            cell.fill = PatternFill(start_color="FFCC99", end_color="FFCC99", fill_type="solid")
-                        else:  # Rouge - Rejet (<60)
+                        else:
                             cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
 
-            col_widths = [8, 20, 35, 35, 20, 18, 22, 18, 20, 18, 14, 25] if use_new_system else [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
+            col_widths = [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
             for col, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(col)].width = w
             for row in range(3, ws.max_row + 1):
@@ -3682,12 +3317,11 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                            spaceAfter=10, alignment=TA_LEFT)
         ))
 
-        data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /100', 'Recommandation']]
+        data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', 'Score /10', 'Recommandation']]
         for idx, c in enumerate(candidats_poste, 1):
-            poste_cand = c.get('poste', '')
             score = int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
-            reco = get_recommandation_from_score(score, poste_cand)
+            reco = get_recommandation_from_score(score)
             data.append([
                 str(idx),
                 num_dos,
@@ -3695,7 +3329,7 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 f"{c.get('prenom', '')} {c.get('nom', '')}",
                 c.get('telephone', '') or '–',
                 poste,
-                str(score) if poste_cand in POSTES_AVEC_SCORING_100 else f"{score}/10",
+                f"{score}/10",
                 reco
             ])
 
@@ -3712,27 +3346,12 @@ def generate_pdf_report(candidats_data, poste_filter=None):
 
         for row_idx in range(1, len(data)):
             score = int(candidats_poste[row_idx-1].get('score', 0)) if row_idx <= len(candidats_poste) else 0
-            poste_cand = candidats_poste[row_idx-1].get('poste', '') if row_idx <= len(candidats_poste) else ''
-            
-            # Utiliser les seuils appropriés selon le type de scoring
-            if poste_cand in POSTES_AVEC_SCORING_100:
-                # Scoring sur 100 points : seuils 80/70/60
-                if score >= 80:
-                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
-                elif score >= 70:
-                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.9, 0.95, 0.9)))
-                elif score >= 60:
-                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
-                else:
-                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
+            if score >= 8:
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
+            elif score >= 6:
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
             else:
-                # Ancien scoring sur 10 points : seuils 8/6
-                if score >= 8:
-                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
-                elif score >= 6:
-                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
-                else:
-                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
+                tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
 
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
@@ -4128,16 +3747,11 @@ def postuler():
         nom_complet = f"{prenom} {nom}".strip()
         sujet_confirmation = f"Confirmation de candidature – {poste}"
         corps_confirmation = (
-            f"Madame, Monsieur {nom_complet},\n\n"
-            f"Nous vous remercions d'avoir soumis votre candidature pour le poste de {poste} au sein de RecrutBank.\n\n"
-            f"Nous vous confirmons que votre dossier a été soumis avec succès et est actuellement en cours d'analyse par notre équipe.\n\n"
-            f"Votre numéro de dossier est : {numero_dossier}\n\n"
-            f"Vous serez informé(e) du résultat de l'étude de votre candidature dans les meilleurs délais. Nous vous prions de bien vouloir rester en attente.\n\n"
-            f"Pour toute question ou pour consulter l'état d'avancement de votre candidature, vous pouvez utiliser votre lien de suivi personnalisé.\n\n"
-            f"Nous vous remercions de l'intérêt que vous portez à notre institution.\n\n"
-            f"Cordialement,\n"
-            f"L'équipe Ressources Humaines\n"
-            f"RecrutBank"
+            f"Bonjour {nom_complet},\n\n"
+            f"Nous accusons réception de votre candidature.\n"
+            f"Sans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\n\n"
+            f"Pour toute information : contact@cdotchad.com.\n\n"
+            f"Cordialement,"
         )
         
         # Envoi de l'email en arrière-plan pour ne pas bloquer la réponse
