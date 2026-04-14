@@ -3747,16 +3747,11 @@ def postuler():
         nom_complet = f"{prenom} {nom}".strip()
         sujet_confirmation = f"Confirmation de candidature – {poste}"
         corps_confirmation = (
-            f"Madame, Monsieur {nom_complet},\n\n"
-            f"Nous vous remercions d'avoir soumis votre candidature pour le poste de {poste} au sein de RecrutBank.\n\n"
-            f"Nous vous confirmons que votre dossier a été soumis avec succès et est actuellement en cours d'analyse par notre équipe.\n\n"
-            f"Votre numéro de dossier est : {numero_dossier}\n\n"
-            f"Vous serez informé(e) du résultat de l'étude de votre candidature dans les meilleurs délais. Nous vous prions de bien vouloir rester en attente.\n\n"
-            f"Pour toute question ou pour consulter l'état d'avancement de votre candidature, vous pouvez utiliser votre lien de suivi personnalisé.\n\n"
-            f"Nous vous remercions de l'intérêt que vous portez à notre institution.\n\n"
-            f"Cordialement,\n"
-            f"L'équipe Ressources Humaines\n"
-            f"RecrutBank"
+            f"Bonjour {nom_complet},\n\n"
+            f"Nous accusons réception de votre candidature.\n"
+            f"Sans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\n\n"
+            f"Pour toute information : contact@cdotchad.com.\n\n"
+            f"Cordialement,"
         )
         
         # Envoi de l'email en arrière-plan pour ne pas bloquer la réponse
