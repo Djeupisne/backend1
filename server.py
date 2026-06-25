@@ -8,66 +8,66 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from werkzeug.utils import secure_filename
 try:
-from dotenv import load_dotenv
-load_dotenv()
+    from dotenv import load_dotenv
+    load_dotenv()
 except ImportError:
-pass
+    pass
 try:
-import pdfplumber
-PDFPLUMBER_AVAILABLE = True
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
 except ImportError:
-PDFPLUMBER_AVAILABLE = False
+    PDFPLUMBER_AVAILABLE = False
 try:
-import PyPDF2
-PYPDF2_AVAILABLE = True
+    import PyPDF2
+    PYPDF2_AVAILABLE = True
 except ImportError:
-PYPDF2_AVAILABLE = False
+    PYPDF2_AVAILABLE = False
 try:
-from docx import Document
-DOCX_AVAILABLE = True
+    from docx import Document
+    DOCX_AVAILABLE = True
 except ImportError:
-DOCX_AVAILABLE = False
+    DOCX_AVAILABLE = False
 try:
-import chardet
-CHARDET_AVAILABLE = True
+    import chardet
+    CHARDET_AVAILABLE = True
 except ImportError:
-CHARDET_AVAILABLE = False
+    CHARDET_AVAILABLE = False
 try:
-from langdetect import detect, DetectorFactory
-DetectorFactory.seed = 0
-LANGDETECT_AVAILABLE = True
+    from langdetect import detect, DetectorFactory
+    DetectorFactory.seed = 0
+    LANGDETECT_AVAILABLE = True
 except ImportError:
-LANGDETECT_AVAILABLE = False
+    LANGDETECT_AVAILABLE = False
 try:
-from rapidfuzz import fuzz
-RAPIDFUZZ_AVAILABLE = True
+    from rapidfuzz import fuzz
+    RAPIDFUZZ_AVAILABLE = True
 except ImportError:
-RAPIDFUZZ_AVAILABLE = False
+    RAPIDFUZZ_AVAILABLE = False
 try:
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-REPORTLAB_AVAILABLE = True
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    REPORTLAB_AVAILABLE = True
 except ImportError:
-REPORTLAB_AVAILABLE = False
+    REPORTLAB_AVAILABLE = False
 try:
-import openpyxl
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
-OPENPYXL_AVAILABLE = True
+    import openpyxl
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    OPENPYXL_AVAILABLE = True
 except ImportError:
-OPENPYXL_AVAILABLE = False
+    OPENPYXL_AVAILABLE = False
 try:
-from docx import Document as DocxDocument
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-DOCX_AVAILABLE = True
+    from docx import Document as DocxDocument
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    DOCX_AVAILABLE = True
 except ImportError:
-DOCX_AVAILABLE = False
+    DOCX_AVAILABLE = False
 app = Flask(__name__)
 import logging
 logging.basicConfig(level=logging.INFO)
