@@ -424,7 +424,7 @@ for row in table:
 if row:
 row_text = ' | '.join([str(cell).strip() if cell else '' for cell in row])
 if row_text.strip():
-text += normalize_spaces(content) + "\n"
+text += normalize_spaces(row_text) + "\n"
 content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
 if content:
 text += normalize_spaces(content) + "\n"
@@ -439,7 +439,7 @@ reader = PyPDF2.PdfReader(f)
 for page in reader.pages:
 content = page.extract_text()
 if content:
-text += quelque_chose + "\n"
+text += normalize_spaces(content) + "\n"
 if text.strip():
 return normalize_unicode(text.strip())
 except Exception as e:
@@ -478,8 +478,7 @@ for cell in row.cells:
 ct = normalize_spaces(cell.text)
 if ct: cells.append(ct)
 if cells: parts.append(" | ".join(cells))
-result = "
-".join(parts).strip()
+result = "\n".join(parts).strip()
 return normalize_unicode(result)
 except Exception as e2:
 print(f"⚠️ Fallback DOCX échoué: {e2}")
@@ -542,8 +541,7 @@ return 'non_financial'
 return 'unknown'
 def check_current_employment_financial(cv_text):
 current_patterns = [
-r'(?:depuis|from|since|à nos jours|a nos jours|nos jours|to present|current|actuel)\s*[:\-]?\s*([^
-]+)',
+r'(?:depuis|from|since|à nos jours|a nos jours|nos jours|to present|current|actuel)\s*[:\-]?\s*([^\n]+)',
 r'(\d{4})\s*[-–]\s*(?:présent|present|now|actuel|nos jours|a nos jours|aujourd\'hui)',
 r'(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s*\d{4}\s*[-–]\s*(?:présent|present|now|actuel|nos jours|a nos jours|aujourd\'hui)'
 ]
@@ -745,8 +743,7 @@ FRENCH_MONTHS = {
 }
 def split_into_jobs(raw_text):
 separators = re.compile(
-r'(?:^|
-)(?=\s*(?:'
+r'(?:^|\n)(?=\s*(?:'
 r'(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|'
 r'jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*'
 r'(?:20\d{2}|19\d{2})|'
@@ -1158,11 +1155,8 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
 config = SCORING_CONFIG.get(poste)
 if not config:
 return None
-all_att_raw = "
-".join(attestation_texts_list) if attestation_texts_list else ""
-raw_full = cv_text + "
-" + (lettre_text or "") + "
-" + all_att_raw
+all_att_raw = "\n".join(attestation_texts_list) if attestation_texts_list else ""
+raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
 normalized = normalize_for_matching(raw_full)[0]
 score_cv = {'CV_Exp': 0, 'CV_Niveau': 0, 'CV_Secteur': 0, 'CV_Tech': 0, 'CV_Progression': 0, 'CV_Management': 0, 'CV_Stabilite': 0}
 score_lm = {'LM_Comprehension': 0, 'LM_Coherence': 0, 'LM_Motivation': 0, 'LM_Qualite': 0}
@@ -1358,12 +1352,9 @@ return {
 'details': {},
 'score_breakdown': {}
 }
-all_att_raw  = "
-".join(attestation_texts_list) if attestation_texts_list else ""
-raw_full     = cv_text + "
-" + (lettre_text or "") + "
-" + all_att_raw
-normalized   = normalize_for_matching(raw_full)[0]
+all_att_raw = "\n".join(attestation_texts_list) if attestation_texts_list else ""
+raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att_raw
+normalized = normalize_for_matching(raw_full)[0]
 detected_lang = detect_language(cv_text[:500]) if cv_text else None
 print(f"🌐 Langue détectée: {detected_lang or 'indéterminée'} pour poste: {poste}")
 intelligent_flags = []
@@ -1378,21 +1369,16 @@ inst_valid, inst_reason = validate_financial_institution_for_market_risk(cv_text
 if not inst_valid:
 intelligent_flags.append(f"⚠️ {inst_reason}")
 if DEBUG_EXTRACTION:
-print(f"
-{'='*70}
-🔍 DEBUG: {poste}")
-print(f"📄 CV extrait ({len(cv_text)} chars):
-{cv_text[:1200]}")
-print(f"
-🎯 Critères éliminatoires:")
+print(f"\n{'='*70}\n🔍 DEBUG: {poste}")
+print(f"📄 CV extrait ({len(cv_text)} chars):\n{cv_text[:1200]}")
+print(f"\n🎯 Critères éliminatoires:")
 for crit in grille['eliminatoire']:
 ok, conf, found = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
 print(f"   {'✅' if ok else '❌'} {crit} (conf: {conf:.0%}) → {found}")
-print(f"{'='*70}
-")
-checklist    = {}
-flags_elim   = []
-signaux      = []
+print(f"{'='*70}\n")
+checklist = {}
+flags_elim = []
+signaux = []
 points_bloc2 = 0
 points_bloc3 = 0
 details = {
@@ -1400,13 +1386,13 @@ details = {
 'lettre_words': len((lettre_text or "").split()),
 'attestation_words': len(all_att_raw.split()),
 'detected_language': detected_lang,
-'criteres_valides_bloc2':  [],
-'signaux_valides_bloc3':   [],
-'alertes_attention':       intelligent_flags,
-'matching_details':        {},
+'criteres_valides_bloc2': [],
+'signaux_valides_bloc3': [],
+'alertes_attention': intelligent_flags,
+'matching_details': {},
 'documents_analyses': {
-'cv':          len(cv_text) > 0,
-'lettre':      len(lettre_text or "") > 0,
+'cv': len(cv_text) > 0,
+'lettre': len(lettre_text or "") > 0,
 'certificats': len(attestation_texts_list) if attestation_texts_list else 0
 }
 }
@@ -1561,12 +1547,12 @@ return {
 'documents_analyses': details['documents_analyses']
 }
 }
-adequation    = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
-coherence     = min(2, points_bloc2)
+adequation = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
+coherence = min(2, points_bloc2)
 risque_metier = min(3, len(signaux))
-qualite_cv    = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
-lettre_motiv  = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
-score_final   = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
+qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
+lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
+score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
 return {
 'score': score_final,
 'checklist': checklist,
@@ -1574,19 +1560,19 @@ return {
 'signaux_detectes': signaux,
 'details': details,
 'score_breakdown': {
-'bloc1_eliminatoire':       False,
+'bloc1_eliminatoire': False,
 'flags_eliminatoires_count': 0,
-'adequation_experience':    adequation,
-'coherence_parcours':       coherence,
+'adequation_experience': adequation,
+'coherence_parcours': coherence,
 'exposition_risque_metier': risque_metier,
-'qualite_cv':               qualite_cv,
-'lettre_motivation':        lettre_motiv,
-'bloc2_criteres_valides':   len(details['criteres_valides_bloc2']),
-'bloc2_points':             points_bloc2,
-'bloc3_signaux_detectes':   len(signaux),
-'bloc3_points':             points_bloc3,
-'total_raw_points':         points_bloc2 + points_bloc3,
-'score_final':              score_final,
+'qualite_cv': qualite_cv,
+'lettre_motivation': lettre_motiv,
+'bloc2_criteres_valides': len(details['criteres_valides_bloc2']),
+'bloc2_points': points_bloc2,
+'bloc3_signaux_detectes': len(signaux),
+'bloc3_points': points_bloc3,
+'total_raw_points': points_bloc2 + points_bloc3,
+'score_final': score_final,
 'note': f"Score Excel: {score_final}/10",
 'documents_analyses': details['documents_analyses']
 }
@@ -1601,10 +1587,10 @@ try:
 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
 except Exception:
 attestation_filenames = [attestation_filenames] if attestation_filenames else []
-cv_path  = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
-cv_text  = extract_text_robust(cv_path, cv_filename) if cv_path else ""
-lm_path  = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
-lm_text  = extract_text_robust(lm_path, lettre_filename) if lm_path else ""
+cv_path = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
+cv_text = extract_text_robust(cv_path, cv_filename) if cv_path else ""
+lm_path = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
+lm_text = extract_text_robust(lm_path, lettre_filename) if lm_path else ""
 att_texts = []
 for fn in (attestation_filenames or []):
 ap = os.path.join(UPLOAD_FOLDER, fn)
@@ -1614,8 +1600,7 @@ if t:
 att_texts.append(t)
 print(f"📄 Analyse {token}: CV={len(cv_text)}c, LM={len(lm_text)}c, Certs={len(att_texts)}f")
 if DEBUG_EXTRACTION and cv_text:
-print(f"🔍 TEXTE EXTRAIT CV ({token}):
-{cv_text[:1500]}")
+print(f"🔍 TEXTE EXTRAIT CV ({token}):\n{cv_text[:1500]}")
 if poste in POSTES_AVEC_SCORING_100:
 detailed_result = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
 if detailed_result:
@@ -1641,14 +1626,14 @@ result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
 else:
 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
 redis_client.hset(key, mapping={
-"score":               str(result['score']),
-"checklist":           json.dumps(result['checklist'],             ensure_ascii=False),
-"flags_eliminatoires": json.dumps(result['flags_eliminatoires'],   ensure_ascii=False),
-"signaux_detectes":    json.dumps(result['signaux_detectes'],      ensure_ascii=False),
-"analyse_details":     json.dumps(result['details'],               ensure_ascii=False),
-"score_breakdown":     json.dumps(result['score_breakdown'],       ensure_ascii=False),
-"analyse_auto_date":   datetime.datetime.now().isoformat(),
-"analyse_status":      "completed"
+"score": str(result['score']),
+"checklist": json.dumps(result['checklist'], ensure_ascii=False),
+"flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False),
+"signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False),
+"analyse_details": json.dumps(result['details'], ensure_ascii=False),
+"score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),
+"analyse_auto_date": datetime.datetime.now().isoformat(),
+"analyse_status": "completed"
 })
 if poste in POSTES_AVEC_SCORING_100:
 tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
@@ -1663,8 +1648,8 @@ except Exception as e:
 import traceback
 traceback.print_exc()
 redis_client.hset(f"candidat:{token}", mapping={
-"analyse_status":    "error",
-"analyse_error":     str(e),
+"analyse_status": "error",
+"analyse_error": str(e),
 "analyse_auto_date": datetime.datetime.now().isoformat()
 })
 def get_recommandation_from_score(score, poste=None):
@@ -1739,8 +1724,8 @@ return float(score)
 if poste == "Chef de Section Compensation":
 return float(score)
 signaux_count = len(c.get('signaux_detectes_parsed', []))
-criteres_ok   = sb.get('bloc2_criteres_valides', 0)
-lettre_bonus  = 0.1 if c.get('lettre_filename') else 0
+criteres_ok = sb.get('bloc2_criteres_valides', 0)
+lettre_bonus = 0.1 if c.get('lettre_filename') else 0
 try:
 days = (datetime.datetime.now() - datetime.datetime.fromisoformat(c.get('date_candidature', ''))).days
 date_bonus = max(0, (30 - min(days, 30)) * 0.01)
@@ -1750,7 +1735,7 @@ return round(score + signaux_count * 0.5 + criteres_ok * 0.2 + lettre_bonus + da
 def generate_ranking_for_poste(poste, candidats_data):
 pool = [c for c in candidats_data if c.get('poste') == poste]
 for c in pool:
-c['ranking_score']    = calculate_ranking_score(c, poste)
+c['ranking_score'] = calculate_ranking_score(c, poste)
 c['ranking_position'] = 0
 pool.sort(key=lambda x: (
 -x['ranking_score'],
@@ -1759,7 +1744,7 @@ pool.sort(key=lambda x: (
 x.get('date_candidature', '')
 ))
 for idx, c in enumerate(pool, 1):
-c['ranking_position']       = idx
+c['ranking_position'] = idx
 c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0), poste)
 return pool
 def generate_excel_report(candidats_data, poste_filter=None):
@@ -1781,8 +1766,8 @@ for poste in postes_to_export:
 candidats_poste = generate_ranking_for_poste(poste, [c for c in candidats_data if c.get('poste') == poste])
 sheet_name = poste[:28] if len(poste) > 31 else poste
 ws = wb.create_sheet(title=sheet_name)
-hfill  = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-hfont  = Font(color="000000", bold=True, size=11)
+hfill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+hfont = Font(color="000000", bold=True, size=11)
 border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 ws.merge_cells('A1:L1')
 c = ws['A1']
@@ -1973,14 +1958,10 @@ exclus = sum(1 for c in candidats_data if c.get('statut') == 'exclu')
 en_attente = sum(1 for c in candidats_data if c.get('statut') == 'en_attente')
 entretien = sum(1 for c in candidats_data if c.get('statut') == 'entretien')
 stats_text = (
-f"• Total des candidatures: {total}
-"
-f"• Candidats retenus: {retenus}
-"
-f"• Candidats exclus: {exclus}
-"
-f"• En attente: {en_attente}
-"
+f"• Total des candidatures: {total}\n"
+f"• Candidats retenus: {retenus}\n"
+f"• Candidats exclus: {exclus}\n"
+f"• En attente: {en_attente}\n"
 f"• En cours d'entretien: {entretien}"
 )
 doc.add_paragraph(stats_text)
@@ -2159,7 +2140,7 @@ data = request.get_json(silent=True)
 if not data:
 return jsonify({'error': 'JSON manquant'}), 400
 email = data.get('email', '').strip().lower()
-pwd   = hash_pwd(data.get('password', ''))
+pwd = hash_pwd(data.get('password', ''))
 for key in redis_client.keys("recruteur:*"):
 r = redis_client.hgetall(key)
 if r.get("email", "").lower() == email and r.get("password") == pwd:
@@ -2169,11 +2150,11 @@ return jsonify({'error': 'Identifiants incorrects'}), 401
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
 try:
-nom            = (request.form.get('nom')            or '').strip()
-prenom         = (request.form.get('prenom')         or '').strip()
-email          = (request.form.get('email')          or '').strip().lower()
-telephone      = (request.form.get('telephone')      or '').strip()
-poste          = (request.form.get('poste')          or '').strip()
+nom = (request.form.get('nom') or '').strip()
+prenom = (request.form.get('prenom') or '').strip()
+email = (request.form.get('email') or '').strip().lower()
+telephone = (request.form.get('telephone') or '').strip()
+poste = (request.form.get('poste') or '').strip()
 if not nom or not prenom or not email or poste not in POSTES:
 return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
 for k in redis_client.keys("candidat:*"):
@@ -2198,52 +2179,48 @@ def save_file(field, suffix):
 f = request.files.get(field)
 if f and f.filename and allowed_file(f.filename):
 ext = f.filename.rsplit('.', 1)[-1].lower()
-fn  = f"{uuid.uuid4().hex}_{suffix}.{ext}"
+fn = f"{uuid.uuid4().hex}_{suffix}.{ext}"
 f.save(os.path.join(UPLOAD_FOLDER, fn))
 return fn
 return ''
-cv_filename     = save_file('cv',     'cv')
+cv_filename = save_file('cv', 'cv')
 lettre_filename = save_file('lettre', 'lettre')
 att_filenames = []
 for f in request.files.getlist('attestation'):
 if f and f.filename and allowed_file(f.filename):
 ext = f.filename.rsplit('.', 1)[-1].lower()
-fn  = f"{uuid.uuid4().hex}_attestation.{ext}"
+fn = f"{uuid.uuid4().hex}_attestation.{ext}"
 f.save(os.path.join(UPLOAD_FOLDER, fn))
 att_filenames.append(fn)
 token = uuid.uuid4().hex
 redis_client.hset(f"candidat:{token}", mapping={
-"nom":                   nom,
-"prenom":                prenom,
-"email":                 email,
-"telephone":             telephone,
-"poste":                 poste,
-"numero_dossier":        numero_dossier,
-"cv_filename":           cv_filename,
-"lettre_filename":       lettre_filename,
+"nom": nom,
+"prenom": prenom,
+"email": email,
+"telephone": telephone,
+"poste": poste,
+"numero_dossier": numero_dossier,
+"cv_filename": cv_filename,
+"lettre_filename": lettre_filename,
 "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
-"statut":                "en_attente",
-"note":                  "",
-"score":                 "0",
-"checklist":             "",
-"flags_eliminatoires":   "",
-"signaux_detectes":      "",
-"score_breakdown":       "",
-"analyse_status":        "pending",
-"date_candidature":      datetime.datetime.now().isoformat()
+"statut": "en_attente",
+"note": "",
+"score": "0",
+"checklist": "",
+"flags_eliminatoires": "",
+"signaux_detectes": "",
+"score_breakdown": "",
+"analyse_status": "pending",
+"date_candidature": datetime.datetime.now().isoformat()
 })
 threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste), daemon=True).start()
 nom_complet = f"{prenom} {nom}".strip()
 sujet_confirmation = f"Confirmation de candidature – {poste}"
 corps_confirmation = (
-f"Bonjour {nom_complet},
-"
-f"Nous accusons réception de votre candidature.
-"
-f"Sans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.
-"
-f"Pour toute information : contact@cdotchad.com.
-"
+f"Bonjour {nom_complet},\n"
+f"Nous accusons réception de votre candidature.\n"
+f"Sans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\n"
+f"Pour toute information : contact@cdotchad.com.\n"
 f"Cordialement,"
 )
 threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
@@ -2262,7 +2239,7 @@ return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
-keys  = redis_client.keys("candidat:*")
+keys = redis_client.keys("candidat:*")
 stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0, "by_poste": []}
 counts = {}
 for k in keys:
@@ -2277,15 +2254,15 @@ return jsonify(stats), 200
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
-poste_filter  = request.args.get('poste',  '')
+poste_filter = request.args.get('poste', '')
 statut_filter = request.args.get('statut', '')
-search        = request.args.get('search', '').lower()
-min_score     = request.args.get('min_score', type=int)
+search = request.args.get('search', '').lower()
+min_score = request.args.get('min_score', type=int)
 result = []
 for k in redis_client.keys("candidat:*"):
 c = redis_client.hgetall(k)
 c['id'] = k.split(':', 1)[1]
-if poste_filter  and c.get('poste')  != poste_filter:  continue
+if poste_filter and c.get('poste') != poste_filter: continue
 if statut_filter and c.get('statut') != statut_filter: continue
 if min_score is not None and int(c.get('score', 0)) < min_score: continue
 if search:
@@ -2325,36 +2302,36 @@ def update_candidat(token):
 key = f"candidat:{token}"
 if not redis_client.exists(key):
 return jsonify({'error': 'Candidat introuvable'}), 404
-data   = request.get_json(silent=True) or {}
+data = request.get_json(silent=True) or {}
 statut = data.get('statut', 'en_attente')
-note   = data.get('note', '')
-score  = str(min(10, max(0, int(data.get('score', 0)))))
+note = data.get('note', '')
+score = str(min(10, max(0, int(data.get('score', 0)))))
 if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
 return jsonify({'error': 'Statut invalide'}), 400
 redis_client.hset(key, mapping={
-"statut":        statut,
-"note":          note,
-"score":         score,
+"statut": statut,
+"note": note,
+"score": score,
 "decision_date": datetime.datetime.now().isoformat(),
-"decided_by":    get_jwt_identity()
+"decided_by": get_jwt_identity()
 })
 return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
-key  = f"candidat:{token}"
+key = f"candidat:{token}"
 data = redis_client.hgetall(key)
 if not data:
 return jsonify({'error': 'Candidat introuvable'}), 404
-cv_fn   = data.get('cv_filename')
-lm_fn   = data.get('lettre_filename')
+cv_fn = data.get('cv_filename')
+lm_fn = data.get('lettre_filename')
 att_raw = data.get('attestation_filenames', '[]')
-poste   = data.get('poste')
+poste = data.get('poste')
 if not cv_fn:
 return jsonify({'error': 'CV manquant pour analyse'}), 400
 redis_client.hset(key, mapping={
-"analyse_status":          "pending",
-"analyse_manual_trigger":  datetime.datetime.now().isoformat()
+"analyse_status": "pending",
+"analyse_manual_trigger": datetime.datetime.now().isoformat()
 })
 threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste), daemon=True).start()
 return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
@@ -2419,43 +2396,33 @@ def email_preview(token):
 data = redis_client.hgetall(f"candidat:{token}")
 if not data:
 return jsonify({'error': 'Candidat introuvable'}), 404
-body     = request.get_json(silent=True) or {}
+body = request.get_json(silent=True) or {}
 msg_type = body.get('type', data.get('statut', 'en_attente'))
-nom_c    = f"{data.get('prenom', '')} {data.get('nom', '')}".strip()
-poste    = data.get('poste', '')
+nom_c = f"{data.get('prenom', '')} {data.get('nom', '')}".strip()
+poste = data.get('poste', '')
 to_email = data.get('email', '')
-sign     = "
-Cordialement,
-L'équipe Ressources Humaines
-RecrutBank"
+sign = "\nCordialement,\nL'équipe Ressources Humaines\nRecrutBank"
 if msg_type == 'retenu':
 sujet = f"Félicitations – Candidature retenue – {poste}"
-corps = (f"Madame, Monsieur {nom_c},
-"
+corps = (f"Madame, Monsieur {nom_c},\n"
 f"Nous avons le plaisir de vous informer que votre candidature pour le poste de {poste} "
-f"a été retenue à l'issue de notre processus de présélection.
-"
+f"a été retenue à l'issue de notre processus de présélection.\n"
 f"Nous vous contacterons très prochainement pour les modalités de la prochaine étape."
 + sign)
 elif msg_type == 'entretien':
 sujet = f"Invitation à un entretien – {poste}"
-corps = (f"Madame, Monsieur {nom_c},
-"
+corps = (f"Madame, Monsieur {nom_c},\n"
 f"Suite à l'examen de votre candidature pour le poste de {poste}, "
-f"nous avons le plaisir de vous inviter à un entretien avec notre équipe.
-"
+f"nous avons le plaisir de vous inviter à un entretien avec notre équipe.\n"
 f"Nous prendrons contact avec vous dans les meilleurs délais pour convenir d'une date."
 + sign)
 else:
 sujet = f"Réponse à votre candidature – {poste}"
-corps = (f"Madame, Monsieur {nom_c},
-"
+corps = (f"Madame, Monsieur {nom_c},\n"
 f"Nous vous remercions de l'intérêt que vous portez à notre institution et du temps "
-f"consacré à votre candidature pour le poste de {poste}.
-"
+f"consacré à votre candidature pour le poste de {poste}.\n"
 f"Après examen attentif de votre dossier, nous avons le regret de vous informer que "
-f"votre candidature n'a pas été retenue pour la suite du processus de sélection.
-"
+f"votre candidature n'a pas été retenue pour la suite du processus de sélection.\n"
 f"Nous vous encourageons à postuler à nouveau pour toute opportunité future."
 + sign)
 return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
@@ -2534,20 +2501,13 @@ print(f"⚠️ Fichier attestation non trouvé: {att_file} pour candidat {dossie
 except Exception as e:
 print(f"⚠️ Erreur parsing attestations: {e}")
 if not fichiers_a_inclure:
-info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}
-"
-info_content += f"Poste: {cand.get('poste', 'N/A')}
-"
-info_content += f"Numero dossier: {num_dossier}
-"
-info_content += f"Email: {cand.get('email', 'N/A')}
-"
-info_content += f"Telephone: {cand.get('telephone', 'N/A')}
-"
-info_content += f"Date candidature: {cand.get('date_candidature', 'N/A')}
-"
-info_content += f"
-Note: Les fichiers originaux ne sont plus disponibles sur le serveur."
+info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\n"
+info_content += f"Poste: {cand.get('poste', 'N/A')}\n"
+info_content += f"Numero dossier: {num_dossier}\n"
+info_content += f"Email: {cand.get('email', 'N/A')}\n"
+info_content += f"Telephone: {cand.get('telephone', 'N/A')}\n"
+info_content += f"Date candidature: {cand.get('date_candidature', 'N/A')}\n"
+info_content += f"\nNote: Les fichiers originaux ne sont plus disponibles sur le serveur."
 archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
 zip_file.writestr(archive_name, info_content.encode('utf-8'))
 files_added += 1
