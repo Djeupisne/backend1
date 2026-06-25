@@ -424,7 +424,7 @@ for row in table:
 if row:
 row_text = ' | '.join([str(cell).strip() if cell else '' for cell in row])
 if row_text.strip():
-text += normalize_spaces(row_text) + "
+text += normalize_spaces(row_text) + "\n"
 "
 content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
 if content:
