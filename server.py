@@ -80,29 +80,32 @@ CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
 logger.info("✅ CORS configuré")
 @app.after_request
 def after_request(response):
-logger.debug(f"📝 Requête {request.method} {request.path} - Status: {response.status_code}")
-response.headers.add('Access-Control-Allow-Origin', '*')
-response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
-response.headers.add('Access-Control-Max-Age', '600')
-if request.method == 'OPTIONS':
-response.status_code = 204
-logger.debug("✅ Requête OPTIONS traitée")
-return response
+    logger.debug(f"📝 Requête {request.method} {request.path} - Status: {response.status_code}")
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+    response.headers.add('Access-Control-Max-Age', '600')
+    if request.method == 'OPTIONS':
+        response.status_code = 204
+        logger.debug("✅ Requête OPTIONS traitée")
+    return response
+
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
-return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
+    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
+
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
+
 redis_client = redis.Redis(
-host=os.getenv("REDIS_HOST", "redis-11133.c8.us-east-1-4.ec2.cloud.redislabs.com"),
-port=int(os.getenv("REDIS_PORT", 11133)),
-username="default",
-password=os.getenv("REDIS_PASSWORD", "WKJdeilasGOWkXJWOHwqcRV7X5uWwQ"),
-decode_responses=True,
-socket_connect_timeout=5,
-socket_timeout=5
+    host=os.getenv("REDIS_HOST", "redis-11133.c8.us-east-1-4.ec2.cloud.redislabs.com"),
+    port=int(os.getenv("REDIS_PORT", 11133)),
+    username="default",
+    password=os.getenv("REDIS_PASSWORD", "WKJdeilasGOWkXJWOHwqcRV7X5uWwQ"),
+    decode_responses=True,
+    socket_connect_timeout=5,
+    socket_timeout=5
 )
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
