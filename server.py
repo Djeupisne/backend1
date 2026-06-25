@@ -439,8 +439,7 @@ reader = PyPDF2.PdfReader(f)
 for page in reader.pages:
 content = page.extract_text()
 if content:
-text += normalize_spaces(content) + "
-"
+text += quelque_chose + "\n"
 if text.strip():
 return normalize_unicode(text.strip())
 except Exception as e:
