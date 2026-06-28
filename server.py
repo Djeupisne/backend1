@@ -401,8 +401,8 @@ def extract_text_from_pdf_robust(file_bytes, filename):
                     content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
                     if content:
                         text += normalize_spaces(content) + "\n"
-            if text.strip() and len(text.strip()) > 100:
-                return normalize_unicode(text.strip())
+                if text.strip() and len(text.strip()) > 100:
+                    return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ pdfplumber erreur: {e}")
     if PYPDF2_AVAILABLE:
@@ -1163,7 +1163,7 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
     tech_signals = sum(1 for crit in grille.get('a_verifier', []) + grille.get('signaux_forts', []) if check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)[0])
     if total_tech > 0:
         score_cv['CV_Tech'] = round(max_tech * tech_signals / total_tech)
-    details['cv_scores']['CV_Tech'] = f"{score_cv['CV_Tech']}/{max_tech}"
+        details['cv_scores']['CV_Tech'] = f"{score_cv['CV_Tech']}/{max_tech}"
     for key, max_val, keywords in [('CV_Progression', config.get('CV_Progression', 5), ['promotion', 'évolution', 'senior', 'lead', 'manager', 'chef', 'responsable', 'head of', 'director']), ('CV_Management', config.get('CV_Management', 5), ['management', 'encadrement', 'équipe', 'team', 'supervision', 'collaborateurs'])]:
         count = sum(1 for kw in keywords if kw in raw_full.lower())
         if count >= 5: score_cv[key] = max_val
@@ -1711,52 +1711,51 @@ def postuler():
                         pass
             new_num = max_num + 1
             numero_dossier = str(new_num)
-            def save_file_to_supabase(field, suffix):
-    f = request.files.get(field)
-    if f and f.filename and allowed_file(f.filename):
-        ext = f.filename.rsplit('.', 1)[-1].lower()
-        blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
-        upload_file_to_supabase(f, blob_name, f.content_type)
-        return blob_name
-    return ''
-            cv_filename = save_file_to_supabase('cv', 'cv')
-            lettre_filename = save_file_to_supabase('lettre', 'lettre')
-            att_filenames = []
-            att_filenames = []
-for f in request.files.getlist('attestation'):
-    if f and f.filename and allowed_file(f.filename):
-        ext = f.filename.rsplit('.', 1)[-1].lower()
-        blob_name = f"{uuid.uuid4().hex}_attestation.{ext}"
-        upload_file_to_supabase(f, blob_name, f.content_type)
-        att_filenames.append(blob_name)
-            token = uuid.uuid4().hex
-            supabase.table('candidats').insert({
-                "token": token,
-                "nom": nom,
-                "prenom": prenom,
-                "email": email,
-                "telephone": telephone,
-                "poste": poste,
-                "numero_dossier": numero_dossier,
-                "cv_filename": cv_filename,
-                "lettre_filename": lettre_filename,
-                "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
-                "statut": "en_attente",
-                "note": "",
-                "score": "0",
-                "checklist": "",
-                "flags_eliminatoires": "",
-                "signaux_detectes": "",
-                "score_breakdown": "",
-                "analyse_status": "pending",
-                "date_candidature": datetime.datetime.now().isoformat()
-            }).execute()
-            threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste), daemon=True).start()
-            nom_complet = f"{prenom} {nom}".strip()
-            sujet_confirmation = f"Confirmation de candidature – {poste}"
-            corps_confirmation = f"Bonjour {nom_complet},\nNous accusons réception de votre candidature.\nSans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
-            threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
-            return jsonify({'message': 'Candidature soumise avec succès', 'token': token, 'numero_dossier': numero_dossier, 'analyse': 'Analyse automatique en cours'}), 201
+        def save_file_to_supabase(field, suffix):
+            f = request.files.get(field)
+            if f and f.filename and allowed_file(f.filename):
+                ext = f.filename.rsplit('.', 1)[-1].lower()
+                blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
+                upload_file_to_supabase(f, blob_name, f.content_type)
+                return blob_name
+            return ''
+        cv_filename = save_file_to_supabase('cv', 'cv')
+        lettre_filename = save_file_to_supabase('lettre', 'lettre')
+        att_filenames = []
+        for f in request.files.getlist('attestation'):
+            if f and f.filename and allowed_file(f.filename):
+                ext = f.filename.rsplit('.', 1)[-1].lower()
+                blob_name = f"{uuid.uuid4().hex}_attestation.{ext}"
+                upload_file_to_supabase(f, blob_name, f.content_type)
+                att_filenames.append(blob_name)
+        token = uuid.uuid4().hex
+        supabase.table('candidats').insert({
+            "token": token,
+            "nom": nom,
+            "prenom": prenom,
+            "email": email,
+            "telephone": telephone,
+            "poste": poste,
+            "numero_dossier": numero_dossier,
+            "cv_filename": cv_filename,
+            "lettre_filename": lettre_filename,
+            "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
+            "statut": "en_attente",
+            "note": "",
+            "score": "0",
+            "checklist": "",
+            "flags_eliminatoires": "",
+            "signaux_detectes": "",
+            "score_breakdown": "",
+            "analyse_status": "pending",
+            "date_candidature": datetime.datetime.now().isoformat()
+        }).execute()
+        threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste), daemon=True).start()
+        nom_complet = f"{prenom} {nom}".strip()
+        sujet_confirmation = f"Confirmation de candidature – {poste}"
+        corps_confirmation = f"Bonjour {nom_complet},\nNous accusons réception de votre candidature.\nSans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
+        threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
+        return jsonify({'message': 'Candidature soumise avec succès', 'token': token, 'numero_dossier': numero_dossier, 'analyse': 'Analyse automatique en cours'}), 201
     except Exception as e:
         import traceback
         traceback.print_exc()
