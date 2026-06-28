@@ -22,3 +22,4 @@ python-magic>=0.4.27
 requests==2.33.1
 python-dotenv>=1.0.0
 anthropic>=0.40.0
+firebase-admin>=6.4.0
