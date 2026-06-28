@@ -1,10 +1,9 @@
 from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time
+import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time
 from werkzeug.utils import secure_filename
-from firebase_admin import credentials, storage, initialize_app
-import firebase_admin
+from supabase import create_client, Client
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -133,15 +132,10 @@ def health_check():
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
-redis_client = redis.Redis(
-    host=os.getenv("REDIS_HOST", "redis-11133.c8.us-east-1-4.ec2.cloud.redislabs.com"),
-    port=int(os.getenv("REDIS_PORT", 11133)),
-    username="default",
-    password=os.getenv("REDIS_PASSWORD", "WKJdeilasGOWkXJWOHhqcRV7X5uWwQgF"),
-    decode_responses=True,
-    socket_connect_timeout=5,
-    socket_timeout=5
-)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
@@ -152,40 +146,34 @@ ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "firebase-credentials.json")
-FIREBASE_STORAGE_BUCKET = os.getenv("FIREBASE_STORAGE_BUCKET", "")
-if not firebase_admin._apps:
-    cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
-    if FIREBASE_STORAGE_BUCKET:
-        initialize_app(cred, {'storageBucket': FIREBASE_STORAGE_BUCKET})
-    else:
-        initialize_app(cred)
-def upload_file_to_firebase(file_obj, blob_name, content_type=None):
-    bucket = storage.bucket()
-    blob = bucket.blob(blob_name)
-    if content_type:
-        blob.upload_from_file(file_obj, content_type=content_type)
-    else:
-        blob.upload_from_file(file_obj)
-    return blob_name
-def download_file_from_firebase(blob_name):
-    bucket = storage.bucket()
-    blob = bucket.blob(blob_name)
-    if not blob.exists():
+def upload_file_to_supabase(file_obj, blob_name, content_type=None):
+    if not supabase:
         return None
-    data = blob.download_as_bytes()
-    return data
+    try:
+        file_bytes = file_obj.read()
+        supabase.storage.from_(SUPABASE_STORAGE_BUCKET).upload(blob_name, file_bytes, {"content-type": content_type or "application/octet-stream"})
+        return blob_name
+    except Exception as e:
+        logger.error(f"Upload error: {e}")
+        return None
+def download_file_from_supabase(blob_name):
+    if not supabase:
+        return None
+    try:
+        response = supabase.storage.from_(SUPABASE_STORAGE_BUCKET).download(blob_name)
+        return response
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        return None
 def get_signed_url(blob_name, expiration_minutes=60):
-    bucket = storage.bucket()
-    blob = bucket.blob(blob_name)
-    if not blob.exists():
+    if not supabase:
         return None
-    url = blob.generate_signed_url(
-        version="v4",
-        expiration=datetime.timedelta(minutes=expiration_minutes),
-        method="GET"
-    )
-    return url
+    try:
+        response = supabase.storage.from_(SUPABASE_STORAGE_BUCKET).create_signed_url(blob_name, expiration_minutes * 60)
+        return response.get('signedURL') if response else None
+    except Exception as e:
+        logger.error(f"Signed URL error: {e}")
+        return None
 def send_email(to_email, subject, body):
     import requests
     import re as _re
@@ -463,8 +451,8 @@ def extract_text_from_pdf_robust(file_bytes, filename):
                     content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
                     if content:
                         text += normalize_spaces(content) + "\n"
-                if text.strip() and len(text.strip()) > 100:
-                    return normalize_unicode(text.strip())
+            if text.strip() and len(text.strip()) > 100:
+                return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ pdfplumber erreur: {e}")
     if PYPDF2_AVAILABLE:
@@ -1469,7 +1457,6 @@ def normalize_text_for_matching(text):
     return normalize_for_matching(text)[0]
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
     try:
-        key = f"candidat:{token}"
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
@@ -1477,18 +1464,18 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
         cv_text = ""
         if cv_filename:
-            cv_bytes = download_file_from_firebase(cv_filename)
+            cv_bytes = download_file_from_supabase(cv_filename)
             if cv_bytes:
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
         lm_text = ""
         if lettre_filename:
-            lm_bytes = download_file_from_firebase(lettre_filename)
+            lm_bytes = download_file_from_supabase(lettre_filename)
             if lm_bytes:
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
-                att_bytes = download_file_from_firebase(fn)
+                att_bytes = download_file_from_supabase(fn)
                 if att_bytes:
                     t = extract_text_robust_from_bytes(att_bytes, fn)
                     if t:
@@ -1496,7 +1483,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         detected_lang = detect_language(cv_text[:500]) if cv_text else None
         nlp_enrichment = enrich_analysis_with_nlp(cv_text, lm_text, detected_lang)
         if nlp_enrichment:
-            redis_client.hset(key, "nlp_enrichment", json.dumps(nlp_enrichment, ensure_ascii=False))
+            supabase.table('candidats').update({"nlp_enrichment": json.dumps(nlp_enrichment, ensure_ascii=False)}).eq('token', token).execute()
         result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
         if result is None:
             if poste == "Chef de Section Compensation":
@@ -1510,14 +1497,23 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
         else:
             result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
-        redis_client.hset(key, mapping={"score": str(result['score']), "checklist": json.dumps(result['checklist'], ensure_ascii=False), "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False), "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False), "analyse_details": json.dumps(result['details'], ensure_ascii=False), "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False), "analyse_auto_date": datetime.datetime.now().isoformat(), "analyse_status": "completed"})
+        supabase.table('candidats').update({
+            "score": str(result['score']),
+            "checklist": json.dumps(result['checklist'], ensure_ascii=False),
+            "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False),
+            "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False),
+            "analyse_details": json.dumps(result['details'], ensure_ascii=False),
+            "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),
+            "analyse_auto_date": datetime.datetime.now().isoformat(),
+            "analyse_status": "completed"
+        }).eq('token', token).execute()
         moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés'))
         tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
         print(f"{tag} [{moteur}] Score {token}: {result['score']} — {result['score_breakdown'].get('note','')}")
     except Exception as e:
         import traceback
         traceback.print_exc()
-        redis_client.hset(f"candidat:{token}", mapping={"analyse_status": "error", "analyse_error": str(e), "analyse_auto_date": datetime.datetime.now().isoformat()})
+        supabase.table('candidats').update({"analyse_status": "error", "analyse_error": str(e), "analyse_auto_date": datetime.datetime.now().isoformat()}).eq('token', token).execute()
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
@@ -1889,43 +1885,16 @@ def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
 def init_recruteur():
     try:
-        redis_client.ping()
-        if not redis_client.exists("recruteur:1"):
-            redis_client.hset("recruteur:1", mapping={"id": "1", "email": "sougnabeoualoumibank@gmail.com", "password": hash_pwd("AdminLaurent123"), "nom": "Responsable RH"})
-        migrate_numero_dossier()
+        if supabase:
+            response = supabase.table('recruteurs').select('*').eq('email', 'sougnabeoualoumibank@gmail.com').execute()
+            if not response.data:
+                supabase.table('recruteurs').insert({
+                    "email": "sougnabeoualoumibank@gmail.com",
+                    "password": hash_pwd("AdminLaurent123"),
+                    "nom": "Responsable RH"
+                }).execute()
     except Exception as e:
-        print(f"⚠️ Redis non disponible au démarrage : {e}")
-def migrate_numero_dossier():
-    postes_candidates = {}
-    for k in redis_client.keys("candidat:*"):
-        c = redis_client.hgetall(k)
-        token = k.split(':', 1)[1]
-        poste = c.get('poste', '')
-        numero_dossier = c.get('numero_dossier', '')
-        if not numero_dossier and poste:
-            if poste not in postes_candidates:
-                postes_candidates[poste] = []
-            postes_candidates[poste].append((token, c))
-    for poste, candidates in postes_candidates.items():
-        if not candidates:
-            continue
-        max_num = 0
-        for k in redis_client.keys("candidat:*"):
-            existing = redis_client.hgetall(k)
-            if existing.get('poste') == poste:
-                existing_num = existing.get('numero_dossier', '')
-                if existing_num:
-                    try:
-                        num_val = int(existing_num)
-                        if num_val > max_num:
-                            max_num = num_val
-                    except (ValueError):
-                        pass
-        candidates_sorted = sorted(candidates, key=lambda x: x[1].get('date_candidature', ''))
-        for token, c in candidates_sorted:
-            max_num += 1
-            numero_dossier = str(max_num)
-            redis_client.hset(f"candidat:{token}", "numero_dossier", numero_dossier)
+        print(f"⚠️ Erreur initialisation recruteur : {e}")
 init_recruteur()
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
@@ -1945,11 +1914,13 @@ def login():
         return jsonify({'error': 'JSON manquant'}), 400
     email = data.get('email', '').strip().lower()
     pwd = hash_pwd(data.get('password', ''))
-    for key in redis_client.keys("recruteur:*"):
-        r = redis_client.hgetall(key)
-        if r.get("email", "").lower() == email and r.get("password") == pwd:
-            token = create_access_token(identity=r["id"])
-            return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
+    if supabase:
+        response = supabase.table('recruteurs').select('*').eq('email', email).execute()
+        if response.data and len(response.data) > 0:
+            r = response.data[0]
+            if r.get("password") == pwd:
+                token = create_access_token(identity=str(r["id"]))
+                return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
     return jsonify({'error': 'Identifiants incorrects'}), 401
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
@@ -1961,15 +1932,14 @@ def postuler():
         poste = (request.form.get('poste') or '').strip()
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
-        for k in redis_client.keys("candidat:*"):
-            existing = redis_client.hgetall(k)
-            if existing.get('email') == email and existing.get('poste') == poste:
+        if supabase:
+            existing = supabase.table('candidats').select('*').eq('email', email).eq('poste', poste).execute()
+            if existing.data and len(existing.data) > 0:
                 return jsonify({'error': f'Vous avez déjà soumis une candidature pour le poste "{poste}".'}), 409
-        max_num = 0
-        for k in redis_client.keys("candidat:*"):
-            existing = redis_client.hgetall(k)
-            if existing.get('poste') == poste:
-                existing_num = existing.get('numero_dossier', '')
+            all_candidats = supabase.table('candidats').select('numero_dossier').eq('poste', poste).execute()
+            max_num = 0
+            for c in all_candidats.data:
+                existing_num = c.get('numero_dossier', '')
                 if existing_num:
                     try:
                         num_val = int(existing_num)
@@ -1977,52 +1947,76 @@ def postuler():
                             max_num = num_val
                     except (ValueError):
                         pass
-        new_num = max_num + 1
-        numero_dossier = str(new_num)
-        def save_file_to_firebase(field, suffix):
-            f = request.files.get(field)
-            if f and f.filename and allowed_file(f.filename):
-                ext = f.filename.rsplit('.', 1)[-1].lower()
-                blob_name = f"candidatures/{uuid.uuid4().hex}_{suffix}.{ext}"
-                upload_file_to_firebase(f, blob_name, f.content_type)
-                return blob_name
-            return ''
-        cv_filename = save_file_to_firebase('cv', 'cv')
-        lettre_filename = save_file_to_firebase('lettre', 'lettre')
-        att_filenames = []
-        for f in request.files.getlist('attestation'):
-            if f and f.filename and allowed_file(f.filename):
-                ext = f.filename.rsplit('.', 1)[-1].lower()
-                blob_name = f"candidatures/{uuid.uuid4().hex}_attestation.{ext}"
-                upload_file_to_firebase(f, blob_name, f.content_type)
-                att_filenames.append(blob_name)
-        token = uuid.uuid4().hex
-        redis_client.hset(f"candidat:{token}", mapping={"nom": nom, "prenom": prenom, "email": email, "telephone": telephone, "poste": poste, "numero_dossier": numero_dossier, "cv_filename": cv_filename, "lettre_filename": lettre_filename, "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False), "statut": "en_attente", "note": "", "score": "0", "checklist": "", "flags_eliminatoires": "", "signaux_detectes": "", "score_breakdown": "", "analyse_status": "pending", "date_candidature": datetime.datetime.now().isoformat()})
-        threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste), daemon=True).start()
-        nom_complet = f"{prenom} {nom}".strip()
-        sujet_confirmation = f"Confirmation de candidature – {poste}"
-        corps_confirmation = f"Bonjour {nom_complet},\nNous accusons réception de votre candidature.\nSans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
-        threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
-        return jsonify({'message': 'Candidature soumise avec succès', 'token': token, 'numero_dossier': numero_dossier, 'analyse': 'Analyse automatique en cours'}), 201
+            new_num = max_num + 1
+            numero_dossier = str(new_num)
+            def save_file_to_supabase(field, suffix):
+                f = request.files.get(field)
+                if f and f.filename and allowed_file(f.filename):
+                    ext = f.filename.rsplit('.', 1)[-1].lower()
+                    blob_name = f"candidatures/{uuid.uuid4().hex}_{suffix}.{ext}"
+                    upload_file_to_supabase(f, blob_name, f.content_type)
+                    return blob_name
+                return ''
+            cv_filename = save_file_to_supabase('cv', 'cv')
+            lettre_filename = save_file_to_supabase('lettre', 'lettre')
+            att_filenames = []
+            for f in request.files.getlist('attestation'):
+                if f and f.filename and allowed_file(f.filename):
+                    ext = f.filename.rsplit('.', 1)[-1].lower()
+                    blob_name = f"candidatures/{uuid.uuid4().hex}_attestation.{ext}"
+                    upload_file_to_supabase(f, blob_name, f.content_type)
+                    att_filenames.append(blob_name)
+            token = uuid.uuid4().hex
+            supabase.table('candidats').insert({
+                "token": token,
+                "nom": nom,
+                "prenom": prenom,
+                "email": email,
+                "telephone": telephone,
+                "poste": poste,
+                "numero_dossier": numero_dossier,
+                "cv_filename": cv_filename,
+                "lettre_filename": lettre_filename,
+                "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
+                "statut": "en_attente",
+                "note": "",
+                "score": "0",
+                "checklist": "",
+                "flags_eliminatoires": "",
+                "signaux_detectes": "",
+                "score_breakdown": "",
+                "analyse_status": "pending",
+                "date_candidature": datetime.datetime.now().isoformat()
+            }).execute()
+            threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste), daemon=True).start()
+            nom_complet = f"{prenom} {nom}".strip()
+            sujet_confirmation = f"Confirmation de candidature – {poste}"
+            corps_confirmation = f"Bonjour {nom_complet},\nNous accusons réception de votre candidature.\nSans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
+            threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
+            return jsonify({'message': 'Candidature soumise avec succès', 'token': token, 'numero_dossier': numero_dossier, 'analyse': 'Analyse automatique en cours'}), 201
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
-    data = redis_client.hgetall(f"candidat:{token}")
-    if not data:
-        return jsonify({'error': 'Candidature introuvable'}), 404
-    hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown'}
-    return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
+    if supabase:
+        response = supabase.table('candidats').select('*').eq('token', token).execute()
+        if response.data and len(response.data) > 0:
+            data = response.data[0]
+            hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown'}
+            return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
+    return jsonify({'error': 'Candidature introuvable'}), 404
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
-    keys = redis_client.keys("candidat:*")
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    response = supabase.table('candidats').select('*').execute()
+    keys = response.data if response.data else []
     stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0, "by_poste": []}
     counts = {}
-    for k in keys:
-        c = redis_client.hgetall(k)
+    for c in keys:
         s = c.get('statut', 'en_attente')
         if s in stats:
             stats[s] += 1
@@ -2037,10 +2031,13 @@ def list_candidats():
     statut_filter = request.args.get('statut', '')
     search = request.args.get('search', '').lower()
     min_score = request.args.get('min_score', type=int)
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    response = supabase.table('candidats').select('*').execute()
+    all_candidats = response.data if response.data else []
     result = []
-    for k in redis_client.keys("candidat:*"):
-        c = redis_client.hgetall(k)
-        c['id'] = k.split(':', 1)[1]
+    for c in all_candidats:
+        c['id'] = c.get('token', '')
         if poste_filter and c.get('poste') != poste_filter:
             continue
         if statut_filter and c.get('statut') != statut_filter:
@@ -2062,9 +2059,12 @@ def list_candidats():
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
-    data = redis_client.hgetall(f"candidat:{token}")
-    if not data:
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    response = supabase.table('candidats').select('*').eq('token', token).execute()
+    if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
+    data = response.data[0]
     data['id'] = token
     if data.get('attestation_filenames'):
         try:
@@ -2081,8 +2081,10 @@ def get_candidat_detail(token):
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
-    key = f"candidat:{token}"
-    if not redis_client.exists(key):
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    response = supabase.table('candidats').select('*').eq('token', token).execute()
+    if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
     data = request.get_json(silent=True) or {}
     statut = data.get('statut', 'en_attente')
@@ -2090,37 +2092,47 @@ def update_candidat(token):
     score = str(min(10, max(0, int(data.get('score', 0)))))
     if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
         return jsonify({'error': 'Statut invalide'}), 400
-    redis_client.hset(key, mapping={"statut": statut, "note": note, "score": score, "decision_date": datetime.datetime.now().isoformat(), "decided_by": get_jwt_identity()})
+    supabase.table('candidats').update({
+        "statut": statut,
+        "note": note,
+        "score": score,
+        "decision_date": datetime.datetime.now().isoformat(),
+        "decided_by": get_jwt_identity()
+    }).eq('token', token).execute()
     return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
-    key = f"candidat:{token}"
-    data = redis_client.hgetall(key)
-    if not data:
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    response = supabase.table('candidats').select('*').eq('token', token).execute()
+    if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
+    data = response.data[0]
     cv_fn = data.get('cv_filename')
     lm_fn = data.get('lettre_filename')
     att_raw = data.get('attestation_filenames', '[]')
     poste = data.get('poste')
     if not cv_fn:
         return jsonify({'error': 'CV manquant pour analyse'}), 400
-    redis_client.hset(key, mapping={"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()})
+    supabase.table('candidats').update({"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()}).eq('token', token).execute()
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste), daemon=True).start()
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
     try:
-        keys = redis_client.keys("candidat:*")
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        response = supabase.table('candidats').select('*').execute()
+        keys = response.data if response.data else []
         if not keys:
             return jsonify({'message': 'Aucune candidature à réanalyser'}), 200
         reanalyzed_count = 0
         errors = []
-        for key in keys:
+        for data in keys:
             try:
-                token = key.split(':', 1)[1]
-                data = redis_client.hgetall(key)
+                token = data.get('token')
                 cv_fn = data.get('cv_filename')
                 lm_fn = data.get('lettre_filename')
                 att_raw = data.get('attestation_filenames', '[]')
@@ -2128,11 +2140,11 @@ def reanalyze_all_candidates():
                 if not cv_fn:
                     errors.append(f"Token {token}: CV manquant")
                     continue
-                redis_client.hset(key, mapping={
+                supabase.table('candidats').update({
                     "analyse_status": "reanalyzing",
                     "reanalyze_trigger": datetime.datetime.now().isoformat(),
                     "reanalyze_reason": "Modification des règles de sélection"
-                })
+                }).eq('token', token).execute()
                 threading.Thread(
                     target=run_analysis_for_candidat,
                     args=(token, cv_fn, lm_fn, att_raw, poste),
@@ -2140,7 +2152,7 @@ def reanalyze_all_candidates():
                 ).start()
                 reanalyzed_count += 1
             except Exception as e:
-                errors.append(f"Token {token}: {str(e)}")
+                errors.append(f"Token {data.get('token')}: {str(e)}")
         return jsonify({
             'message': f'Réanalyse lancée pour {reanalyzed_count} candidature(s)',
             'reanalyzed_count': reanalyzed_count,
@@ -2156,26 +2168,26 @@ def reanalyze_by_poste(poste):
     if poste not in POSTES:
         return jsonify({'error': f'Poste inconnu: {poste}'}), 400
     try:
-        keys = redis_client.keys("candidat:*")
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        response = supabase.table('candidats').select('*').eq('poste', poste).execute()
+        keys = response.data if response.data else []
         reanalyzed_count = 0
         errors = []
-        for key in keys:
+        for data in keys:
             try:
-                token = key.split(':', 1)[1]
-                data = redis_client.hgetall(key)
-                if data.get('poste') != poste:
-                    continue
+                token = data.get('token')
                 cv_fn = data.get('cv_filename')
                 lm_fn = data.get('lettre_filename')
                 att_raw = data.get('attestation_filenames', '[]')
                 if not cv_fn:
                     errors.append(f"Token {token}: CV manquant")
                     continue
-                redis_client.hset(key, mapping={
+                supabase.table('candidats').update({
                     "analyse_status": "reanalyzing",
                     "reanalyze_trigger": datetime.datetime.now().isoformat(),
                     "reanalyze_reason": f"Modification des règles pour le poste: {poste}"
-                })
+                }).eq('token', token).execute()
                 threading.Thread(
                     target=run_analysis_for_candidat,
                     args=(token, cv_fn, lm_fn, att_raw, poste),
@@ -2183,7 +2195,7 @@ def reanalyze_by_poste(poste):
                 ).start()
                 reanalyzed_count += 1
             except Exception as e:
-                errors.append(f"Token {token}: {str(e)}")
+                errors.append(f"Token {data.get('token')}: {str(e)}")
         return jsonify({
             'message': f'Réanalyse lancée pour {reanalyzed_count} candidature(s) du poste "{poste}"',
             'poste': poste,
@@ -2198,15 +2210,17 @@ def reanalyze_by_poste(poste):
 @jwt_required()
 def get_reanalyze_status():
     try:
-        keys = redis_client.keys("candidat:*")
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        response = supabase.table('candidats').select('*').execute()
+        keys = response.data if response.data else []
         status_counts = {
             'pending': 0,
             'reanalyzing': 0,
             'completed': 0,
             'error': 0
         }
-        for key in keys:
-            data = redis_client.hgetall(key)
+        for data in keys:
             status = data.get('analyse_status', 'pending')
             if status in status_counts:
                 status_counts[status] += 1
@@ -2223,11 +2237,13 @@ def export_candidates(fmt):
     try:
         poste_filter = request.args.get('poste', '')
         statut_filter = request.args.get('statut', '')
-        keys = redis_client.keys("candidat:*")
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        response = supabase.table('candidats').select('*').execute()
+        all_candidats = response.data if response.data else []
         result = []
-        for k in keys:
-            c = redis_client.hgetall(k)
-            c['id'] = k.split(':', 1)[1]
+        for c in all_candidats:
+            c['id'] = c.get('token', '')
             if poste_filter and c.get('poste') != poste_filter:
                 continue
             if statut_filter and c.get('statut') != statut_filter:
@@ -2275,9 +2291,12 @@ def export_candidates(fmt):
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
-    data = redis_client.hgetall(f"candidat:{token}")
-    if not data:
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    response = supabase.table('candidats').select('*').eq('token', token).execute()
+    if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
+    data = response.data[0]
     body = request.get_json(silent=True) or {}
     msg_type = body.get('type', data.get('statut', 'en_attente'))
     nom_c = f"{data.get('prenom', '')} {data.get('nom', '')}".strip()
@@ -2310,11 +2329,13 @@ def export_dossiers_zip():
         poste_filter = request.args.get('poste', '')
         date_start = request.args.get('date_start', '')
         date_end = request.args.get('date_end', '')
-        keys = redis_client.keys("candidat:*")
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        response = supabase.table('candidats').select('*').execute()
+        all_candidats = response.data if response.data else []
         candidats = []
-        for k in keys:
-            c = redis_client.hgetall(k)
-            c['id'] = k.split(':', 1)[1]
+        for c in all_candidats:
+            c['id'] = c.get('token', '')
             if poste_filter and c.get('poste') != poste_filter:
                 continue
             date_cand = c.get('date_candidature', '')
@@ -2343,12 +2364,12 @@ def export_dossiers_zip():
                 fichiers_a_inclure = []
                 cv_file = cand.get('cv_filename', '')
                 if cv_file:
-                    cv_bytes = download_file_from_firebase(cv_file)
+                    cv_bytes = download_file_from_supabase(cv_file)
                     if cv_bytes:
                         fichiers_a_inclure.append((cv_bytes, cv_file, 'CV'))
                 lettre_file = cand.get('lettre_filename', '')
                 if lettre_file:
-                    lettre_bytes = download_file_from_firebase(lettre_file)
+                    lettre_bytes = download_file_from_supabase(lettre_file)
                     if lettre_bytes:
                         fichiers_a_inclure.append((lettre_bytes, lettre_file, 'Lettre_de_motivation'))
                 att_raw = cand.get('attestation_filenames', '[]')
@@ -2356,7 +2377,7 @@ def export_dossiers_zip():
                     att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
                     for idx, att_file in enumerate(att_files, 1):
                         if att_file:
-                            att_bytes = download_file_from_firebase(att_file)
+                            att_bytes = download_file_from_supabase(att_file)
                             if att_bytes:
                                 fichiers_a_inclure.append((att_bytes, att_file, f'Attestation_{idx}'))
                 except Exception:
