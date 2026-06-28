@@ -5,50 +5,42 @@ import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, c
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from werkzeug.utils import secure_filename
-
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
-
 try:
     import pdfplumber
     PDFPLUMBER_AVAILABLE = True
 except ImportError:
     PDFPLUMBER_AVAILABLE = False
-
 try:
     import PyPDF2
     PYPDF2_AVAILABLE = True
 except ImportError:
     PYPDF2_AVAILABLE = False
-
 try:
     from docx import Document
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 try:
     import chardet
     CHARDET_AVAILABLE = True
 except ImportError:
     CHARDET_AVAILABLE = False
-
 try:
     from langdetect import detect, DetectorFactory
     DetectorFactory.seed = 0
     LANGDETECT_AVAILABLE = True
 except ImportError:
     LANGDETECT_AVAILABLE = False
-
 try:
     from rapidfuzz import fuzz
     RAPIDFUZZ_AVAILABLE = True
 except ImportError:
     RAPIDFUZZ_AVAILABLE = False
-
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -59,7 +51,6 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
-
 try:
     import openpyxl
     from openpyxl import Workbook
@@ -68,7 +59,6 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
-
 try:
     from docx import Document as DocxDocument
     from docx.shared import Inches, Pt
@@ -76,7 +66,6 @@ try:
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 try:
     from pdf2image import convert_from_path
     import pytesseract
@@ -84,28 +73,23 @@ try:
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
-
 try:
     import spacy
     SPACY_AVAILABLE = True
 except ImportError:
     SPACY_AVAILABLE = False
-
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
-
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
 _claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_ACTIVE else None
 _ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "5")))
-
 _Nlp_fr = None
 _Nlp_en = None
-
 def _get_spacy_model(lang='fr'):
     global _Nlp_fr, _Nlp_en
     if not SPACY_AVAILABLE:
@@ -127,16 +111,13 @@ def _get_spacy_model(lang='fr'):
             except OSError:
                 return None
         return _Nlp_en
-
 app = Flask(__name__)
 import logging
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('pdfminer').setLevel(logging.WARNING)
 logging.getLogger('pdfplumber').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
-
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -146,15 +127,12 @@ def after_request(response):
     if request.method == 'OPTIONS':
         response.status_code = 204
     return response
-
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
     return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
-
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
-
 redis_client = redis.Redis(
     host=os.getenv("REDIS_HOST", "redis-11133.c8.us-east-1-4.ec2.cloud.redislabs.com"),
     port=int(os.getenv("REDIS_PORT", 11133)),
@@ -164,27 +142,22 @@ redis_client = redis.Redis(
     socket_connect_timeout=5,
     socket_timeout=5
 )
-
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
 app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupisne@gmail.com>')
 app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
-
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 REPORTS_FOLDER = os.path.join(os.path.dirname(__file__), 'reports')
 CHUNKS_FOLDER = os.path.join(UPLOAD_FOLDER, 'chunks')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 os.makedirs(CHUNKS_FOLDER, exist_ok=True)
-
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 def send_email(to_email, subject, body):
     import requests
     import re as _re
@@ -204,7 +177,6 @@ def send_email(to_email, subject, body):
         return response.status_code == 201
     except Exception:
         return False
-
 POSTES = [
     "Responsable Administration de Crédit",
     "Analyste Crédit CCB",
@@ -220,7 +192,6 @@ POSTES = [
     "Chef service reporting réglementaire",
     "Chef de Section Compensation"
 ]
-
 GRILLE = {
     "Responsable Administration de Crédit": {
         "eliminatoire": ["Expérience bancaire", "Minimum 3 ans en crédit / risque (hors stage)", "Exposition aux garanties ou conformité"],
@@ -335,7 +306,6 @@ GRILLE = {
         ]
     }
 }
-
 SCORING_CONFIG = {
     "Responsable Administration de Crédit": None,
     "Analyste Crédit CCB": None,
@@ -351,7 +321,6 @@ SCORING_CONFIG = {
     "Chef service risques de marché": {"CV_Exp": 20, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 20, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
     "Chef service reporting réglementaire": {"CV_Exp": 20, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 20, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3}
 }
-
 POSTES_AVEC_SCORING_100 = [
     "Auditeur interne",
     "Chef service contrôle des engagements",
@@ -360,16 +329,13 @@ POSTES_AVEC_SCORING_100 = [
     "Chef service risques de marché",
     "Chef service reporting réglementaire"
 ]
-
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation"]
-
 BEAC_GIMAC_KEYWORDS = ['beac', 'gimac', 'systac', 'sygma', 'cemac', 'zone cemac', 'banque centrale', 'banque des etats', 'compensation regionale', 'chambre de compensation', 'clearing house', 'central bank cemac']
 COMPENSATION_INTERBANCAIRE_KEYWORDS = ['compensation interbancaire', 'compensation bancaire', 'chambre de compensation', 'cheques', 'virements', 'prelevements', 'interbank clearing', 'clearing', 'systeme de compensation', 'compensation des operations', 'echange interbancaire', 'reglement interbancaire', 'compensation des cheques']
 BACKOFFICE_KEYWORDS = ['back-office', 'back office', 'operations bancaires', 'traitement des operations', 'middle office', 'operations interbancaires', 'service operations', 'banking operations', 'transaction processing', 'operations bancaires courantes']
 SUSPENS_REJETS_KEYWORDS = ['suspens', 'rejets', 'reclamations interbancaires', 'litiges interbancaires', 'reglement des litiges', 'disputes', 'claims', 'unresolved items', 'rejets de virements', 'reclamation client', 'gestion des suspens', 'gestion des rejets', 'incidents de paiement']
 ENCADREMENT_KEYWORDS = ['encadrement', 'supervision equipe', 'chef d equipe', 'team lead', 'responsable equipe', 'superviseur', 'coordination equipe', 'management equipe', 'gestion d equipe', 'head of team', 'manageur', 'encadre une equipe', 'supervise une equipe', 'pilotage d equipe']
 SYSCOHADA_KEYWORDS = ['syscohada', 'comptabilite bancaire', 'plan comptable bancaire', 'normes comptables ohada', 'comptabilite ohada']
-
 COMMERCIAL_BANKS = [
     'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
     'société générale', 'standard chartered', 'nsia banque', 'commercial bank',
@@ -380,20 +346,15 @@ COMMERCIAL_BANKS = [
     'afriland', 'bgfi', 'bgfibank', 'ccei', 'boa', 'bank of africa', 'banque atlantique',
     'commercial bank cameroun', 'sgc cameroun'
 ]
-
 MICROFINANCE = ['microfinance', 'micro-finance', 'mfb', 'finadev', 'ucec', 'caisse d epargne', 'credit union', 'cooperative financiere', 'financial development', 'union des caisses', 'f i n a d e v']
 NON_FINANCIAL_SECTORS = ['logistics', 'logistique', 'transport', 'shipping', 'gls', 'global logistics', 'société commerciale', 'entreprise commerciale', 'retail store', 'grande distribution', 'distribution commerciale', 'manufacturing', 'industrie', 'construction', 'btp', 'holding', 'encobat', 'agriculture', 'farming', 'agroalimentaire', 'communication agency', 'agence de communication', 'health', 'hôpital', 'clinique', 'samaritaine', 'education', 'enseignement', 'école', 'ngo', 'ong', 'association', 'humanitaire', 'world vision', 'wvi', 'government', 'gouvernement', 'administration publique', 'media', 'presse', 'journalisme', 'tourism', 'tourisme', 'restauration', 'real estate', 'immobilier', 'energy', 'énergie', 'oil', 'gaz', 'petrole', 'mining', 'correct services', 'cdo consulting']
-
 COMMERCIAL_BANK_PATTERN = re.compile(r'\b(' + '|'.join(COMMERCIAL_BANKS) + r')\b', re.IGNORECASE)
 MICROFINANCE_PATTERN = re.compile('|'.join(MICROFINANCE), re.IGNORECASE)
 NON_FINANCIAL_PATTERN = re.compile('|'.join(NON_FINANCIAL_SECTORS), re.IGNORECASE)
-
 STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b', r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b', r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b', r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b']
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
-
 NEGATIVE_PATTERNS = [r'\b(pas\s+de|pas\s+d\')\s*(expérience|experience|expérimenté|competence)\b', r'\b(aucun|aucune|aucuns|aucunes)\s*(expérience|experience|competence|connaissance)\b', r'\b(sans|dépourvu\s+de|manque\s+de)\s*(expérience|experience|competence)\b', r'\b(n\')?(?:ai|as|a|avons|avez|ont)\s+pas\s+(?:d\')?(expérience|experience|competence|connaissance)\b', r'\b(jamais\s+(?:eu|travaillé|exercé|pratiqué))\b', r'\b(peu\s+d\')?expérience\b', r'\b(expérience\s+(?:limitée|insuffisante|faible|partielle))\b', r'\b(ne\s+connais\s+pas|ne\s+maîtrise\s+pas|ne\s+possède\s+pas)\b', r'\b(no\s+experience|without\s+experience|lack\s+of\s+experience)\b']
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
-
 def normalize_spaces(text):
     if not text:
         return ""
@@ -407,7 +368,6 @@ def normalize_spaces(text):
     for wrong, correct in typo_corrections.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
     return text.strip()
-
 def is_pdf_scanned(filepath):
     if not PDFPLUMBER_AVAILABLE:
         return False
@@ -417,10 +377,9 @@ def is_pdf_scanned(filepath):
                 text = page.extract_text()
                 if text and len(text.strip()) > 50:
                     return False
-            return True
+        return True
     except Exception:
         return False
-
 def extract_text_from_pdf_via_ocr(filepath):
     if not OCR_AVAILABLE:
         return ""
@@ -440,11 +399,10 @@ def extract_text_from_pdf_via_ocr(filepath):
                 text = normalize_spaces(text)
                 text = re.sub(r'[|¦]', '', text)
                 all_text.append(f"--- Page {i} ---\n{text}")
-        result = "\n\n".join(all_text)
+        result = "\n".join(all_text)
         return normalize_unicode(result)
     except Exception:
         return ""
-
 def extract_text_from_pdf_robust(filepath):
     text = ""
     if PDFPLUMBER_AVAILABLE:
@@ -490,7 +448,6 @@ def extract_text_from_pdf_robust(filepath):
         if ocr_text and len(ocr_text.strip()) > 100:
             return ocr_text
     return ""
-
 def extract_text_from_docx_robust(filepath, raw_bytes=None):
     if not DOCX_AVAILABLE:
         return ""
@@ -531,7 +488,6 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
         except Exception:
             pass
     return ""
-
 def extract_text_from_txt(filepath, raw_bytes=None):
     if raw_bytes and CHARDET_AVAILABLE:
         try:
@@ -547,7 +503,6 @@ def extract_text_from_txt(filepath, raw_bytes=None):
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
-
 def extract_text_robust(filepath, filename):
     if not filepath or not os.path.exists(filepath):
         return ""
@@ -571,7 +526,6 @@ def extract_text_robust(filepath, filename):
         except Exception:
             pass
     return ""
-
 def detect_institution_type(text):
     text_lower = text.lower()
     if COMMERCIAL_BANK_PATTERN.search(text_lower):
@@ -583,7 +537,6 @@ def detect_institution_type(text):
     if NON_FINANCIAL_PATTERN.search(text_lower):
         return 'non_financial'
     return 'unknown'
-
 def check_current_employment_financial(cv_text):
     current_patterns = [r'(?:depuis|from|since|à nos jours|a nos jours|nos jours|to present|current|actuel)\s*[:\-]?\s*([^\n]+)', r'(\d{4})\s*[-–]\s*(?:présent|present|now|actuel|nos jours|a nos jours|aujourd\'hui)', r'(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s*\d{4}\s*[-–]\s*(?:présent|present|now|actuel|nos jours|a nos jours|aujourd\'hui)']
     for pattern in current_patterns:
@@ -599,7 +552,6 @@ def check_current_employment_financial(cv_text):
     if inst_type == 'non_financial':
         return False, "Secteur non financier détecté"
     return True, "Secteur financier ou inconnu"
-
 def check_cv_letter_consistency(cv_text, letter_text, poste):
     cv_lower = cv_text.lower()
     letter_lower = letter_text.lower() if letter_text else ""
@@ -609,24 +561,23 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         letter_matches = sum(1 for kw in technical_keywords if kw in letter_lower)
         if cv_matches > 0 or letter_matches > 0:
             return True, "Compétences Market Risk détectées"
-        if ('risque' in cv_lower or 'risque' in letter_lower) and ('banque' in cv_lower or 'uba' in cv_lower or 'ecobank' in cv_lower or 'orabank' in cv_lower):
-            return True, "Profil risque en banque détecté"
-        if ('responsable' in cv_lower or 'responsable' in letter_lower) and ('risque' in cv_lower or 'risque' in letter_lower):
-            return True, "Responsable risque détecté"
-        if re.search(r'gestion\s+bancaire', cv_lower) or re.search(r'gestion\s+bancaire', letter_lower):
-            if re.search(r'(\d+)\s*(?:années?|ans?)', cv_lower) or re.search(r'(\d+)\s*(?:années?|ans?)', letter_lower):
-                return True, "Gestion bancaire avec expérience détectée"
-        return True, "Cohérent"
+    if ('risque' in cv_lower or 'risque' in letter_lower) and ('banque' in cv_lower or 'uba' in cv_lower or 'ecobank' in cv_lower or 'orabank' in cv_lower):
+        return True, "Profil risque en banque détecté"
+    if ('responsable' in cv_lower or 'responsable' in letter_lower) and ('risque' in cv_lower or 'risque' in letter_lower):
+        return True, "Responsable risque détecté"
+    if re.search(r'gestion\s+bancaire', cv_lower) or re.search(r'gestion\s+bancaire', letter_lower):
+        if re.search(r'(\d+)\s*(?:années?|ans?)', cv_lower) or re.search(r'(\d+)\s*(?:années?|ans?)', letter_lower):
+            return True, "Gestion bancaire avec expérience détectée"
+    return True, "Cohérent"
     if letter_text and len(letter_text.strip()) > 10:
         poste_keywords = poste.lower().split()
         letter_mentions_poste = any(kw in letter_lower for kw in poste_keywords if len(kw) > 3)
         if letter_mentions_poste:
             return True, "Lettre cohérente avec le poste"
-        generic_motivation = ['postule', 'candidature', 'poste', 'offre', 'motivation', 'intérêt']
-        if any(mot in letter_lower for mot in generic_motivation):
-            return True, "Lettre de motivation détectée"
+    generic_motivation = ['postule', 'candidature', 'poste', 'offre', 'motivation', 'intérêt']
+    if any(mot in letter_lower for mot in generic_motivation):
+        return True, "Lettre de motivation détectée"
     return True, "Cohérent"
-
 def validate_financial_institution_for_market_risk(text):
     text_lower = text.lower()
     text_normalized = normalize_spaces(text_lower)
@@ -656,7 +607,6 @@ def validate_financial_institution_for_market_risk(text):
             return True, "Expériences hors secteur mais antérieures à 2015 – ignorées"
         return False, "Secteur non financier détecté (récent)"
     return True, "Institution financière valide"
-
 def check_not_microfinance_only(raw_text):
     text_lower = normalize_spaces(raw_text.lower())
     text_deaccent = text_lower.translate(_ACCENT_MAP)
@@ -666,9 +616,7 @@ def check_not_microfinance_only(raw_text):
     if has_microfinance and not has_commercial_bank and not has_interbank_exposure:
         return False
     return True
-
 _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon')
-
 def normalize_unicode(text):
     if not text:
         return ""
@@ -676,7 +624,6 @@ def normalize_unicode(text):
     text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
     text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
     return text.strip()
-
 def normalize_for_matching(text):
     if not text:
         return "", []
@@ -685,7 +632,6 @@ def normalize_for_matching(text):
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
     return cleaned, tokens
-
 def contains_negative_context(text, keyword):
     if not text or not keyword:
         return False
@@ -700,7 +646,6 @@ def contains_negative_context(text, keyword):
         if NEGATIVE_REGEX.search(context):
             return True
     return False
-
 def is_banking_context(text_window):
     if not text_window:
         return False
@@ -710,7 +655,6 @@ def is_banking_context(text_window):
     if COMMERCIAL_BANK_PATTERN.search(text_lower):
         return True
     return False
-
 def is_it_critical_context(text_window):
     if not text_window:
         return False
@@ -719,7 +663,6 @@ def is_it_critical_context(text_window):
     if critical_pattern.search(text_lower):
         return True
     return False
-
 def check_criterion_context(criterion, raw_text, poste):
     text_lower = raw_text.lower()
     banking_posts = ["Responsable Administration de Crédit", "Analyste Crédit CCB", "Senior Finance Officer", "Market Risk Officer"]
@@ -764,17 +707,13 @@ def check_criterion_context(criterion, raw_text, poste):
                 return True
             return False
     return True
-
 FRENCH_MONTHS = {'janvier': 1, 'jan': 1, 'février': 2, 'fevrier': 2, 'fev': 2, 'mars': 3, 'mar': 3, 'avril': 4, 'avr': 4, 'mai': 5, 'juin': 6, 'juillet': 7, 'juil': 7, 'août': 8, 'aout': 8, 'aou': 8, 'septembre': 9, 'sep': 9, 'octobre': 10, 'oct': 10, 'novembre': 11, 'nov': 11, 'décembre': 12, 'decembre': 12, 'dec': 12}
-
 def split_into_jobs(raw_text):
     separators = re.compile(r'(?:^|\n)(?=\s*(?:(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(?:20\d{2}|19\d{2})|\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|(?:depuis|de |from |since |desde |a partir de |starting |beginning)))', re.IGNORECASE | re.MULTILINE)
     blocks = separators.split(raw_text)
     return [b.strip() for b in blocks if b.strip()]
-
 def is_stage_block(block_text):
     return bool(STAGE_PATTERN.search(block_text))
-
 def extract_duration_years_from_block(block_text):
     years = 0.0
     text = block_text.lower().translate(_ACCENT_MAP)
@@ -831,7 +770,6 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(delta, 1)
     return 0.0
-
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
@@ -872,7 +810,6 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
         if duration > 0:
             total_years += duration
     return total_years >= min_years
-
 KEYWORD_MAPPING = {
     "Expérience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
     "Minimum 3 ans en crédit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
@@ -1027,7 +964,6 @@ KEYWORD_MAPPING = {
     "CV aux missions trop génériques, sans livrables ni résultats quantifiés": ["diverses taches", "missions diverses", "taches diverses", "responsable de divers"],
     "Expériences très courtes (< 1 an par poste) sans progression visible": ["stage", "cdd court", "contrat court"]
 }
-
 DOMAIN_KEYWORDS_MAP = {
     "EXP_CREDIT_3ANS": ["credit", "risque", "banque", "bancaire", "institution financiere", "analyste", "charge", "gestionnaire", "loan", "credit analysis"],
     "EXP_FIN_3ANS": ["finance", "comptable", "comptabilite", "reporting", "tresorerie", "banque", "institution financiere", "auditeur", "controleur", "financial", "accounting", "risque", "risk"],
@@ -1041,7 +977,6 @@ DOMAIN_KEYWORDS_MAP = {
     "EXP_BANKING_5ANS": ["banque", "bancaire", "banking", "comptabilite bancaire", "reporting reglementaire", "beac", "cobac", "spectra", "central bank", "regulatory reporting", "banking supervision"],
     "EXP_BACKOFFICE_5ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire", "banque", "bancaire", "middle office", "moyens de paiement", "traitement des operations", "chambre de compensation"]
 }
-
 EXP_MIN_YEARS_MAP = {
     "EXP_CREDIT_3ANS": 3.0,
     "EXP_FIN_3ANS": 3.0,
@@ -1055,7 +990,6 @@ EXP_MIN_YEARS_MAP = {
     "EXP_BANKING_5ANS": 5.0,
     "EXP_BACKOFFICE_5ANS": 5.0
 }
-
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1100,7 +1034,7 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
                     best_score = max(best_score, ratio / 100)
-                    continue
+                continue
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
             if len(common) >= max(2, len(kw_tokens) * 0.7):
@@ -1108,7 +1042,6 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
     return best_score >= 0.70, round(best_score, 2), found_kws
-
 def detect_language(text):
     if not text or not LANGDETECT_AVAILABLE:
         return None
@@ -1116,7 +1049,6 @@ def detect_language(text):
         return detect(text)
     except Exception:
         return None
-
 def extract_entities_with_spacy(text, lang='fr'):
     if not SPACY_AVAILABLE or not text:
         return None
@@ -1149,7 +1081,6 @@ def extract_entities_with_spacy(text, lang='fr'):
         return entities
     except Exception:
         return None
-
 def enrich_analysis_with_nlp(cv_text, lettre_text, detected_lang):
     if not SPACY_AVAILABLE:
         return {}
@@ -1166,18 +1097,13 @@ def enrich_analysis_with_nlp(cv_text, lettre_text, detected_lang):
     if detected_banks:
         enrichment['banques_detectees'] = detected_banks
     return enrichment
-
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
-
 if IA_ANALYSE_ACTIVE:
     print(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
 else:
     print("⚠️  Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
-
 SCORING_CODE_LABELS = {"CV_Exp": "Expérience professionnelle pertinente", "CV_Niveau": "Niveau / ancienneté de l'expérience", "CV_Secteur": "Expérience sectorielle (banque/finance)", "CV_Tech": "Compétences techniques", "CV_Progression": "Évolution de carrière", "CV_Management": "Capacité managériale", "CV_Stabilite": "Stabilité du parcours", "LM_Comprehension": "Compréhension du poste (lettre)", "LM_Coherence": "Cohérence du profil (lettre)", "LM_Motivation": "Motivation réelle (lettre)", "LM_Qualite": "Qualité rédactionnelle (lettre)", "D_Niveau": "Niveau académique", "D_Specialisation": "Spécialisation pertinente", "D_Certif": "Certifications"}
-
 SCORING_RUBRIQUES = {"Chef de Section Compensation": {"Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": 3, "Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": 3, "Capacité d'encadrement et de management d'équipe opérationnelle": 2, "Cohérence et progression du parcours professionnel": 2, "Qualité et clarté du CV (missions précises, livrables, résultats)": 1, "Lettre de motivation": 1}}
-
 def get_rubrique_scoring(poste):
     if poste in SCORING_RUBRIQUES:
         rub = SCORING_RUBRIQUES[poste]
@@ -1186,9 +1112,7 @@ def get_rubrique_scoring(poste):
         rub = SCORING_CONFIG.get(poste) or {}
         return rub, 100
     return {"Adéquation de l'expérience": 3, "Cohérence du parcours": 2, "Exposition au risque métier": 3, "Qualité du CV": 1, "Lettre de motivation": 1}, 10
-
 SYSTEM_PROMPT_RECRUTEUR = """Tu es un·e responsable recrutement senior, spécialisé·e dans le secteur bancaire en Afrique centrale et de l'Ouest (CEMAC/UEMOA), avec quinze ans d'expérience en présélection de cadres bancaires (compensation, risques, audit, finance, IT). Tu analyses des dossiers de candidature avec la même rigueur et le même bon sens qu'un·e recruteur·se humain·e expérimenté·e : tu lis le CV dans son ensemble, tu replaces chaque expérience dans son contexte réel, et tu n'élimines jamais un candidat sur un doute léger — mais tu restes strict·e sur les critères réellement absents.
-
 Règles d'analyse à appliquer systématiquement :
 1. Calcule l'expérience pertinente à partir des dates réelles du CV, même avec des formats variés ou imparfaits ("depuis 2018", "sept (7) années", "Janvier 2015 – à ce jour", espacement irrégulier issu d'un export PDF/OCR). Les stages, alternances et volontariats NE COMPTENT PAS comme expérience professionnelle, sauf mention contraire explicite.
 2. Distingue toujours l'EMPLOYEUR réel (où le candidat a travaillé) d'un simple mot-clé apparaissant dans une rubrique "compétences", "formation" ou "logiciels".
@@ -1196,19 +1120,16 @@ Règles d'analyse à appliquer systématiquement :
 4. Une lettre de motivation n'est éliminatoire que si elle est manifestement générique/copiée-collée (aucune mention du poste ni de l'institution), incohérente avec le CV, ou truffée de fautes majeures incompatibles avec la rigueur attendue pour ce poste. Son absence n'est PAS éliminatoire en soi, mais prive le candidat des points correspondants.
 5. Justifie chaque évaluation avec des éléments concrets du texte — jamais de suppositions non étayées.
 6. Traite les signaux exprimés en anglais, espagnol ou portugais comme équivalents à leur signal français correspondant.
-
 Tu soumets ton analyse exclusivement via l'outil fourni, sans aucun texte hors de l'appel d'outil."""
-
 def build_analysis_tool_schema():
     return {"name": "soumettre_analyse_candidature", "description": "Soumet l'analyse structurée et argumentée d'une candidature selon la grille de présélection fournie.", "input_schema": {"type": "object", "properties": {"eliminatoire": {"type": "array", "description": "Un objet par critère éliminatoire de la grille, dans l'ordre fourni.", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "valide": {"type": "boolean", "description": "true = critère satisfait, le candidat passe ce filtre"}, "justification": {"type": "string"}}, "required": ["critere", "valide", "justification"]}}, "a_verifier": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "signaux_forts": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "points_attention": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "present": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "present", "justification"]}}, "lettre_motivation": {"type": "object", "properties": {"presente": {"type": "boolean"}, "coherente_avec_cv": {"type": "boolean"}, "generique_ou_copiee": {"type": "boolean"}, "qualite_redactionnelle": {"type": "string", "enum": ["bonne", "moyenne", "faible", "non_evaluable"]}, "eliminatoire": {"type": "boolean", "description": "true si la lettre justifie à elle seule un rejet"}, "commentaire": {"type": "string"}}, "required": ["presente", "coherente_avec_cv", "generique_ou_copiee", "qualite_redactionnelle", "eliminatoire", "commentaire"]}, "diplomes": {"type": "object", "properties": {"niveau_suffisant": {"type": "boolean"}, "domaine_pertinent": {"type": "boolean"}, "atout_complementaire_detecte": {"type": "boolean"}, "commentaire": {"type": "string"}}, "required": ["niveau_suffisant", "domaine_pertinent", "atout_complementaire_detecte", "commentaire"]}, "sous_scores": {"type": "object", "description": "Clé EXACTE = la clé entre guillemets indiquée dans la rubrique de scoring fournie. Valeur = points attribués (entier ≥ 0, ≤ maximum indiqué).", "additionalProperties": {"type": "integer"}}, "score_total": {"type": "integer", "description": "Somme des sous_scores, ou 0 si un critère éliminatoire a échoué."}, "decision": {"type": "string"}, "points_forts": {"type": "array", "items": {"type": "string"}}, "points_vigilance": {"type": "array", "items": {"type": "string"}}, "synthese_recruteur": {"type": "string", "description": "3 à 5 phrases en français, ton professionnel RH, résumant le profil et justifiant la décision — comme le ferait un recruteur senior expérimenté."}}, "required": ["eliminatoire", "a_verifier", "signaux_forts", "points_attention", "lettre_motivation", "diplomes", "sous_scores", "score_total", "decision", "points_forts", "points_vigilance", "synthese_recruteur"]}}
-
 def build_analysis_user_message(cv_text, lettre_text, attestation_texts_list, poste):
     grille = GRILLE.get(poste, {})
     rubrique, score_max = get_rubrique_scoring(poste)
     def fmt_list(items):
         return "\n".join(f"  {i+1}. {c}" for i, c in enumerate(items)) if items else "  (aucun)"
     rubrique_txt = "\n".join(f"  - {SCORING_CODE_LABELS.get(nom, nom)} [clé attendue: \"{nom}\"] : 0 à {pts} points" for nom, pts in rubrique.items())
-    att_txt = "\n\n".join(attestation_texts_list) if attestation_texts_list else "(aucune attestation jointe)"
+    att_txt = "\n".join(attestation_texts_list) if attestation_texts_list else "(aucune attestation jointe)"
     if poste in POSTES_AVEC_SCORING_12:
         seuils_txt = "10-12 : Entretien prioritaire | 7-9 : Entretien si besoin (vivier de réserve) | <7 : Rejet"
     elif poste in POSTES_AVEC_SCORING_100:
@@ -1216,39 +1137,26 @@ def build_analysis_user_message(cv_text, lettre_text, attestation_texts_list, po
     else:
         seuils_txt = "≥8 : Entretien prioritaire | 6-7 : Entretien si besoin | <6 : Rejet"
     return f"""POSTE ÉVALUÉ : {poste}
-
 ═══ GRILLE DE PRÉSÉLECTION ═══
-
 🔴 Critères éliminatoires (un seul non satisfait → rejet immédiat) :
 {fmt_list(grille.get('eliminatoire', []))}
-
 🟠 Points à vérifier dans le CV :
 {fmt_list(grille.get('a_verifier', []))}
-
 🟡 Signaux forts (candidat prioritaire) :
 {fmt_list(grille.get('signaux_forts', []))}
-
 ⚠️ Points d'attention :
 {fmt_list(grille.get('points_attention', []))}
-
 ═══ GRILLE DE SCORING (total /{score_max}) ═══
 {rubrique_txt}
-
 Seuils de décision : {seuils_txt}
-
 ═══ DOCUMENTS DU CANDIDAT ═══
-
 --- CV ---
 {cv_text[:12000]}
-
 --- LETTRE DE MOTIVATION ---
 {lettre_text[:4000] if lettre_text else "(aucune lettre fournie)"}
-
 --- ATTESTATIONS / DIPLÔMES ---
 {att_txt[:6000]}
-
 Soumets ton analyse via l'outil `soumettre_analyse_candidature`. Reproduis EXACTEMENT les libellés des critères ci-dessus dans le champ "critere", et utilise EXACTEMENT les clés entre guillemets indiquées dans la grille de scoring comme clés de `sous_scores`."""
-
 def _build_result_from_ia_analysis(analyse, poste):
     _, score_max = get_rubrique_scoring(poste)
     flags_elim = [e['critere'] for e in analyse.get('eliminatoire', []) if not e.get('valide')]
@@ -1259,7 +1167,6 @@ def _build_result_from_ia_analysis(analyse, poste):
     decision = "❌ Rejet (éliminatoire)" if flags_elim else get_recommandation_from_score(score_total, poste)
     details = {'moteur': 'IA (Claude)', 'eliminatoire_detail': analyse.get('eliminatoire', []), 'a_verifier_detail': analyse.get('a_verifier', []), 'signaux_forts_detail': analyse.get('signaux_forts', []), 'points_attention_detail': analyse.get('points_attention', []), 'lettre_motivation': lm, 'diplomes': analyse.get('diplomes', {}), 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}
     return {'score': score_total, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'details': details, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': analyse.get('sous_scores', {}), 'score_final': score_total, 'score_max': score_max, 'decision': decision, 'note': analyse.get('synthese_recruteur') or f"Score: {score_total}/{score_max} — {decision}"}}
-
 def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     if not IA_ANALYSE_ACTIVE:
         return None
@@ -1282,7 +1189,6 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
             last_error = e
             time.sleep(2)
     return None
-
 def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Section Compensation"
     grille = GRILLE[poste]
@@ -1331,7 +1237,6 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     else:
         decision = "❌ Rejet"
     return {'score': score_total, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'detail': f"Score: {score_total}/12 — {decision}"}
-
 def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, poste):
     config = SCORING_CONFIG.get(poste)
     if not config:
@@ -1408,7 +1313,7 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
     if total_tech_criteria > 0:
         tech_ratio = tech_signals / total_tech_criteria
         score_cv['CV_Tech'] = round(max_tech * tech_ratio)
-    details['cv_scores']['CV_Tech'] = f"{score_cv['CV_Tech']}/{max_tech} ({tech_signals}/{total_tech_criteria})"
+        details['cv_scores']['CV_Tech'] = f"{score_cv['CV_Tech']}/{max_tech} ({tech_signals}/{total_tech_criteria})"
     max_progression = config.get('CV_Progression', 5)
     progression_keywords = ['promotion', 'évolution', 'avancement', 'senior', 'lead', 'manager', 'chef', 'responsable', 'head of', 'director']
     progression_count = sum(1 for kw in progression_keywords if kw in raw_full.lower())
@@ -1505,7 +1410,6 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
     else:
         decision = "Rejet"
     return {'score': score_total, 'decision': decision, 'bloc_cv': {'total': score_cv_total, 'max': 70, 'details': score_cv, 'raw_total': total_cv_raw, 'raw_max': max_cv_raw}, 'bloc_lm': {'total': score_lm_total, 'max': 20, 'details': score_lm}, 'bloc_diplomes': {'total': score_diplomes_total, 'max': 10, 'details': score_diplomes}, 'details': details, 'note': f"Score: {score_total}/100 — {decision}"}
-
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
         return {'score': 0, 'checklist': {}, 'flags_eliminatoires': ['CV non analysable (trop court ou vide)'], 'signaux_detectes': [], 'details': {'error': 'CV vide ou non parsé'}, 'score_breakdown': {'bloc1_eliminatoire': True, 'score_final': 0, 'note': 'CV non analysable'}}
@@ -1592,10 +1496,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': [], 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'flags_eliminatoires_count': 0, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'bloc2_criteres_valides': len(details['criteres_valides_bloc2']), 'bloc2_points': points_bloc2, 'bloc3_signaux_detectes': len(signaux), 'bloc3_points': points_bloc3, 'total_raw_points': points_bloc2 + points_bloc3, 'score_final': score_final, 'note': f"Score Excel: {score_final}/10", 'documents_analyses': details['documents_analyses']}}
-
 def normalize_text_for_matching(text):
     return normalize_for_matching(text)[0]
-
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste):
     try:
         key = f"candidat:{token}"
@@ -1640,7 +1542,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         import traceback
         traceback.print_exc()
         redis_client.hset(f"candidat:{token}", mapping={"analyse_status": "error", "analyse_error": str(e), "analyse_auto_date": datetime.datetime.now().isoformat()})
-
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
@@ -1666,12 +1567,10 @@ def get_recommandation_from_score(score, poste=None):
             return "🥈 Entretien si besoin"
         else:
             return "❌ Rejet"
-
 def get_decision_from_score(score, poste=None):
     if not poste or (poste not in POSTES_AVEC_SCORING_100 and poste not in POSTES_AVEC_SCORING_12):
         return None
     return get_recommandation_from_score(score, poste)
-
 def get_recommandation_color(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
@@ -1697,7 +1596,6 @@ def get_recommandation_color(score, poste=None):
             return "FFA500"
         else:
             return "FF0000"
-
 def calculate_ranking_score(c, poste):
     sb = c.get('score_breakdown_parsed', {})
     if sb.get('bloc1_eliminatoire'):
@@ -1714,7 +1612,6 @@ def calculate_ranking_score(c, poste):
     except Exception:
         date_bonus = 0
     return round(score + signaux_count * 0.5 + criteres_ok * 0.2 + lettre_bonus + date_bonus, 3)
-
 def generate_ranking_for_poste(poste, candidats_data):
     pool = [c for c in candidats_data if c.get('poste') == poste]
     for c in pool:
@@ -1725,7 +1622,6 @@ def generate_ranking_for_poste(poste, candidats_data):
         c['ranking_position'] = idx
         c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0), poste)
     return pool
-
 def generate_excel_report(candidats_data, poste_filter=None):
     if not OPENPYXL_AVAILABLE:
         return None
@@ -1816,7 +1712,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
     wb.save(buf)
     buf.seek(0)
     return buf
-
 def generate_csv_report(candidats_data, poste_filter=None):
     out = io.StringIO()
     w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL, quotechar='"')
@@ -1835,7 +1730,6 @@ def generate_csv_report(candidats_data, poste_filter=None):
         w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), str(c.get('statut', '') or ''), 'OUI' if sb.get('bloc1_eliminatoire') else 'NON', str(sb.get('adequation_experience', sb.get('sous_scores', {}).get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0))), str(sb.get('coherence_parcours', sb.get('sous_scores', {}).get("Cohérence et progression du parcours professionnel", 0))), str(sb.get('exposition_risque_metier', sb.get('sous_scores', {}).get("Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)", 0))), str(sb.get('note', '') or ''), str(reco)])
     out.seek(0)
     return out.getvalue()
-
 def generate_pdf_report(candidats_data, poste_filter=None):
     if not REPORTLAB_AVAILABLE:
         return None
@@ -1896,7 +1790,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     doc.build(els)
     buf.seek(0)
     return buf
-
 def generate_word_report(candidats_data, poste_filter=None):
     if not DOCX_AVAILABLE:
         return None
@@ -2016,10 +1909,8 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.save(buf)
     buf.seek(0)
     return buf
-
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
-
 def init_recruteur():
     try:
         redis_client.ping()
@@ -2028,7 +1919,6 @@ def init_recruteur():
         migrate_numero_dossier()
     except Exception as e:
         print(f"⚠️ Redis non disponible au démarrage : {e}")
-
 def migrate_numero_dossier():
     postes_candidates = {}
     for k in redis_client.keys("candidat:*"):
@@ -2060,20 +1950,16 @@ def migrate_numero_dossier():
             max_num += 1
             numero_dossier = str(max_num)
             redis_client.hset(f"candidat:{token}", "numero_dossier", numero_dossier)
-
 init_recruteur()
-
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
     return jsonify(POSTES), 200
-
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
-
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     if request.method == 'OPTIONS':
@@ -2089,7 +1975,6 @@ def login():
             token = create_access_token(identity=r["id"])
             return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
     return jsonify({'error': 'Identifiants incorrects'}), 401
-
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -2147,7 +2032,6 @@ def postuler():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
     data = redis_client.hgetall(f"candidat:{token}")
@@ -2155,7 +2039,6 @@ def get_statut(token):
         return jsonify({'error': 'Candidature introuvable'}), 404
     hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown'}
     return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
-
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
@@ -2171,7 +2054,6 @@ def get_stats():
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
-
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
@@ -2201,7 +2083,6 @@ def list_candidats():
         result.append(c)
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
-
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
@@ -2221,7 +2102,6 @@ def get_candidat_detail(token):
             except Exception:
                 pass
     return jsonify(data), 200
-
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
@@ -2236,7 +2116,6 @@ def update_candidat(token):
         return jsonify({'error': 'Statut invalide'}), 400
     redis_client.hset(key, mapping={"statut": statut, "note": note, "score": score, "decision_date": datetime.datetime.now().isoformat(), "decided_by": get_jwt_identity()})
     return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
-
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
@@ -2253,7 +2132,115 @@ def trigger_analyze(token):
     redis_client.hset(key, mapping={"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()})
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste), daemon=True).start()
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
-
+@app.route('/api/recruteur/reanalyze-all', methods=['POST'])
+@jwt_required()
+def reanalyze_all_candidates():
+    try:
+        keys = redis_client.keys("candidat:*")
+        if not keys:
+            return jsonify({'message': 'Aucune candidature à réanalyser'}), 200
+        reanalyzed_count = 0
+        errors = []
+        for key in keys:
+            try:
+                token = key.split(':', 1)[1]
+                data = redis_client.hgetall(key)
+                cv_fn = data.get('cv_filename')
+                lm_fn = data.get('lettre_filename')
+                att_raw = data.get('attestation_filenames', '[]')
+                poste = data.get('poste')
+                if not cv_fn:
+                    errors.append(f"Token {token}: CV manquant")
+                    continue
+                redis_client.hset(key, mapping={
+                    "analyse_status": "reanalyzing",
+                    "reanalyze_trigger": datetime.datetime.now().isoformat(),
+                    "reanalyze_reason": "Modification des règles de sélection"
+                })
+                threading.Thread(
+                    target=run_analysis_for_candidat,
+                    args=(token, cv_fn, lm_fn, att_raw, poste),
+                    daemon=True
+                ).start()
+                reanalyzed_count += 1
+            except Exception as e:
+                errors.append(f"Token {token}: {str(e)}")
+        return jsonify({
+            'message': f'Réanalyse lancée pour {reanalyzed_count} candidature(s)',
+            'reanalyzed_count': reanalyzed_count,
+            'errors': errors[:10]
+        }), 202
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
+@jwt_required()
+def reanalyze_by_poste(poste):
+    if poste not in POSTES:
+        return jsonify({'error': f'Poste inconnu: {poste}'}), 400
+    try:
+        keys = redis_client.keys("candidat:*")
+        reanalyzed_count = 0
+        errors = []
+        for key in keys:
+            try:
+                token = key.split(':', 1)[1]
+                data = redis_client.hgetall(key)
+                if data.get('poste') != poste:
+                    continue
+                cv_fn = data.get('cv_filename')
+                lm_fn = data.get('lettre_filename')
+                att_raw = data.get('attestation_filenames', '[]')
+                if not cv_fn:
+                    errors.append(f"Token {token}: CV manquant")
+                    continue
+                redis_client.hset(key, mapping={
+                    "analyse_status": "reanalyzing",
+                    "reanalyze_trigger": datetime.datetime.now().isoformat(),
+                    "reanalyze_reason": f"Modification des règles pour le poste: {poste}"
+                })
+                threading.Thread(
+                    target=run_analysis_for_candidat,
+                    args=(token, cv_fn, lm_fn, att_raw, poste),
+                    daemon=True
+                ).start()
+                reanalyzed_count += 1
+            except Exception as e:
+                errors.append(f"Token {token}: {str(e)}")
+        return jsonify({
+            'message': f'Réanalyse lancée pour {reanalyzed_count} candidature(s) du poste "{poste}"',
+            'poste': poste,
+            'reanalyzed_count': reanalyzed_count,
+            'errors': errors[:10]
+        }), 202
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/recruteur/reanalyze-status', methods=['GET'])
+@jwt_required()
+def get_reanalyze_status():
+    try:
+        keys = redis_client.keys("candidat:*")
+        status_counts = {
+            'pending': 0,
+            'reanalyzing': 0,
+            'completed': 0,
+            'error': 0
+        }
+        for key in keys:
+            data = redis_client.hgetall(key)
+            status = data.get('analyse_status', 'pending')
+            if status in status_counts:
+                status_counts[status] += 1
+        return jsonify({
+            'total_candidatures': len(keys),
+            'status_counts': status_counts,
+            'reanalyze_in_progress': status_counts['reanalyzing'] > 0
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -2309,7 +2296,6 @@ def export_candidates(fmt):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -2332,7 +2318,6 @@ def email_preview(token):
         sujet = f"Réponse à votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'intérêt que vous portez à notre institution et du temps consacré à votre candidature pour le poste de {poste}.\nAprès examen attentif de votre dossier, nous avons le regret de vous informer que votre candidature n'a pas été retenue pour la suite du processus de sélection.\nNous vous encourageons à postuler à nouveau pour toute opportunité future." + sign
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
-
 @app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename)
@@ -2343,7 +2328,6 @@ def serve_upload(filename):
         return jsonify({'error': 'Fichier introuvable'}), 404
     mime = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
     return send_from_directory(UPLOAD_FOLDER, safe, mimetype=mime, as_attachment=False)
-
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip():
@@ -2403,7 +2387,7 @@ def export_dossiers_zip():
                 except Exception:
                     pass
                 if not fichiers_a_inclure:
-                    info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {num_dossier}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}\n\nNote: Les fichiers originaux ne sont plus disponibles sur le serveur."
+                    info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {num_dossier}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}\nNote: Les fichiers originaux ne sont plus disponibles sur le serveur."
                     archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
                     zip_file.writestr(archive_name, info_content.encode('utf-8'))
                     files_added += 1
@@ -2427,7 +2411,6 @@ def export_dossiers_zip():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/debug/analyse-ia', methods=['POST'])
 @jwt_required()
 def debug_analyse_ia():
@@ -2441,7 +2424,6 @@ def debug_analyse_ia():
     if result is None:
         return jsonify({'error': "Moteur IA indisponible (clé API manquante ou erreur d'appel) — voir logs serveur"}), 503
     return jsonify(result), 200
-
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     try:
@@ -2452,7 +2434,6 @@ def test_email():
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
