@@ -137,7 +137,7 @@ redis_client = redis.Redis(
     host=os.getenv("REDIS_HOST", "redis-11133.c8.us-east-1-4.ec2.cloud.redislabs.com"),
     port=int(os.getenv("REDIS_PORT", 11133)),
     username="default",
-    password=os.getenv("REDIS_PASSWORD", "WKJdeilasGOWkXJWOHwqcRV7X5uWwQ"),
+    password=os.getenv("REDIS_PASSWORD", "WKJdeilasGOWkXJWOHhqcRV7X5uWwQgF"),
     decode_responses=True,
     socket_connect_timeout=5,
     socket_timeout=5
@@ -355,6 +355,7 @@ STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 NEGATIVE_PATTERNS = [r'\b(pas\s+de|pas\s+d\')\s*(expérience|experience|expérimenté|competence)\b', r'\b(aucun|aucune|aucuns|aucunes)\s*(expérience|experience|competence|connaissance)\b', r'\b(sans|dépourvu\s+de|manque\s+de)\s*(expérience|experience|competence)\b', r'\b(n\')?(?:ai|as|a|avons|avez|ont)\s+pas\s+(?:d\')?(expérience|experience|competence|connaissance)\b', r'\b(jamais\s+(?:eu|travaillé|exercé|pratiqué))\b', r'\b(peu\s+d\')?expérience\b', r'\b(expérience\s+(?:limitée|insuffisante|faible|partielle))\b', r'\b(ne\s+connais\s+pas|ne\s+maîtrise\s+pas|ne\s+possède\s+pas)\b', r'\b(no\s+experience|without\s+experience|lack\s+of\s+experience)\b']
 NEGATIVE_REGEX = re.compile('|'.join(NEGATIVE_PATTERNS), re.IGNORECASE)
+_ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon')
 def normalize_spaces(text):
     if not text:
         return ""
@@ -368,6 +369,35 @@ def normalize_spaces(text):
     for wrong, correct in typo_corrections.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
     return text.strip()
+def normalize_unicode(text):
+    if not text:
+        return ""
+    text = unicodedata.normalize('NFC', text)
+    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+    text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
+    return text.strip()
+def normalize_for_matching(text):
+    if not text:
+        return "", []
+    no_accents = text.lower().translate(_ACCENT_MAP)
+    cleaned = re.sub(r'[^\w\s\-/\.]', ' ', no_accents)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
+    return cleaned, tokens
+def contains_negative_context(text, keyword):
+    if not text or not keyword:
+        return False
+    keyword_pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+    matches = list(keyword_pattern.finditer(text))
+    if not matches:
+        return False
+    for match in matches:
+        start = max(0, match.start() - 100)
+        end = min(len(text), match.end() + 100)
+        context = text[start:end]
+        if NEGATIVE_REGEX.search(context):
+            return True
+    return False
 def is_pdf_scanned(filepath):
     if not PDFPLUMBER_AVAILABLE:
         return False
@@ -569,15 +599,6 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         if re.search(r'(\d+)\s*(?:années?|ans?)', cv_lower) or re.search(r'(\d+)\s*(?:années?|ans?)', letter_lower):
             return True, "Gestion bancaire avec expérience détectée"
     return True, "Cohérent"
-    if letter_text and len(letter_text.strip()) > 10:
-        poste_keywords = poste.lower().split()
-        letter_mentions_poste = any(kw in letter_lower for kw in poste_keywords if len(kw) > 3)
-        if letter_mentions_poste:
-            return True, "Lettre cohérente avec le poste"
-    generic_motivation = ['postule', 'candidature', 'poste', 'offre', 'motivation', 'intérêt']
-    if any(mot in letter_lower for mot in generic_motivation):
-        return True, "Lettre de motivation détectée"
-    return True, "Cohérent"
 def validate_financial_institution_for_market_risk(text):
     text_lower = text.lower()
     text_normalized = normalize_spaces(text_lower)
@@ -616,53 +637,6 @@ def check_not_microfinance_only(raw_text):
     if has_microfinance and not has_commercial_bank and not has_interbank_exposure:
         return False
     return True
-_ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊËÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouuucaaAAEEEEIIOUUUCAAaaonaaon')
-def normalize_unicode(text):
-    if not text:
-        return ""
-    text = unicodedata.normalize('NFC', text)
-    text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
-    text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
-    return text.strip()
-def normalize_for_matching(text):
-    if not text:
-        return "", []
-    no_accents = text.lower().translate(_ACCENT_MAP)
-    cleaned = re.sub(r'[^\w\s\-/\.]', ' ', no_accents)
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
-    return cleaned, tokens
-def contains_negative_context(text, keyword):
-    if not text or not keyword:
-        return False
-    keyword_pattern = re.compile(re.escape(keyword), re.IGNORECASE)
-    matches = list(keyword_pattern.finditer(text))
-    if not matches:
-        return False
-    for match in matches:
-        start = max(0, match.start() - 100)
-        end = min(len(text), match.end() + 100)
-        context = text[start:end]
-        if NEGATIVE_REGEX.search(context):
-            return True
-    return False
-def is_banking_context(text_window):
-    if not text_window:
-        return False
-    text_lower = text_window.lower()
-    if NON_FINANCIAL_PATTERN.search(text_lower):
-        return False
-    if COMMERCIAL_BANK_PATTERN.search(text_lower):
-        return True
-    return False
-def is_it_critical_context(text_window):
-    if not text_window:
-        return False
-    text_lower = text_window.lower()
-    critical_pattern = re.compile('|'.join(['banque', 'bancaire', 'bank', 'banking', 'telco', 'telecom', 'télécom', 'opérateur', 'datacenter', 'centre de données', 'data center', 'hébergement', 'hosting', 'cloud provider', 'faa', 'gouvernement', 'ministère', 'défense', 'hôpital', 'santé', 'critical infrastructure', 'ecobank', 'orabank', 'uba', 'mtn', 'airtel', 'salam', 'financial services', 'telecommunications', 'critical systems']), re.IGNORECASE)
-    if critical_pattern.search(text_lower):
-        return True
-    return False
 def check_criterion_context(criterion, raw_text, poste):
     text_lower = raw_text.lower()
     banking_posts = ["Responsable Administration de Crédit", "Analyste Crédit CCB", "Senior Finance Officer", "Market Risk Officer"]
