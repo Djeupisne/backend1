@@ -2054,7 +2054,7 @@ def serve_upload(filename):
     safe = secure_filename(filename.replace('/', '_'))
     if not safe:
         return jsonify({'error': 'Nom de fichier invalide'}), 400
-    url = get_signed_url(filename, expiration_minutes=30)
+    url = get_signed_url(safe, expiration_minutes=30)  # ✅ utilise safe
     if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
     return redirect(url)
