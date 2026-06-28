@@ -1712,17 +1712,16 @@ def postuler():
             new_num = max_num + 1
             numero_dossier = str(new_num)
         def save_file_to_supabase(field, suffix):
-    f = request.files.get(field)
-    if f and f.filename and allowed_file(f.filename):
-        ext = f.filename.rsplit('.', 1)[-1].lower()
-        blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
-        result = upload_file_to_supabase(f, blob_name, f.content_type)
-        return result if result else ''
-    return ''
+            f = request.files.get(field)
+            if f and f.filename and allowed_file(f.filename):
+                ext = f.filename.rsplit('.', 1)[-1].lower()
+                blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
+                result = upload_file_to_supabase(f, blob_name, f.content_type)
+                return result if result else ''
+            return ''
         cv_filename = save_file_to_supabase('cv', 'cv')
         if request.files.get('cv') and not cv_filename:
             return jsonify({'error': "Échec de l'envoi du CV, merci de réessayer."}), 500
-
         lettre_filename = save_file_to_supabase('lettre', 'lettre')
         if request.files.get('lettre') and not lettre_filename:
             return jsonify({'error': "Échec de l'envoi de la lettre de motivation, merci de réessayer."}), 500
@@ -1731,8 +1730,9 @@ def postuler():
             if f and f.filename and allowed_file(f.filename):
                 ext = f.filename.rsplit('.', 1)[-1].lower()
                 blob_name = f"{uuid.uuid4().hex}_attestation.{ext}"
-                upload_file_to_supabase(f, blob_name, f.content_type)
-                att_filenames.append(blob_name)
+                result = upload_file_to_supabase(f, blob_name, f.content_type)
+                if result:
+                    att_filenames.append(blob_name)
         token = uuid.uuid4().hex
         supabase.table('candidats').insert({
             "token": token,
@@ -2059,7 +2059,7 @@ def serve_upload(filename):
     safe = secure_filename(filename.replace('/', '_'))
     if not safe:
         return jsonify({'error': 'Nom de fichier invalide'}), 400
-    url = get_signed_url(safe, expiration_minutes=30)  # ✅ utilise safe
+    url = get_signed_url(safe, expiration_minutes=30)
     if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
     return redirect(url)
