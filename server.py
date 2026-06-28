@@ -1712,15 +1712,20 @@ def postuler():
             new_num = max_num + 1
             numero_dossier = str(new_num)
         def save_file_to_supabase(field, suffix):
-            f = request.files.get(field)
-            if f and f.filename and allowed_file(f.filename):
-                ext = f.filename.rsplit('.', 1)[-1].lower()
-                blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
-                upload_file_to_supabase(f, blob_name, f.content_type)
-                return blob_name
-            return ''
+    f = request.files.get(field)
+    if f and f.filename and allowed_file(f.filename):
+        ext = f.filename.rsplit('.', 1)[-1].lower()
+        blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
+        result = upload_file_to_supabase(f, blob_name, f.content_type)
+        return result if result else ''
+    return ''
         cv_filename = save_file_to_supabase('cv', 'cv')
+        if request.files.get('cv') and not cv_filename:
+            return jsonify({'error': "Échec de l'envoi du CV, merci de réessayer."}), 500
+
         lettre_filename = save_file_to_supabase('lettre', 'lettre')
+        if request.files.get('lettre') and not lettre_filename:
+            return jsonify({'error': "Échec de l'envoi de la lettre de motivation, merci de réessayer."}), 500
         att_filenames = []
         for f in request.files.getlist('attestation'):
             if f and f.filename and allowed_file(f.filename):
