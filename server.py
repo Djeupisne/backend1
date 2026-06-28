@@ -1723,11 +1723,11 @@ def postuler():
             lettre_filename = save_file_to_supabase('lettre', 'lettre')
             att_filenames = []
             for f in request.files.getlist('attestation'):
-                if f and f.filename and allowed_file(f.filename):
-                    ext = f.filename.rsplit('.', 1)[-1].lower()
-                    blob_name = f"candidatures/{uuid.uuid4().hex}_attestation.{ext}"
-                    upload_file_to_supabase(f, blob_name, f.content_type)
-                    att_filenames.append(blob_name)
+    if f and f.filename and allowed_file(f.filename):
+        ext = f.filename.rsplit('.', 1)[-1].lower()
+        blob_name = f"{uuid.uuid4().hex}_attestation.{ext}"  
+        upload_file_to_supabase(f, blob_name, f.content_type)
+        att_filenames.append(blob_name)
             token = uuid.uuid4().hex
             supabase.table('candidats').insert({
                 "token": token,
