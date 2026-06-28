@@ -1,10 +1,10 @@
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, smtplib, time
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import os, hashlib, datetime, uuid, redis, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time
 from werkzeug.utils import secure_filename
+from firebase_admin import credentials, storage, initialize_app
+import firebase_admin
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -148,16 +148,44 @@ app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
 app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupisne@gmail.com>')
 app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
-UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
-REPORTS_FOLDER = os.path.join(os.path.dirname(__file__), 'reports')
-CHUNKS_FOLDER = os.path.join(UPLOAD_FOLDER, 'chunks')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(REPORTS_FOLDER, exist_ok=True)
-os.makedirs(CHUNKS_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "firebase-credentials.json")
+FIREBASE_STORAGE_BUCKET = os.getenv("FIREBASE_STORAGE_BUCKET", "")
+if not firebase_admin._apps:
+    cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
+    if FIREBASE_STORAGE_BUCKET:
+        initialize_app(cred, {'storageBucket': FIREBASE_STORAGE_BUCKET})
+    else:
+        initialize_app(cred)
+def upload_file_to_firebase(file_obj, blob_name, content_type=None):
+    bucket = storage.bucket()
+    blob = bucket.blob(blob_name)
+    if content_type:
+        blob.upload_from_file(file_obj, content_type=content_type)
+    else:
+        blob.upload_from_file(file_obj)
+    return blob_name
+def download_file_from_firebase(blob_name):
+    bucket = storage.bucket()
+    blob = bucket.blob(blob_name)
+    if not blob.exists():
+        return None
+    data = blob.download_as_bytes()
+    return data
+def get_signed_url(blob_name, expiration_minutes=60):
+    bucket = storage.bucket()
+    blob = bucket.blob(blob_name)
+    if not blob.exists():
+        return None
+    url = blob.generate_signed_url(
+        version="v4",
+        expiration=datetime.timedelta(minutes=expiration_minutes),
+        method="GET"
+    )
+    return url
 def send_email(to_email, subject, body):
     import requests
     import re as _re
@@ -398,19 +426,7 @@ def contains_negative_context(text, keyword):
         if NEGATIVE_REGEX.search(context):
             return True
     return False
-def is_pdf_scanned(filepath):
-    if not PDFPLUMBER_AVAILABLE:
-        return False
-    try:
-        with pdfplumber.open(filepath) as pdf:
-            for i, page in enumerate(pdf.pages[:2]):
-                text = page.extract_text()
-                if text and len(text.strip()) > 50:
-                    return False
-        return True
-    except Exception:
-        return False
-def extract_text_from_pdf_via_ocr(filepath):
+def extract_text_from_pdf_via_ocr(file_bytes):
     if not OCR_AVAILABLE:
         return ""
     try:
@@ -418,26 +434,23 @@ def extract_text_from_pdf_via_ocr(filepath):
     except Exception:
         return ""
     try:
-        images = convert_from_path(filepath, dpi=300, first_page=1, last_page=10)
-        all_text = []
-        for i, img in enumerate(images, 1):
-            if img.mode != 'L':
-                img = img.convert('L')
-            custom_config = r'--oem 3 --psm 6 -l fra+eng'
-            text = pytesseract.image_to_string(img, config=custom_config)
-            if text.strip():
-                text = normalize_spaces(text)
-                text = re.sub(r'[|¦]', '', text)
-                all_text.append(f"--- Page {i} ---\n{text}")
-        result = "\n".join(all_text)
-        return normalize_unicode(result)
+        img = Image.open(io.BytesIO(file_bytes))
+        if img.mode != 'L':
+            img = img.convert('L')
+        custom_config = r'--oem 3 --psm 6 -l fra+eng'
+        text = pytesseract.image_to_string(img, config=custom_config)
+        if text.strip():
+            text = normalize_spaces(text)
+            text = re.sub(r'[|¦]', '', text)
+            return normalize_unicode(text)
+        return ""
     except Exception:
         return ""
-def extract_text_from_pdf_robust(filepath):
+def extract_text_from_pdf_robust(file_bytes, filename):
     text = ""
     if PDFPLUMBER_AVAILABLE:
         try:
-            with pdfplumber.open(filepath) as pdf:
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                 for page in pdf.pages:
                     tables = page.extract_tables()
                     if tables:
@@ -450,39 +463,31 @@ def extract_text_from_pdf_robust(filepath):
                     content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
                     if content:
                         text += normalize_spaces(content) + "\n"
-            if text.strip() and len(text.strip()) > 100:
-                return normalize_unicode(text.strip())
+                if text.strip() and len(text.strip()) > 100:
+                    return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ pdfplumber erreur: {e}")
     if PYPDF2_AVAILABLE:
         try:
-            with open(filepath, 'rb') as f:
-                reader = PyPDF2.PdfReader(f)
-                for page in reader.pages:
-                    content = page.extract_text()
-                    if content:
-                        text += normalize_spaces(content) + "\n"
+            reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            for page in reader.pages:
+                content = page.extract_text()
+                if content:
+                    text += normalize_spaces(content) + "\n"
             if text.strip() and len(text.strip()) > 100:
                 return normalize_unicode(text.strip())
         except Exception as e:
             print(f"⚠️ PyPDF2 erreur: {e}")
-    try:
-        import subprocess
-        result = subprocess.run(['pdftotext', '-layout', filepath, '-'], capture_output=True, text=True, timeout=30)
-        if result.returncode == 0 and result.stdout.strip() and len(result.stdout.strip()) > 100:
-            return normalize_unicode(normalize_spaces(result.stdout.strip()))
-    except Exception:
-        pass
-    if is_pdf_scanned(filepath):
-        ocr_text = extract_text_from_pdf_via_ocr(filepath)
+    if len(text.strip()) < 100:
+        ocr_text = extract_text_from_pdf_via_ocr(file_bytes)
         if ocr_text and len(ocr_text.strip()) > 100:
             return ocr_text
     return ""
-def extract_text_from_docx_robust(filepath, raw_bytes=None):
+def extract_text_from_docx_robust(file_bytes):
     if not DOCX_AVAILABLE:
         return ""
     try:
-        doc = Document(filepath)
+        doc = Document(io.BytesIO(file_bytes))
         W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
         W_T = f'{{{W_NS}}}t'
         texts = [e.text for e in doc.element.body.iter(W_T) if e.text and e.text.strip()]
@@ -492,7 +497,7 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
     except Exception as e:
         print(f"⚠️ Erreur lecture DOCX (XML): {e}")
     try:
-        doc = Document(filepath)
+        doc = Document(io.BytesIO(file_bytes))
         parts = []
         for para in doc.paragraphs:
             t = normalize_spaces(para.text)
@@ -511,50 +516,40 @@ def extract_text_from_docx_robust(filepath, raw_bytes=None):
         return normalize_unicode(result)
     except Exception as e2:
         print(f"⚠️ Fallback DOCX échoué: {e2}")
-    if raw_bytes:
-        try:
-            text = re.sub(r'[^\x20-\x7E\u00C0-\u017F]+', ' ', raw_bytes.decode('utf-8', errors='ignore'))
-            return normalize_unicode(normalize_spaces(text.strip()))
-        except Exception:
-            pass
+    try:
+        text = re.sub(r'[^\x20-\x7E\u00C0-\u017F]+', ' ', file_bytes.decode('utf-8', errors='ignore'))
+        return normalize_unicode(normalize_spaces(text.strip()))
+    except Exception:
+        pass
     return ""
-def extract_text_from_txt(filepath, raw_bytes=None):
-    if raw_bytes and CHARDET_AVAILABLE:
+def extract_text_from_txt(file_bytes):
+    if CHARDET_AVAILABLE:
         try:
-            detected = chardet.detect(raw_bytes[:10000])
+            detected = chardet.detect(file_bytes[:10000])
             encoding = detected['encoding'] or 'utf-8'
-            return normalize_unicode(normalize_spaces(raw_bytes.decode(encoding, errors='ignore')))
+            return normalize_unicode(normalize_spaces(file_bytes.decode(encoding, errors='ignore')))
         except Exception:
             pass
     for enc in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']:
         try:
-            with open(filepath, 'r', encoding=enc) as f:
-                return normalize_unicode(normalize_spaces(f.read().strip()))
+            return normalize_unicode(normalize_spaces(file_bytes.decode(enc, errors='ignore').strip()))
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
-def extract_text_robust(filepath, filename):
-    if not filepath or not os.path.exists(filepath):
+def extract_text_robust_from_bytes(file_bytes, filename):
+    if not file_bytes:
         return ""
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    raw_bytes = None
-    if CHARDET_AVAILABLE and ext in ('doc', 'docx', 'txt'):
-        try:
-            with open(filepath, 'rb') as f:
-                raw_bytes = f.read()
-        except Exception:
-            pass
     if ext == 'pdf':
-        return extract_text_from_pdf_robust(filepath)
+        return extract_text_from_pdf_robust(file_bytes, filename)
     elif ext in ('doc', 'docx'):
-        return extract_text_from_docx_robust(filepath, raw_bytes)
+        return extract_text_from_docx_robust(file_bytes)
     elif ext == 'txt':
-        return extract_text_from_txt(filepath, raw_bytes)
-    if raw_bytes:
-        try:
-            return normalize_unicode(normalize_spaces(raw_bytes.decode('utf-8', errors='ignore').strip()))
-        except Exception:
-            pass
+        return extract_text_from_txt(file_bytes)
+    try:
+        return normalize_unicode(normalize_spaces(file_bytes.decode('utf-8', errors='ignore').strip()))
+    except Exception:
+        pass
     return ""
 def detect_institution_type(text):
     text_lower = text.lower()
@@ -591,14 +586,14 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         letter_matches = sum(1 for kw in technical_keywords if kw in letter_lower)
         if cv_matches > 0 or letter_matches > 0:
             return True, "Compétences Market Risk détectées"
-    if ('risque' in cv_lower or 'risque' in letter_lower) and ('banque' in cv_lower or 'uba' in cv_lower or 'ecobank' in cv_lower or 'orabank' in cv_lower):
-        return True, "Profil risque en banque détecté"
-    if ('responsable' in cv_lower or 'responsable' in letter_lower) and ('risque' in cv_lower or 'risque' in letter_lower):
-        return True, "Responsable risque détecté"
-    if re.search(r'gestion\s+bancaire', cv_lower) or re.search(r'gestion\s+bancaire', letter_lower):
-        if re.search(r'(\d+)\s*(?:années?|ans?)', cv_lower) or re.search(r'(\d+)\s*(?:années?|ans?)', letter_lower):
-            return True, "Gestion bancaire avec expérience détectée"
-    return True, "Cohérent"
+        if ('risque' in cv_lower or 'risque' in letter_lower) and ('banque' in cv_lower or 'uba' in cv_lower or 'ecobank' in cv_lower or 'orabank' in cv_lower):
+            return True, "Profil risque en banque détecté"
+        if ('responsable' in cv_lower or 'responsable' in letter_lower) and ('risque' in cv_lower or 'risque' in letter_lower):
+            return True, "Responsable risque détecté"
+        if re.search(r'gestion\s+bancaire', cv_lower) or re.search(r'gestion\s+bancaire', letter_lower):
+            if re.search(r'(\d+)\s*(?:années?|ans?)', cv_lower) or re.search(r'(\d+)\s*(?:années?|ans?)', letter_lower):
+                return True, "Gestion bancaire avec expérience détectée"
+        return True, "Cohérent"
 def validate_financial_institution_for_market_risk(text):
     text_lower = text.lower()
     text_normalized = normalize_spaces(text_lower)
@@ -1155,10 +1150,10 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
         try:
             with _ia_semaphore:
                 response = _claude_client.messages.create(model=ANTHROPIC_MODEL, max_tokens=4096, temperature=0, system=SYSTEM_PROMPT_RECRUTEUR, tools=[tool], tool_choice={"type": "tool", "name": "soumettre_analyse_candidature"}, messages=[{"role": "user", "content": user_msg}])
-            tool_use = next((b for b in response.content if b.type == "tool_use"), None)
-            if not tool_use:
-                return None
-            return _build_result_from_ia_analysis(tool_use.input, poste)
+                tool_use = next((b for b in response.content if b.type == "tool_use"), None)
+                if not tool_use:
+                    return None
+                return _build_result_from_ia_analysis(tool_use.input, poste)
         except Exception as e:
             last_error = e
             time.sleep(2)
@@ -1480,17 +1475,24 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
-        cv_path = os.path.join(UPLOAD_FOLDER, cv_filename) if cv_filename else None
-        cv_text = extract_text_robust(cv_path, cv_filename) if cv_path else ""
-        lm_path = os.path.join(UPLOAD_FOLDER, lettre_filename) if lettre_filename else None
-        lm_text = extract_text_robust(lm_path, lettre_filename) if lm_path else ""
+        cv_text = ""
+        if cv_filename:
+            cv_bytes = download_file_from_firebase(cv_filename)
+            if cv_bytes:
+                cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
+        lm_text = ""
+        if lettre_filename:
+            lm_bytes = download_file_from_firebase(lettre_filename)
+            if lm_bytes:
+                lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
         att_texts = []
         for fn in (attestation_filenames or []):
-            ap = os.path.join(UPLOAD_FOLDER, fn)
-            if os.path.exists(ap):
-                t = extract_text_robust(ap, fn)
-                if t:
-                    att_texts.append(t)
+            if fn:
+                att_bytes = download_file_from_firebase(fn)
+                if att_bytes:
+                    t = extract_text_robust_from_bytes(att_bytes, fn)
+                    if t:
+                        att_texts.append(t)
         detected_lang = detect_language(cv_text[:500]) if cv_text else None
         nlp_enrichment = enrich_analysis_with_nlp(cv_text, lm_text, detected_lang)
         if nlp_enrichment:
@@ -1504,10 +1506,10 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 detailed_result = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
                 if detailed_result:
                     result = {'score': detailed_result['score'], 'checklist': {}, 'flags_eliminatoires': [], 'signaux_detectes': [], 'details': detailed_result['details'], 'score_breakdown': {'bloc1_eliminatoire': False, 'scoring_type': '100_points', 'bloc_cv': detailed_result['bloc_cv'], 'bloc_lm': detailed_result['bloc_lm'], 'bloc_diplomes': detailed_result['bloc_diplomes'], 'score_final': detailed_result['score'], 'decision': detailed_result['decision'], 'note': detailed_result['note']}}
-                else:
-                    result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
             else:
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+        else:
+            result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
         redis_client.hset(key, mapping={"score": str(result['score']), "checklist": json.dumps(result['checklist'], ensure_ascii=False), "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False), "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False), "analyse_details": json.dumps(result['details'], ensure_ascii=False), "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False), "analyse_auto_date": datetime.datetime.now().isoformat(), "analyse_status": "completed"})
         moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés'))
         tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
@@ -1977,23 +1979,23 @@ def postuler():
                         pass
         new_num = max_num + 1
         numero_dossier = str(new_num)
-        def save_file(field, suffix):
+        def save_file_to_firebase(field, suffix):
             f = request.files.get(field)
             if f and f.filename and allowed_file(f.filename):
                 ext = f.filename.rsplit('.', 1)[-1].lower()
-                fn = f"{uuid.uuid4().hex}_{suffix}.{ext}"
-                f.save(os.path.join(UPLOAD_FOLDER, fn))
-                return fn
+                blob_name = f"candidatures/{uuid.uuid4().hex}_{suffix}.{ext}"
+                upload_file_to_firebase(f, blob_name, f.content_type)
+                return blob_name
             return ''
-        cv_filename = save_file('cv', 'cv')
-        lettre_filename = save_file('lettre', 'lettre')
+        cv_filename = save_file_to_firebase('cv', 'cv')
+        lettre_filename = save_file_to_firebase('lettre', 'lettre')
         att_filenames = []
         for f in request.files.getlist('attestation'):
             if f and f.filename and allowed_file(f.filename):
                 ext = f.filename.rsplit('.', 1)[-1].lower()
-                fn = f"{uuid.uuid4().hex}_attestation.{ext}"
-                f.save(os.path.join(UPLOAD_FOLDER, fn))
-                att_filenames.append(fn)
+                blob_name = f"candidatures/{uuid.uuid4().hex}_attestation.{ext}"
+                upload_file_to_firebase(f, blob_name, f.content_type)
+                att_filenames.append(blob_name)
         token = uuid.uuid4().hex
         redis_client.hset(f"candidat:{token}", mapping={"nom": nom, "prenom": prenom, "email": email, "telephone": telephone, "poste": poste, "numero_dossier": numero_dossier, "cv_filename": cv_filename, "lettre_filename": lettre_filename, "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False), "statut": "en_attente", "note": "", "score": "0", "checklist": "", "flags_eliminatoires": "", "signaux_detectes": "", "score_breakdown": "", "analyse_status": "pending", "date_candidature": datetime.datetime.now().isoformat()})
         threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste), daemon=True).start()
@@ -2292,16 +2294,15 @@ def email_preview(token):
         sujet = f"Réponse à votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'intérêt que vous portez à notre institution et du temps consacré à votre candidature pour le poste de {poste}.\nAprès examen attentif de votre dossier, nous avons le regret de vous informer que votre candidature n'a pas été retenue pour la suite du processus de sélection.\nNous vous encourageons à postuler à nouveau pour toute opportunité future." + sign
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
-@app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
+@app.route('/api/recruteur/uploads/<path:filename>', methods=['GET'])
 def serve_upload(filename):
-    safe = secure_filename(filename)
-    if not safe or safe != filename:
+    safe = secure_filename(filename.replace('/', '_'))
+    if not safe:
         return jsonify({'error': 'Nom de fichier invalide'}), 400
-    fp = os.path.join(UPLOAD_FOLDER, safe)
-    if not os.path.exists(fp):
+    url = get_signed_url(filename, expiration_minutes=30)
+    if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
-    mime = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
-    return send_from_directory(UPLOAD_FOLDER, safe, mimetype=mime, as_attachment=False)
+    return redirect(url)
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip():
@@ -2342,22 +2343,22 @@ def export_dossiers_zip():
                 fichiers_a_inclure = []
                 cv_file = cand.get('cv_filename', '')
                 if cv_file:
-                    cv_path = os.path.join(UPLOAD_FOLDER, cv_file)
-                    if os.path.exists(cv_path):
-                        fichiers_a_inclure.append((cv_file, 'CV'))
+                    cv_bytes = download_file_from_firebase(cv_file)
+                    if cv_bytes:
+                        fichiers_a_inclure.append((cv_bytes, cv_file, 'CV'))
                 lettre_file = cand.get('lettre_filename', '')
                 if lettre_file:
-                    lettre_path = os.path.join(UPLOAD_FOLDER, lettre_file)
-                    if os.path.exists(lettre_path):
-                        fichiers_a_inclure.append((lettre_file, 'Lettre_de_motivation'))
+                    lettre_bytes = download_file_from_firebase(lettre_file)
+                    if lettre_bytes:
+                        fichiers_a_inclure.append((lettre_bytes, lettre_file, 'Lettre_de_motivation'))
                 att_raw = cand.get('attestation_filenames', '[]')
                 try:
                     att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
                     for idx, att_file in enumerate(att_files, 1):
                         if att_file:
-                            att_path = os.path.join(UPLOAD_FOLDER, att_file)
-                            if os.path.exists(att_path):
-                                fichiers_a_inclure.append((att_file, f'Attestation_{idx}'))
+                            att_bytes = download_file_from_firebase(att_file)
+                            if att_bytes:
+                                fichiers_a_inclure.append((att_bytes, att_file, f'Attestation_{idx}'))
                 except Exception:
                     pass
                 if not fichiers_a_inclure:
@@ -2366,12 +2367,11 @@ def export_dossiers_zip():
                     zip_file.writestr(archive_name, info_content.encode('utf-8'))
                     files_added += 1
                 else:
-                    for original_filename, prefix in fichiers_a_inclure:
-                        filepath = os.path.join(UPLOAD_FOLDER, original_filename)
+                    for file_bytes, original_filename, prefix in fichiers_a_inclure:
                         ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
                         archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
                         try:
-                            zip_file.write(filepath, archive_name)
+                            zip_file.writestr(archive_name, file_bytes)
                             files_added += 1
                         except Exception:
                             pass
