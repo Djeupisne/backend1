@@ -471,10 +471,10 @@ def extract_real_employers(text: str) -> List[Dict]:
     )
     
     experience_context = re.compile(
-        r'(?:j\'?ai|j[\''](?:ai|\'(?:été|occup[ée])))\s+(?:travaill[ée]|occup[ée]|exerc[ée]|offici[ée])\s+'
-        r'(?:chez|pour|au\s+sein\s+de|dans)\s+([A-ZÉÈÊË][\w\s\-\.]{2,40})',
-        re.IGNORECASE
-    )
+    r"(?:j'?ai|j['\"](?:ai|'(?:été|occup[ée])))\s+(?:travaill[ée]|occup[ée]|exerc[ée]|offici[ée])\s+"
+    r"(?:chez|pour|au\s+sein\s+de|dans)\s+([A-ZÉÈÊË][\w\s\-\.]{2,40})",
+    re.IGNORECASE
+)
     
     for match in pattern1.finditer(text):
         poste = match.group(1).strip()
