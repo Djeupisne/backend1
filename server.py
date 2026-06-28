@@ -1712,13 +1712,13 @@ def postuler():
             new_num = max_num + 1
             numero_dossier = str(new_num)
             def save_file_to_supabase(field, suffix):
-                f = request.files.get(field)
-                if f and f.filename and allowed_file(f.filename):
-                    ext = f.filename.rsplit('.', 1)[-1].lower()
-                    blob_name = f"candidatures/{uuid.uuid4().hex}_{suffix}.{ext}"
-                    upload_file_to_supabase(f, blob_name, f.content_type)
-                    return blob_name
-                return ''
+    f = request.files.get(field)
+    if f and f.filename and allowed_file(f.filename):
+        ext = f.filename.rsplit('.', 1)[-1].lower()
+        blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"  
+        upload_file_to_supabase(f, blob_name, f.content_type)
+        return blob_name
+    return ''
             cv_filename = save_file_to_supabase('cv', 'cv')
             lettre_filename = save_file_to_supabase('lettre', 'lettre')
             att_filenames = []
