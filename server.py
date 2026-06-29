@@ -2158,7 +2158,7 @@ def email_preview(token):
     nom_c = f"{data.get('prenom', '')} {data.get('nom', '')}".strip()
     poste = data.get('poste', '')
     to_email = data.get('email', '')
-    sign = "\n\nCordialement,\nL'équipe Ressources Humaines\nRecrutBank"
+    sign = "\nCordialement,\nL'équipe Ressources Humaines\nRecrutBank"
     if msg_type == 'retenu':
         sujet = f"Félicitations – Candidature retenue – {poste}"
         corps = f"Madame, Monsieur {nom_c},\n\nNous avons le plaisir de vous informer que votre candidature pour le poste de {poste} a été retenue.\n\nNous vous contacterons très prochainement." + sign
