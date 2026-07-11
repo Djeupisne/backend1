@@ -2311,29 +2311,20 @@ def serve_upload(filename):
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip():
+    # === NOUVEAU : Timer pour savoir combien de temps ça prend ===
+    import time
+    start_time = time.time()
+    print(f"⏱️ Début export ZIP - {datetime.datetime.now()}")
+    # ===========================================================
+    
     try:
         poste_filter = request.args.get('poste', '')
         date_start = request.args.get('date_start', '')
         date_end = request.args.get('date_end', '')
         
-        # === NOUVEAU : VALIDATION DES DATES ===
-        if date_start and date_end:
-            try:
-                start_dt = datetime.datetime.strptime(date_start, '%Y-%m-%d')
-                end_dt = datetime.datetime.strptime(date_end, '%Y-%m-%d')
-                days_diff = (end_dt - start_dt).days
-                if days_diff > 30:
-                    return jsonify({
-                        'error': 'La plage de dates ne peut pas dépasser 30 jours',
-                        'days_requested': days_diff
-                    }), 400
-            except ValueError:
-                return jsonify({'error': 'Format de date invalide. Utilisez YYYY-MM-DD'}), 400
-        
         if not supabase:
             return jsonify({'error': 'Supabase non configuré'}), 500
         
-        # Récupérer les candidats
         response = supabase.table('candidats').select('*').execute()
         all_candidats = response.data if response.data else []
         
@@ -2351,122 +2342,76 @@ def export_dossiers_zip():
                     continue
             candidats.append(c)
         
-        # === NOUVEAU : LIMITE DU NOMBRE DE CANDIDATS ===
-        MAX_CANDIDATS = 50
-        if len(candidats) > MAX_CANDIDATS:
-            return jsonify({
-                'error': f'Trop de candidats ({len(candidats)}). Maximum {MAX_CANDIDATS}.',
-                'max_allowed': MAX_CANDIDATS
-            }), 400
-        
         if not candidats:
             return jsonify({'error': 'Aucun dossier à exporter'}), 404
         
-        # === NOUVEAU : FONCTION DE GÉNÉRATION EN STREAMING ===
-        def generate_zip_stream():
-            """Génère le ZIP en streaming pour économiser la mémoire"""
-            zip_buffer = io.BytesIO()
-            
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                total_candidats = len(candidats)
-                
-                for idx, cand in enumerate(candidats, 1):
-                    logger.info(f"Traitement {idx}/{total_candidats}: {cand.get('nom', 'N/A')}")
-                    
-                    poste_nom = cand.get('poste', 'Poste_Inconnu')
-                    poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
-                    num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
-                    nom_candidat = cand.get('nom', 'N/A').upper()
-                    prenom_candidat = cand.get('prenom', 'N/A')
-                    
-                    dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
-                    dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
-                    dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
-                    
-                    fichiers_trouves = 0
-                    
-                    # CV
-                    cv_file = cand.get('cv_filename', '')
-                    if cv_file:
-                        try:
-                            cv_bytes = download_file_from_supabase(cv_file)
-                            if cv_bytes:
-                                ext = cv_file.rsplit('.', 1)[-1].lower() if '.' in cv_file else 'pdf'
-                                archive_name = f"{dossier_parent}/CV.{ext}"
-                                zip_file.writestr(archive_name, cv_bytes)
-                                fichiers_trouves += 1
-                                del cv_bytes  # === NOUVEAU : LIBÉRATION MÉMOIRE ===
-                        except Exception as e:
-                            logger.warning(f"Erreur CV pour {cand.get('nom')}: {e}")
-                    
-                    # Lettre de motivation
-                    lettre_file = cand.get('lettre_filename', '')
-                    if lettre_file:
-                        try:
-                            lettre_bytes = download_file_from_supabase(lettre_file)
-                            if lettre_bytes:
-                                ext = lettre_file.rsplit('.', 1)[-1].lower() if '.' in lettre_file else 'pdf'
-                                archive_name = f"{dossier_parent}/Lettre_de_motivation.{ext}"
-                                zip_file.writestr(archive_name, lettre_bytes)
-                                fichiers_trouves += 1
-                                del lettre_bytes  # === NOUVEAU : LIBÉRATION MÉMOIRE ===
-                        except Exception as e:
-                            logger.warning(f"Erreur Lettre pour {cand.get('nom')}: {e}")
-                    
-                    # Attestations
-                    att_raw = cand.get('attestation_filenames', '[]')
-                    try:
-                        att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
-                        for att_idx, att_file in enumerate(att_files, 1):
-                            if att_file:
-                                try:
-                                    att_bytes = download_file_from_supabase(att_file)
-                                    if att_bytes:
-                                        ext = att_file.rsplit('.', 1)[-1].lower() if '.' in att_file else 'pdf'
-                                        archive_name = f"{dossier_parent}/Attestation_{att_idx}.{ext}"
-                                        zip_file.writestr(archive_name, att_bytes)
-                                        fichiers_trouves += 1
-                                        del att_bytes  # === NOUVEAU : LIBÉRATION MÉMOIRE ===
-                                except Exception as e:
-                                    logger.warning(f"Erreur Attestation pour {cand.get('nom')}: {e}")
-                    except Exception as e:
-                        logger.warning(f"Erreur parsing attestations: {e}")
-                    
-                    # Si aucun fichier trouvé
-                    if fichiers_trouves == 0:
-                        info_content = f"""Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}
-Poste: {cand.get('poste', 'N/A')}
-Numéro dossier: {num_dossier}
-Email: {cand.get('email', 'N/A')}
-Téléphone: {cand.get('telephone', 'N/A')}
-Date candidature: {cand.get('date_candidature', 'N/A')}
-Statut: {cand.get('statut', 'N/A')}
-Note: Les fichiers originaux ne sont plus disponibles."""
-                        archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
-                        zip_file.writestr(archive_name, info_content.encode('utf-8'))
-                    
-                    # === NOUVEAU : NETTOYAGE MÉMOIRE RÉGULIER ===
-                    if idx % 10 == 0:
-                        import gc
-                        gc.collect()
-                
-                zip_buffer.seek(0)
-                yield zip_buffer.getvalue()
+        zip_buffer = io.BytesIO()
+        files_added = 0
         
-        # === NOUVEAU : RÉPONSE EN STREAMING ===
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for cand in candidats:
+                poste_nom = cand.get('poste', 'Poste_Inconnu')
+                poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
+                num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+                nom_candidat = cand.get('nom', 'N/A').upper()
+                prenom_candidat = cand.get('prenom', 'N/A')
+                
+                dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
+                dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
+                dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
+                
+                fichiers_a_inclure = []
+                
+                cv_file = cand.get('cv_filename', '')
+                if cv_file:
+                    cv_bytes = download_file_from_supabase(cv_file)
+                    if cv_bytes:
+                        fichiers_a_inclure.append((cv_bytes, cv_file, 'CV'))
+                
+                lettre_file = cand.get('lettre_filename', '')
+                if lettre_file:
+                    lettre_bytes = download_file_from_supabase(lettre_file)
+                    if lettre_bytes:
+                        fichiers_a_inclure.append((lettre_bytes, lettre_file, 'Lettre_de_motivation'))
+                
+                att_raw = cand.get('attestation_filenames', '[]')
+                try:
+                    att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
+                    for idx, att_file in enumerate(att_files, 1):
+                        if att_file:
+                            att_bytes = download_file_from_supabase(att_file)
+                            if att_bytes:
+                                fichiers_a_inclure.append((att_bytes, att_file, f'Attestation_{idx}'))
+                except Exception:
+                    pass
+                
+                if not fichiers_a_inclure:
+                    info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {num_dossier}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}"
+                    archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
+                    zip_file.writestr(archive_name, info_content.encode('utf-8'))
+                    files_added += 1
+                else:
+                    for file_bytes, original_filename, prefix in fichiers_a_inclure:
+                        ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
+                        archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
+                        try:
+                            zip_file.writestr(archive_name, file_bytes)
+                            files_added += 1
+                        except Exception:
+                            pass
+        
+        zip_buffer.seek(0)
+        
+        # === NOUVEAU : Afficher le temps écoulé ===
+        elapsed = time.time() - start_time
+        print(f"✅ Export ZIP terminé en {elapsed:.2f} secondes pour {len(candidats)} candidats")
+        # =======================================
+        
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
         filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
         
-        from flask import Response, stream_with_context
-        return Response(
-            stream_with_context(generate_zip_stream()),
-            mimetype='application/zip',
-            headers={
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Type': 'application/zip'
-            }
-        )
+        return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=filename)
         
     except Exception as e:
         import traceback
