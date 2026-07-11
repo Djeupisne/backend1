@@ -2311,23 +2311,22 @@ def serve_upload(filename):
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip():
-    # === NOUVEAU : Timer pour savoir combien de temps ça prend ===
     import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     start_time = time.time()
     print(f"⏱️ Début export ZIP - {datetime.datetime.now()}")
-    # ===========================================================
-    
+
     try:
         poste_filter = request.args.get('poste', '')
         date_start = request.args.get('date_start', '')
         date_end = request.args.get('date_end', '')
-        
+
         if not supabase:
             return jsonify({'error': 'Supabase non configuré'}), 500
-        
+
         response = supabase.table('candidats').select('*').execute()
         all_candidats = response.data if response.data else []
-        
+
         candidats = []
         for c in all_candidats:
             c['id'] = c.get('token', '')
@@ -2341,52 +2340,89 @@ def export_dossiers_zip():
                 if date_end and date_only > date_end:
                     continue
             candidats.append(c)
-        
+
         if not candidats:
             return jsonify({'error': 'Aucun dossier à exporter'}), 404
-        
+
+        # --- 1) Construire la liste de TOUS les fichiers à télécharger ---
+        download_tasks = []
+        candidats_meta = {}
+
+        for cand in candidats:
+            poste_nom = cand.get('poste', 'Poste_Inconnu')
+            poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
+            num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+            nom_candidat = cand.get('nom', 'N/A').upper()
+            prenom_candidat = cand.get('prenom', 'N/A')
+
+            dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
+            dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
+            dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
+
+            candidats_meta[cand['id']] = {
+                'dossier_parent': dossier_parent,
+                'num_dossier': num_dossier,
+                'cand': cand,
+            }
+
+            cv_file = cand.get('cv_filename', '')
+            if cv_file:
+                download_tasks.append((cand['id'], cv_file, dossier_parent, 'CV'))
+
+            lettre_file = cand.get('lettre_filename', '')
+            if lettre_file:
+                download_tasks.append((cand['id'], lettre_file, dossier_parent, 'Lettre_de_motivation'))
+
+            att_raw = cand.get('attestation_filenames', '[]')
+            try:
+                att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
+                for idx, att_file in enumerate(att_files, 1):
+                    if att_file:
+                        download_tasks.append((cand['id'], att_file, dossier_parent, f'Attestation_{idx}'))
+            except Exception:
+                pass
+
+        # --- 2) Télécharger tous les fichiers EN PARALLÈLE ---
+        def _download_one(task):
+            cand_id, blob_name, dossier_parent, prefix = task
+            file_bytes = download_file_from_supabase(blob_name)
+            return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
+
+        results_by_cand = {}
+        max_workers = min(16, max(4, len(download_tasks))) if download_tasks else 4
+
+        if download_tasks:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(_download_one, t) for t in download_tasks]
+                for future in as_completed(futures):
+                    try:
+                        cand_id, blob_name, dossier_parent, prefix, file_bytes = future.result()
+                    except Exception as e:
+                        logger.error(f"Erreur téléchargement fichier ZIP: {e}")
+                        continue
+                    if file_bytes:
+                        results_by_cand.setdefault(cand_id, []).append((file_bytes, blob_name, prefix))
+
+        # --- 3) Construire le ZIP ---
         zip_buffer = io.BytesIO()
         files_added = 0
-        
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for cand in candidats:
-                poste_nom = cand.get('poste', 'Poste_Inconnu')
-                poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
-                num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
-                nom_candidat = cand.get('nom', 'N/A').upper()
-                prenom_candidat = cand.get('prenom', 'N/A')
-                
-                dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
-                dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
-                dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
-                
-                fichiers_a_inclure = []
-                
-                cv_file = cand.get('cv_filename', '')
-                if cv_file:
-                    cv_bytes = download_file_from_supabase(cv_file)
-                    if cv_bytes:
-                        fichiers_a_inclure.append((cv_bytes, cv_file, 'CV'))
-                
-                lettre_file = cand.get('lettre_filename', '')
-                if lettre_file:
-                    lettre_bytes = download_file_from_supabase(lettre_file)
-                    if lettre_bytes:
-                        fichiers_a_inclure.append((lettre_bytes, lettre_file, 'Lettre_de_motivation'))
-                
-                att_raw = cand.get('attestation_filenames', '[]')
-                try:
-                    att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
-                    for idx, att_file in enumerate(att_files, 1):
-                        if att_file:
-                            att_bytes = download_file_from_supabase(att_file)
-                            if att_bytes:
-                                fichiers_a_inclure.append((att_bytes, att_file, f'Attestation_{idx}'))
-                except Exception:
-                    pass
-                
+            for cand_id, meta in candidats_meta.items():
+                dossier_parent = meta['dossier_parent']
+                num_dossier = meta['num_dossier']
+                cand = meta['cand']
+                fichiers_a_inclure = results_by_cand.get(cand_id, [])
+
                 if not fichiers_a_inclure:
-                    info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {num_dossier}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}"
+                    info_content = (
+                        f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\n"
+                        f"Poste: {cand.get('poste', 'N/A')}\n"
+                        f"Numero dossier: {num_dossier}\n"
+                        f"Email: {cand.get('email', 'N/A')}\n"
+                        f"Telephone: {cand.get('telephone', 'N/A')}\n"
+                        f"Date candidature: {cand.get('date_candidature', 'N/A')}"
+                    )
                     archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
                     zip_file.writestr(archive_name, info_content.encode('utf-8'))
                     files_added += 1
@@ -2399,25 +2435,22 @@ def export_dossiers_zip():
                             files_added += 1
                         except Exception:
                             pass
-        
+
         zip_buffer.seek(0)
-        
-        # === NOUVEAU : Afficher le temps écoulé ===
+
         elapsed = time.time() - start_time
-        print(f"✅ Export ZIP terminé en {elapsed:.2f} secondes pour {len(candidats)} candidats")
-        # =======================================
-        
+        print(f"✅ Export ZIP terminé en {elapsed:.2f} secondes pour {len(candidats)} candidats ({files_added} fichiers)")
+
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
         filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
-        
+
         return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=filename)
-        
+
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/debug/analyse-ia', methods=['POST'])
 @jwt_required()
 def debug_analyse_ia():
