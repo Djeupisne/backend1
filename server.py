@@ -101,7 +101,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
 _claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_ACTIVE else None
-_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "5")))
+_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
 
 _Nlp_fr = None
 _Nlp_en = None
@@ -520,12 +520,17 @@ def extract_text_from_pdf_via_ocr(file_bytes):
     except Exception:
         return ""
 
+MAX_PDF_PAGES = 15
+
 def extract_text_from_pdf_robust(file_bytes, filename):
     text = ""
     if PDFPLUMBER_AVAILABLE:
         try:
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                for page in pdf.pages:
+                for i, page in enumerate(pdf.pages):
+                    if i >= MAX_PDF_PAGES:
+                        logger.info(f"⚠️ PDF tronqué à {MAX_PDF_PAGES} pages: {filename}")
+                        break
                     tables = page.extract_tables()
                     if tables:
                         for table in tables:
@@ -544,7 +549,9 @@ def extract_text_from_pdf_robust(file_bytes, filename):
     if PYPDF2_AVAILABLE:
         try:
             reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-            for page in reader.pages:
+            for i, page in enumerate(reader.pages):
+                if i >= MAX_PDF_PAGES:
+                    break
                 content = page.extract_text()
                 if content:
                     text += normalize_spaces(content) + "\n"
@@ -2451,7 +2458,7 @@ def trigger_analyze(token):
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
-    """Réanalyse PARALLÈLE ultra-rapide des postes actifs uniquement."""
+    """Réanalyse PARALLÈLE (2 workers) des postes actifs uniquement."""
     try:
         if not supabase:
             return jsonify({'error': 'Supabase non configuré'}), 500
@@ -2462,23 +2469,18 @@ def reanalyze_all_candidates():
         candidates_to_reanalyze = [data for data in keys if data.get('poste') in POSTES_ACTIFS]
         candidates_skipped = len(keys) - len(candidates_to_reanalyze)
         if not candidates_to_reanalyze:
-            return jsonify({
-                'message': 'Aucun candidat sur poste actif à réanalyser',
-                'skipped_closed_posts': candidates_skipped
-            }), 200
-        tokens_to_update = [c.get('token') for c in candidates_to_reanalyze if c.get('cv_filename')]
+            return jsonify({'message': 'Aucun candidat sur poste actif à réanalyser', 'skipped_closed_posts': candidates_skipped}), 200
         now_iso = datetime.datetime.now().isoformat()
-        for token in tokens_to_update:
-            try:
-                supabase.table('candidats').update({
-                    "analyse_status": "reanalyzing",
-                    "reanalyze_trigger": now_iso,
-                    "reanalyze_reason": "Réanalyse parallélisée (postes actifs)"
-                }).eq('token', token).execute()
-            except Exception:
-                pass
-        errors = []
-        reanalyzed_count = 0
+        for c in candidates_to_reanalyze:
+            if c.get('cv_filename'):
+                try:
+                    supabase.table('candidats').update({
+                        "analyse_status": "reanalyzing",
+                        "reanalyze_trigger": now_iso,
+                        "reanalyze_reason": "Réanalyse parallélisée (postes actifs)"
+                    }).eq('token', c.get('token')).execute()
+                except Exception:
+                    pass
         def analyze_one(data):
             try:
                 token = data.get('token')
@@ -2492,49 +2494,33 @@ def reanalyze_all_candidates():
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(10, len(candidates_to_reanalyze))
-        logger.info(f"🚀 Lancement réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
+        MAX_WORKERS = min(2, len(candidates_to_reanalyze))  # 🛡️ 2 workers max
+        logger.info(f"🚀 Réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
         start_time = time.time()
+        reanalyzed_count = 0
+        errors = []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = {executor.submit(analyze_one, c): c for c in candidates_to_reanalyze if c.get('cv_filename')}
             for future in as_completed(futures):
                 try:
                     token, success, msg = future.result(timeout=180)
-                    if success:
-                        reanalyzed_count += 1
-                    else:
-                        errors.append(f"Token {token}: {msg}")
+                    if success: reanalyzed_count += 1
+                    else: errors.append(f"Token {token}: {msg}")
                 except Exception as e:
                     errors.append(f"Timeout ou erreur: {str(e)}")
         elapsed = time.time() - start_time
-        logger.info(f"✅ Réanalyse terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)} succès")
-        return jsonify({
-            'message': f'Réanalyse ultra-rapide terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)} candidatures',
-            'reanalyzed_count': reanalyzed_count,
-            'skipped_closed_posts': candidates_skipped,
-            'postes_actifs_concernes': POSTES_ACTIFS,
-            'workers_used': MAX_WORKERS,
-            'elapsed_seconds': round(elapsed, 1),
-            'errors': errors[:10]
-        }), 202
+        return jsonify({'message': f'Réanalyse terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)}', 'reanalyzed_count': reanalyzed_count, 'skipped_closed_posts': candidates_skipped, 'workers_used': MAX_WORKERS, 'elapsed_seconds': round(elapsed, 1), 'errors': errors[:10]}), 202
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
-    """Réanalyse PARALLÈLE d'un poste actif spécifique."""
+    """Réanalyse PARALLÈLE (2 workers) d'un poste actif spécifique."""
     if poste not in POSTES:
         return jsonify({'error': f'Poste inconnu: {poste}'}), 400
     if not is_poste_actif(poste):
-        return jsonify({
-            'error': f'Le poste "{poste}" est clôturé. La réanalyse automatique est désactivée.',
-            'poste': poste,
-            'statut': 'clôturé',
-            'postes_actifs': POSTES_ACTIFS
-        }), 403
+        return jsonify({'error': f'Le poste "{poste}" est clôturé. Réanalyse désactivée.', 'poste': poste, 'statut': 'clôturé', 'postes_actifs': POSTES_ACTIFS}), 403
     try:
         if not supabase:
             return jsonify({'error': 'Supabase non configuré'}), 500
@@ -2565,34 +2551,23 @@ def reanalyze_by_poste(poste):
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(10, len([k for k in keys if k.get('cv_filename')]))
+        MAX_WORKERS = min(2, len([k for k in keys if k.get('cv_filename')]))  # 🛡️ 2 workers max
+        start_time = time.time()
         reanalyzed_count = 0
         errors = []
-        start_time = time.time()
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = [executor.submit(analyze_one, c) for c in keys if c.get('cv_filename')]
             for future in as_completed(futures):
                 try:
                     token, success, msg = future.result(timeout=180)
-                    if success:
-                        reanalyzed_count += 1
-                    else:
-                        errors.append(f"Token {token}: {msg}")
+                    if success: reanalyzed_count += 1
+                    else: errors.append(f"Token {token}: {msg}")
                 except Exception as e:
                     errors.append(f"Erreur: {str(e)}")
         elapsed = time.time() - start_time
-        return jsonify({
-            'message': f'Réanalyse rapide : {reanalyzed_count}/{len(keys)} candidature(s) du poste "{poste}" en {elapsed:.1f}s',
-            'poste': poste,
-            'statut': 'actif',
-            'reanalyzed_count': reanalyzed_count,
-            'workers_used': MAX_WORKERS,
-            'elapsed_seconds': round(elapsed, 1),
-            'errors': errors[:10]
-        }), 202
+        return jsonify({'message': f'Réanalyse : {reanalyzed_count}/{len(keys)} du poste "{poste}" en {elapsed:.1f}s', 'poste': poste, 'statut': 'actif', 'reanalyzed_count': reanalyzed_count, 'workers_used': MAX_WORKERS, 'elapsed_seconds': round(elapsed, 1), 'errors': errors[:10]}), 202
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/recruteur/reanalyze-fast', methods=['POST'])
@@ -2714,7 +2689,7 @@ def reanalyze_fast():
         start = time.time()
         success_count = 0
         errors = []
-        with ThreadPoolExecutor(max_workers=min(10, len(candidates))) as executor:
+        with ThreadPoolExecutor(max_workers=min(2, len(candidates))) as executor:  # 🛡️ 2 workers max
             futures = [executor.submit(analyze_fast_only, c) for c in candidates]
             for future in as_completed(futures):
                 try:
@@ -3040,7 +3015,7 @@ def cleanup_closed_statuses():
 # ═══════════════════════════════════════════════════════════════
 def resume_pending_analyses_on_boot():
     """Après un redéploiement Render, les threads sont tués.
-    On relance automatiquement (en parallèle) les analyses des postes ACTIFS
+    On relance en DOUCEUR (max 3, espacées de 3s) les analyses des postes ACTIFS
     restées en 'pending' ou 'reanalyzing'. Les postes clôturés ne sont jamais touchés."""
     if not supabase:
         return
@@ -3051,6 +3026,7 @@ def resume_pending_analyses_on_boot():
             poste = row.get('poste')
             status = row.get('analyse_status')
             if poste in POSTES_ACTIFS and status in ('pending', 'reanalyzing') and row.get('cv_filename'):
+                time.sleep(3)  # ⏱️ Échelonne les lancements pour éviter le pic de RAM
                 threading.Thread(
                     target=run_analysis_for_candidat,
                     args=(row['token'], row.get('cv_filename'), row.get('lettre_filename'),
@@ -3058,8 +3034,10 @@ def resume_pending_analyses_on_boot():
                     daemon=True
                 ).start()
                 resumed += 1
+                if resumed >= 3:  # 🛡️ Max 3 analyses au boot
+                    break
         if resumed:
-            logger.info(f"🔄 Auto-reprise : {resumed} analyse(s) relancée(s) après redéploiement")
+            logger.info(f"🔄 Auto-reprise : {resumed} analyse(s) relancée(s) en douceur après redéploiement")
     except Exception as e:
         logger.warning(f"Resume boot erreur: {e}")
 
