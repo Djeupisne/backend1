@@ -2634,12 +2634,25 @@ def get_reanalyze_status():
             return jsonify({'error': 'Supabase non configuré'}), 500
         response = supabase.table('candidats').select('*').execute()
         keys = response.data if response.data else []
-        status_counts = {'pending': 0, 'reanalyzing': 0, 'completed': 0, 'error': 0, 'skipped_closed_post': 0, 'closed_post_no_analysis': 0}
+        
+        # ★ FILTRE CRITIQUE : ne compter QUE les postes ACTIFS ★
+        keys = [d for d in keys if d.get('poste') in POSTES_ACTIFS]
+        
+        status_counts = {
+            'pending': 0, 'reanalyzing': 0, 'completed': 0, 'error': 0,
+            'skipped_closed_post': 0, 'closed_post_no_analysis': 0
+        }
         for data in keys:
             status = data.get('analyse_status', 'pending')
             if status in status_counts:
                 status_counts[status] += 1
-        return jsonify({'total_candidatures': len(keys), 'status_counts': status_counts, 'reanalyze_in_progress': status_counts['reanalyzing'] > 0}), 200
+        
+        return jsonify({
+            'total_candidatures': len(keys),
+            'status_counts': status_counts,
+            'reanalyze_in_progress': status_counts['reanalyzing'] > 0,
+            'postes_concernes': POSTES_ACTIFS  # ← info utile pour le dashboard
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
