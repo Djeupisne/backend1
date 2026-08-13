@@ -3035,7 +3035,35 @@ def cleanup_closed_statuses():
         'fixed': fixed,
         'postes_concernes': POSTES_CLOTURES
     }), 200
+# ═══════════════════════════════════════════════════════════════
+#  AUTO-REPRISE : relance les analyses interrompues par un redéploiement
+# ═══════════════════════════════════════════════════════════════
+def resume_pending_analyses_on_boot():
+    """Après un redéploiement Render, les threads sont tués.
+    On relance automatiquement (en parallèle) les analyses des postes ACTIFS
+    restées en 'pending' ou 'reanalyzing'. Les postes clôturés ne sont jamais touchés."""
+    if not supabase:
+        return
+    try:
+        response = supabase.table('candidats').select('*').execute()
+        resumed = 0
+        for row in (response.data or []):
+            poste = row.get('poste')
+            status = row.get('analyse_status')
+            if poste in POSTES_ACTIFS and status in ('pending', 'reanalyzing') and row.get('cv_filename'):
+                threading.Thread(
+                    target=run_analysis_for_candidat,
+                    args=(row['token'], row.get('cv_filename'), row.get('lettre_filename'),
+                          row.get('attestation_filenames'), poste, False),
+                    daemon=True
+                ).start()
+                resumed += 1
+        if resumed:
+            logger.info(f"🔄 Auto-reprise : {resumed} analyse(s) relancée(s) après redéploiement")
+    except Exception as e:
+        logger.warning(f"Resume boot erreur: {e}")
 
+threading.Thread(target=resume_pending_analyses_on_boot, daemon=True).start()
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
