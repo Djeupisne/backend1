@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from werkzeug.utils import secure_filename
 from supabase import create_client, Client
 
@@ -239,7 +240,7 @@ def send_email(to_email, subject, body):
         return False
 
 # ═══════════════════════════════════════════════════════════════
-#  POSTES (13 ANCIENS + 1 NOUVEAU)
+#  POSTES
 # ═══════════════════════════════════════════════════════════════
 POSTES = [
     "Responsable Administration de Crédit",
@@ -258,23 +259,15 @@ POSTES = [
     "Chargé(e) d'Administration de Crédit"
 ]
 
-# ═══════════════════════════════════════════════════════════════
-#  ★★★ GESTION DES STATUTS : POSTES ACTIFS vs CLOTURÉS ★★★
-#  Seuls les postes ACTIFS sont éligibles à l'analyse et à la réanalyse.
-#  Les postes CLOTURÉS conservent leur dernier score calculé.
-# ═══════════════════════════════════════════════════════════════
-POSTES_ACTIFS = [
-    "Chargé(e) d'Administration de Crédit"
-]
-
+# ═══ STATUTS : ACTIFS vs CLOTURÉS ═══
+POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 
 def is_poste_actif(poste):
-    """Retourne True si le poste est actuellement ouvert au recrutement."""
     return poste in POSTES_ACTIFS
 
 # ═══════════════════════════════════════════════════════════════
-#  GRILLES DE SÉLECTION (tous les postes)
+#  GRILLES DE SÉLECTION
 # ═══════════════════════════════════════════════════════════════
 GRILLE = {
     "Responsable Administration de Crédit": {
@@ -355,7 +348,6 @@ GRILLE = {
         "signaux_forts": ["BEAC / GIMAC / compensation interbancaire (SYSTAC, SYGMA)", "Règlement de positions nettes dans les délais réglementaires", "Contrôle de conformité réglementaire et procédurale", "Maîtrise du contrôle interne et de la comptabilité bancaire (SYSCOHADA)", "Gestion de fin de journée comptable / clôture des opérations interbancaires", "Rapports opérationnels ou réglementaires produits", "Expérience dans une banque de la zone CEMAC / UEMOA", "Audits COBAC ou contrôles internes réussis sans réserve majeure", "Gestion d'une équipe avec résultats mesurables"],
         "points_attention": ["Parcours purement comptable sans exposition aux opérations interbancaires", "Rôle uniquement administratif ou de support, sans responsabilité opérationnelle", "Absence de tout rôle managérial", "CV aux missions trop génériques, sans livrables ni résultats quantifiés", "Expériences très courtes (< 1 an par poste) sans progression visible", "Maîtrise des outils non mentionnée (SWIFT, compensation, ERP bancaire)", "Trous inexpliqués dans le parcours professionnel"]
     },
-    # ═══ NOUVEAU POSTE : Chargé(e) d'Administration de Crédit ═══
     "Chargé(e) d'Administration de Crédit": {
         "eliminatoire": [
             "Expérience dans une banque ou un établissement financier réglementé",
@@ -688,7 +680,6 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         if re.search(r'gestion\s+bancaire', cv_lower) or re.search(r'gestion\s+bancaire', letter_lower):
             if re.search(r'(\d+)\s*(?:années?|ans?)', cv_lower) or re.search(r'(\d+)\s*(?:années?|ans?)', letter_lower):
                 return True, "Gestion bancaire avec expérience détectée"
-        return True, "Cohérent"
     return True, "Cohérent"
 
 def validate_financial_institution_for_market_risk(text):
@@ -731,9 +722,6 @@ def check_not_microfinance_only(raw_text):
         return False
     return True
 
-# ═══════════════════════════════════════════════════════════════
-#  VÉRIFICATION CONTEXTUELLE (avec nouveau poste)
-# ═══════════════════════════════════════════════════════════════
 def check_criterion_context(criterion, raw_text, poste):
     text_lower = raw_text.lower()
     banking_posts = ["Responsable Administration de Crédit", "Analyste Crédit CCB", "Senior Finance Officer", "Market Risk Officer", "Chargé(e) d'Administration de Crédit"]
@@ -912,18 +900,13 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
             total_years += duration
     return total_years >= min_years
 
-# ═══════════════════════════════════════════════════════════════
-#  MARQUEURS SPÉCIAUX (nouveau poste)
-# ═══════════════════════════════════════════════════════════════
 def check_no_banking_tools(raw_text):
-    """Détecte l'ABSENCE totale d'outils bancaires → point d'attention."""
     text_lower = raw_text.lower().translate(_ACCENT_MAP)
     all_tools = ['finacle', 't24', 'temenos', 'amplitude', 'flexcube', 'core banking', 'systeme bancaire', 'banking system', 'sigma', 'sygma', 'systac', 'spectra', 'cerber', 'excel', 'vba', 'reporting', 'dashboard', 'tableau de bord']
     found = any(kw in text_lower for kw in all_tools)
     return not found
 
 def check_unexplained_gaps(raw_text):
-    """Détecte les trous inexpliqués > 2 ans dans le parcours."""
     years_found = sorted(set(int(m) for m in re.findall(r'(20[0-2]\d|199\d)', raw_text)))
     if len(years_found) < 2:
         return False
@@ -935,7 +918,7 @@ def check_unexplained_gaps(raw_text):
     return len(gaps) > 0
 
 # ═══════════════════════════════════════════════════════════════
-#  KEYWORD_MAPPING (tous les postes + nouveau)
+#  KEYWORD_MAPPING
 # ═══════════════════════════════════════════════════════════════
 KEYWORD_MAPPING = {
     "Expérience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
@@ -1088,8 +1071,6 @@ KEYWORD_MAPPING = {
     "Rôle uniquement administratif ou de support, sans responsabilité opérationnelle": ["administratif", "support administratif", "assistant administratif", "secretariat", "taches administratives"],
     "CV aux missions trop génériques, sans livrables ni résultats quantifiés": ["diverses taches", "missions diverses", "taches diverses", "responsable de divers"],
     "Expériences très courtes (< 1 an par poste) sans progression visible": ["stage", "cdd court", "contrat court"],
-
-    # ═══ NOUVEAU POSTE : Chargé(e) d'Administration de Crédit ═══
     "Niveau de diplôme minimum Bac +3 (école de commerce, gestion, comptabilité ou équivalent)": ["bac+3", "bac +3", "bac 3", "bac+4", "bac+5", "bac +4", "bac +5", "licence", "licence professionnelle", "bachelor", "master", "mba", "ecole de commerce", "ecole superieure de commerce", "diplome universitaire", "diplome d etudes superieures", "diplome superieur", "graduate degree", "bts", "dut", "brevet de technicien superieur", "comptabilite", "gestion", "finance", "banking", "economie", "sciences economiques", "sciences de gestion", "administration des affaires", "business administration", "finance and accounting", "banking and finance"],
     "Minimum 1 an d'expérience dans une fonction bancaire (administration de crédit, back-office, risques ou analyse crédit)": ["EXP_BANK_1ANS"],
     "Exposition au cycle de vie du crédit bancaire (mise en place, suivi, garanties, échéances)": ["cycle de credit", "cycle du credit", "cycle de vie credit", "mise en place credit", "deblocage credit", "credit disbursement", "loan origination", "loan processing", "credit approval", "approbation credit", "octroi credit", "credit granting", "documentation credit", "credit file", "dossier credit", "instruction credit", "credit administration", "administration de credit", "administration credit", "gestion de credit", "credit management", "loan administration", "back-office credit", "back office credit", "suivi credit", "credit monitoring", "echeances credit", "credit repayment", "remboursement credit", "cloture credit", "credit closure", "fin de credit", "garantie", "garanties", "nantissement", "hypotheque", "surete", "suretes", "collateral", "caution", "aval", "gage", "privilege", "inscription hypothecaire", "mainlevee", "valorisation garantie", "guarantee", "guarantees", "security", "securisation credit", "collateral management", "guarantee management", "enregistrement garantie", "renouvellement assurance", "assurance credit"],
@@ -1191,14 +1172,14 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
             if ratio >= 85:
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
-                    best_score = max(best_score, ratio / 100)
+                best_score = max(best_score, ratio / 100)
                 continue
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
             if len(common) >= max(2, len(kw_tokens) * 0.7):
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
-                    best_score = max(best_score, len(common) / len(kw_tokens))
+                best_score = max(best_score, len(common) / len(kw_tokens))
     return best_score >= 0.70, round(best_score, 2), found_kws
 
 def detect_language(text):
@@ -1260,6 +1241,7 @@ def enrich_analysis_with_nlp(cv_text, lettre_text, detected_lang):
     return enrichment
 
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
+
 if IA_ANALYSE_ACTIVE:
     logger.info(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
 else:
@@ -1295,7 +1277,26 @@ def get_rubrique_scoring(poste):
         return rub, 100
     return {"Adéquation de l'expérience": 3, "Cohérence du parcours": 2, "Exposition au risque métier": 3, "Qualité du CV": 1, "Lettre de motivation": 1}, 10
 
-SYSTEM_PROMPT_RECRUTEUR = """Tu es un·e responsable recrutement senior, spécialisé·e dans le secteur bancaire en Afrique centrale et de l'Ouest (CEMAC/UEMOA), avec quinze ans d'expérience en présélection de cadres bancaires. Tu analyses des dossiers avec rigueur et bon sens, en COMPRENANT LE SENS des phrases (pas seulement les mots-clés). Les stages NE COMPTENT PAS. Distingue l'EMPLOYEUR réel d'un mot-clé. Une lettre générique est éliminatoire. Justifie chaque évaluation. Tu soumets ton analyse exclusivement via l'outil fourni."""
+# ═══ PROMPT IA RENFORCÉ POUR AUTHENTICITÉ MAXIMALE ═══
+SYSTEM_PROMPT_RECRUTEUR = """Tu es un·e responsable recrutement senior avec 15 ans d'expérience dans le secteur bancaire en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
+
+RÈGLES ABSOLUES D'AUTHENTICITÉ :
+1. Tu ne JAMAIS inventer de faits qui ne sont PAS dans les documents fournis (CV, lettre, attestations).
+2. Si une information n'est PAS explicitement mentionnée, tu considères qu'elle N'EXISTE PAS.
+3. Tu ne fais AUCUNE supposition, AUCUNE interprétation excessive.
+4. Les stages, bénévolats et formations NE COMPTENT PAS comme expérience professionnelle.
+5. Tu distingues l'EMPLOYEUR réel d'un simple mot-clé mentionné dans une mission ponctuelle.
+6. Une lettre générique (sans mention du poste spécifique ni de l'institution) est ÉLIMINATOIRE.
+7. Tu justifies CHAQUE évaluation avec une citation courte du document concerné.
+8. Tu suis STRICTEMENT la grille fournie : aucun critère inventé, aucun critère ignoré.
+
+MÉTHODOLOGIE :
+- Pour les critères ÉLIMINATOIRES : si un seul manque → décision "❌ Rejet (éliminatoire)", score total = 0.
+- Pour les critères À VÉRIFIER et SIGNAUX FORTS : présence = 1 point, absence = 0. Pas de demi-points.
+- Pour le SOUS-SCORE : additionne UNIQUEMENT ce qui est prouvé dans les documents.
+- Pour la DÉCISION : applique STRICTEMENT les seuils fournis (pas de mansuétude).
+
+Tu soumets ton analyse exclusivement via l'outil `soumettre_analyse_candidature`."""
 
 def build_analysis_tool_schema():
     return {"name": "soumettre_analyse_candidature", "description": "Soumet l'analyse structurée d'une candidature.", "input_schema": {"type": "object", "properties": {"eliminatoire": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "valide": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "valide", "justification"]}}, "a_verifier": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "signaux_forts": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "points_attention": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "present": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "present", "justification"]}}, "lettre_motivation": {"type": "object", "properties": {"presente": {"type": "boolean"}, "coherente_avec_cv": {"type": "boolean"}, "generique_ou_copiee": {"type": "boolean"}, "qualite_redactionnelle": {"type": "string", "enum": ["bonne", "moyenne", "faible", "non_evaluable"]}, "eliminatoire": {"type": "boolean"}, "commentaire": {"type": "string"}}, "required": ["presente", "coherente_avec_cv", "generique_ou_copiee", "qualite_redactionnelle", "eliminatoire", "commentaire"]}, "diplomes": {"type": "object", "properties": {"niveau_suffisant": {"type": "boolean"}, "domaine_pertinent": {"type": "boolean"}, "atout_complementaire_detecte": {"type": "boolean"}, "commentaire": {"type": "string"}}, "required": ["niveau_suffisant", "domaine_pertinent", "atout_complementaire_detecte", "commentaire"]}, "sous_scores": {"type": "object", "additionalProperties": {"type": "integer"}}, "score_total": {"type": "integer"}, "decision": {"type": "string"}, "points_forts": {"type": "array", "items": {"type": "string"}}, "points_vigilance": {"type": "array", "items": {"type": "string"}}, "synthese_recruteur": {"type": "string"}}, "required": ["eliminatoire", "a_verifier", "signaux_forts", "points_attention", "lettre_motivation", "diplomes", "sous_scores", "score_total", "decision", "points_forts", "points_vigilance", "synthese_recruteur"]}}
@@ -1459,7 +1460,6 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     decision = "🥇 Entretien prioritaire" if score_total >= 10 else ("🥈 Entretien si besoin (vivier de réserve)" if score_total >= 7 else "❌ Rejet")
     return {'score': score_total, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': checklist, 'detail': f"Score: {score_total}/12 — {decision}"}
 
-# ═══ NOUVELLE FONCTION : SCORING /12 pour Chargé(e) d'Administration de Crédit ═══
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Chargé(e) d'Administration de Crédit"
     grille = GRILLE[poste]
@@ -1474,8 +1474,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     checklist = _build_checklist_from_grille(grille, raw_full, normalized, poste)
     if flags:
         return {'score': 0, 'score_max': 12, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_rac(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
-
-    # Bloc 1 : Adéquation de l'expérience (0-3)
     signaux_exp = [
         "Gestion du cycle complet d'un crédit (conditions d'approbation, documentation, mise en place, déblocage)",
         "Supervision des échéances et production d'alertes ou rappels aux gestionnaires de portefeuille",
@@ -1484,8 +1482,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     ]
     n_exp = sum(1 for c in signaux_exp if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
     adequation = min(3, n_exp)
-
-    # Bloc 2 : Exposition IFRS 9 / portefeuille (0-3)
     signaux_ifrs = [
         "Exposition à la norme IFRS 9 : staging du portefeuille (Stage 1, 2, 3), ECL, provisions",
         "Production de reportings portefeuille (encours, impayés, dépassements, couverture par garanties)",
@@ -1494,23 +1490,15 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     ]
     n_ifrs = sum(1 for c in signaux_ifrs if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
     exposition_ifrs = min(3, n_ifrs)
-
-    # Bloc 3 : Rigueur opérationnelle et outils (0-2)
     outils_ok = check_criterion_match_advanced("Maîtrise d'un système bancaire de gestion du crédit (Finacle, T24, Amplitude ou équivalent)", normalized, raw_full, poste=poste)[0]
     classement_ok = check_criterion_match_advanced("Classement physique et numérique des dossiers de crédit et originaux de garanties", normalized, raw_full, poste=poste)[0]
     rigueur_ok = check_criterion_match_advanced("Rigueur documentaire : dossiers complets, traçabilité des actes, zéro anomalie détectée en contrôle interne", normalized, raw_full, poste=poste)[0]
     rigueur_outils = min(2, sum([outils_ok, classement_ok, rigueur_ok]))
-
-    # Bloc 4 : Cohérence et progression du parcours (0-2)
     n_points_attention = sum(1 for c in grille['points_attention'] if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
     coherence = 2 if n_points_attention == 0 else (1 if n_points_attention <= 2 else 0)
-
-    # Bloc 5 : Qualité et clarté du CV (0-1)
     word_count = len(cv_text.split())
     has_quantified = bool(re.search(r'\d+\s*(%|pourcent|dossiers|credits|portefeuille|garanties|operations|agences|collaborateurs|millions|milliards)', cv_text.lower()))
     qualite_cv = 1 if (word_count >= 150 and has_quantified) else 0
-
-    # Bloc 6 : Lettre de motivation (0-1)
     lettre_clean = (lettre_text or '').strip()
     if lettre_clean:
         poste_keywords = ['administration de credit', 'credit', 'back-office', 'ifrs', 'cobac', 'garantie', 'portefeuille', 'reporting', 'banque', 'ecobank']
@@ -1519,7 +1507,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         lettre_score = 0 if is_generic else 1
     else:
         lettre_score = 0
-
     sous_scores = {
         "Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": adequation,
         "Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": exposition_ifrs,
@@ -1709,11 +1696,10 @@ def normalize_text_for_matching(text):
     return normalize_for_matching(text)[0]
 
 # ═══════════════════════════════════════════════════════════════
-#  PIPELINE D'ANALYSE (avec blocage des postes clôturés)
+#  PIPELINE D'ANALYSE
 # ═══════════════════════════════════════════════════════════════
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
-        # ★ BLOCAGE : ne pas analyser les postes clôturés sauf forçage explicite ★
         if not force and not is_poste_actif(poste):
             logger.info(f"⏸️ Analyse ignorée pour {token} — poste clôturé : {poste}")
             if supabase:
@@ -1723,25 +1709,21 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "analyse_skip_reason": f"Poste clôturé : {poste}"
                 }).eq('token', token).execute()
             return
-
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
-
         cv_text = ""
         if cv_filename:
             cv_bytes = download_file_from_supabase(cv_filename)
             if cv_bytes:
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
-
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase(lettre_filename)
             if lm_bytes:
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
-
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -1750,74 +1732,26 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     t = extract_text_robust_from_bytes(att_bytes, fn)
                     if t:
                         att_texts.append(t)
-
         detected_lang = detect_language(cv_text[:500]) if cv_text else None
         nlp_enrichment = enrich_analysis_with_nlp(cv_text, lm_text, detected_lang)
         if nlp_enrichment and supabase:
             supabase.table('candidats').update({"nlp_enrichment": json.dumps(nlp_enrichment, ensure_ascii=False)}).eq('token', token).execute()
-
         result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
-
         if result is None:
             if poste == "Chef de Section Compensation":
                 fb = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
-                result = {
-                    'score': fb['score'],
-                    'checklist': fb.get('checklist', {}),
-                    'flags_eliminatoires': fb['flags_eliminatoires'],
-                    'signaux_detectes': [],
-                    'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']},
-                    'score_breakdown': {
-                        'bloc1_eliminatoire': bool(fb['flags_eliminatoires']),
-                        'sous_scores': fb['sous_scores'],
-                        'score_final': fb['score'],
-                        'score_max': fb['score_max'],
-                        'decision': fb['decision'],
-                        'note': fb['detail']
-                    }
-                }
+                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
             elif poste == "Chargé(e) d'Administration de Crédit":
                 fb = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
-                result = {
-                    'score': fb['score'],
-                    'checklist': fb.get('checklist', {}),
-                    'flags_eliminatoires': fb['flags_eliminatoires'],
-                    'signaux_detectes': [],
-                    'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']},
-                    'score_breakdown': {
-                        'bloc1_eliminatoire': bool(fb['flags_eliminatoires']),
-                        'sous_scores': fb['sous_scores'],
-                        'score_final': fb['score'],
-                        'score_max': fb['score_max'],
-                        'decision': fb['decision'],
-                        'note': fb['detail']
-                    }
-                }
+                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
             elif poste in POSTES_AVEC_SCORING_100:
                 detailed_result = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
                 if detailed_result:
-                    result = {
-                        'score': detailed_result['score'],
-                        'checklist': {},
-                        'flags_eliminatoires': [],
-                        'signaux_detectes': [],
-                        'details': detailed_result['details'],
-                        'score_breakdown': {
-                            'bloc1_eliminatoire': False,
-                            'scoring_type': '100_points',
-                            'bloc_cv': detailed_result['bloc_cv'],
-                            'bloc_lm': detailed_result['bloc_lm'],
-                            'bloc_diplomes': detailed_result['bloc_diplomes'],
-                            'score_final': detailed_result['score'],
-                            'decision': detailed_result['decision'],
-                            'note': detailed_result['note']
-                        }
-                    }
+                    result = {'score': detailed_result['score'], 'checklist': {}, 'flags_eliminatoires': [], 'signaux_detectes': [], 'details': detailed_result['details'], 'score_breakdown': {'bloc1_eliminatoire': False, 'scoring_type': '100_points', 'bloc_cv': detailed_result['bloc_cv'], 'bloc_lm': detailed_result['bloc_lm'], 'bloc_diplomes': detailed_result['bloc_diplomes'], 'score_final': detailed_result['score'], 'decision': detailed_result['decision'], 'note': detailed_result['note']}}
                 else:
                     result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
             else:
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
-
         if supabase:
             supabase.table('candidats').update({
                 "score": str(result['score']),
@@ -1829,11 +1763,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }).eq('token', token).execute()
-
         moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés'))
         tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
         logger.info(f"{tag} [{moteur}] Score {token}: {result['score']} — {result['score_breakdown'].get('note','')}")
-
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2211,7 +2143,6 @@ init_recruteur()
 # ═══════════════════════════════════════════════════════════════
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
-    """Retourne la liste complète des postes + statut actif/clôturé."""
     return jsonify({
         "postes": POSTES,
         "postes_actifs": POSTES_ACTIFS,
@@ -2220,7 +2151,6 @@ def get_postes():
 
 @app.route('/api/postes/actifs', methods=['GET'])
 def get_postes_actifs():
-    """Retourne uniquement les postes ouverts au recrutement."""
     return jsonify(POSTES_ACTIFS), 200
 
 @app.route('/api/grille/<poste>', methods=['GET'])
@@ -2275,75 +2205,70 @@ def postuler():
                         pass
             new_num = max_num + 1
             numero_dossier = str(new_num)
-
-            def save_file_to_supabase(field, suffix):
-                f = request.files.get(field)
-                if f and f.filename and allowed_file(f.filename):
-                    ext = f.filename.rsplit('.', 1)[-1].lower()
-                    blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
-                    result = upload_file_to_supabase(f, blob_name, f.content_type)
-                    return result if result else ''
-                return ''
-
-            cv_filename = save_file_to_supabase('cv', 'cv')
-            if request.files.get('cv') and not cv_filename:
-                return jsonify({'error': "Échec de l'envoi du CV, merci de réessayer."}), 500
-            lettre_filename = save_file_to_supabase('lettre', 'lettre')
-            if request.files.get('lettre') and not lettre_filename:
-                return jsonify({'error': "Échec de l'envoi de la lettre de motivation, merci de réessayer."}), 500
-            att_filenames = []
-            for f in request.files.getlist('attestation'):
-                if f and f.filename and allowed_file(f.filename):
-                    ext = f.filename.rsplit('.', 1)[-1].lower()
-                    blob_name = f"{uuid.uuid4().hex}_attestation.{ext}"
-                    result = upload_file_to_supabase(f, blob_name, f.content_type)
-                    if result:
-                        att_filenames.append(blob_name)
-            token = uuid.uuid4().hex
-            supabase.table('candidats').insert({
-                "token": token,
-                "nom": nom,
-                "prenom": prenom,
-                "email": email,
-                "telephone": telephone,
-                "poste": poste,
-                "numero_dossier": numero_dossier,
-                "cv_filename": cv_filename,
-                "lettre_filename": lettre_filename,
-                "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
-                "statut": "en_attente",
-                "note": "",
-                "score": "0",
-                "checklist": "",
-                "flags_eliminatoires": "",
-                "signaux_detectes": "",
-                "score_breakdown": "",
-                "analyse_status": "pending",
-                "date_candidature": datetime.datetime.now().isoformat()
-            }).execute()
-
-            # ★ Analyse automatique déclenchée UNIQUEMENT pour les postes actifs ★
-            if is_poste_actif(poste):
-                threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste, False), daemon=True).start()
-                analyse_msg = 'Analyse automatique en cours'
-            else:
-                analyse_msg = 'Poste clôturé — candidature enregistrée sans analyse'
-                supabase.table('candidats').update({
-                    "analyse_status": "closed_post_no_analysis",
-                    "analyse_auto_date": datetime.datetime.now().isoformat()
-                }).eq('token', token).execute()
-
-            nom_complet = f"{prenom} {nom}".strip()
-            sujet_confirmation = f"Confirmation de candidature – {poste}"
-            corps_confirmation = f"Bonjour {nom_complet},\nNous accusons réception de votre candidature.\nSans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
-            threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
-            return jsonify({
-                'message': 'Candidature soumise avec succès',
-                'token': token,
-                'numero_dossier': numero_dossier,
-                'analyse': analyse_msg,
-                'poste_statut': 'actif' if is_poste_actif(poste) else 'clôturé'
-            }), 201
+        def save_file_to_supabase(field, suffix):
+            f = request.files.get(field)
+            if f and f.filename and allowed_file(f.filename):
+                ext = f.filename.rsplit('.', 1)[-1].lower()
+                blob_name = f"{uuid.uuid4().hex}_{suffix}.{ext}"
+                result = upload_file_to_supabase(f, blob_name, f.content_type)
+                return result if result else ''
+            return ''
+        cv_filename = save_file_to_supabase('cv', 'cv')
+        if request.files.get('cv') and not cv_filename:
+            return jsonify({'error': "Échec de l'envoi du CV, merci de réessayer."}), 500
+        lettre_filename = save_file_to_supabase('lettre', 'lettre')
+        if request.files.get('lettre') and not lettre_filename:
+            return jsonify({'error': "Échec de l'envoi de la lettre de motivation, merci de réessayer."}), 500
+        att_filenames = []
+        for f in request.files.getlist('attestation'):
+            if f and f.filename and allowed_file(f.filename):
+                ext = f.filename.rsplit('.', 1)[-1].lower()
+                blob_name = f"{uuid.uuid4().hex}_attestation.{ext}"
+                result = upload_file_to_supabase(f, blob_name, f.content_type)
+                if result:
+                    att_filenames.append(blob_name)
+        token = uuid.uuid4().hex
+        supabase.table('candidats').insert({
+            "token": token,
+            "nom": nom,
+            "prenom": prenom,
+            "email": email,
+            "telephone": telephone,
+            "poste": poste,
+            "numero_dossier": numero_dossier,
+            "cv_filename": cv_filename,
+            "lettre_filename": lettre_filename,
+            "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False),
+            "statut": "en_attente",
+            "note": "",
+            "score": "0",
+            "checklist": "",
+            "flags_eliminatoires": "",
+            "signaux_detectes": "",
+            "score_breakdown": "",
+            "analyse_status": "pending",
+            "date_candidature": datetime.datetime.now().isoformat()
+        }).execute()
+        if is_poste_actif(poste):
+            threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste, False), daemon=True).start()
+            analyse_msg = 'Analyse automatique en cours'
+        else:
+            analyse_msg = 'Poste clôturé — candidature enregistrée sans analyse'
+            supabase.table('candidats').update({
+                "analyse_status": "closed_post_no_analysis",
+                "analyse_auto_date": datetime.datetime.now().isoformat()
+            }).eq('token', token).execute()
+        nom_complet = f"{prenom} {nom}".strip()
+        sujet_confirmation = f"Confirmation de candidature – {poste}"
+        corps_confirmation = f"Bonjour {nom_complet},\nNous accusons réception de votre candidature.\nSans réponse de notre part sous deux (2) semaines, veuillez considérer que votre candidature n'a pas été retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
+        threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
+        return jsonify({
+            'message': 'Candidature soumise avec succès',
+            'token': token,
+            'numero_dossier': numero_dossier,
+            'analyse': analyse_msg,
+            'poste_statut': 'actif' if is_poste_actif(poste) else 'clôturé'
+        }), 201
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2380,7 +2305,6 @@ def get_stats():
 @app.route('/api/recruteur/postes/stats', methods=['GET'])
 @jwt_required()
 def get_postes_stats():
-    """Statistiques de candidatures par statut de poste (actif/clôturé)."""
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
     response = supabase.table('candidats').select('*').execute()
@@ -2498,7 +2422,6 @@ def update_candidat(token):
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
-    """Relance manuelle d'analyse — respecte le statut actif/clôturé du poste."""
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
     response = supabase.table('candidats').select('*').eq('token', token).execute()
@@ -2511,7 +2434,6 @@ def trigger_analyze(token):
     poste = data.get('poste')
     if not cv_fn:
         return jsonify({'error': 'CV manquant pour analyse'}), 400
-    # ★ Blocage si poste clôturé (sauf paramètre force=1 explicite) ★
     force = request.args.get('force', '0') == '1'
     if not force and not is_poste_actif(poste):
         return jsonify({
@@ -2524,13 +2446,12 @@ def trigger_analyze(token):
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
 # ═══════════════════════════════════════════════════════════════
-#  ★★★ RÉANALYSE AUTOMATIQUE : POSTES ACTIFS UNIQUEMENT ★★★
+#  ★★★ RÉANALYSE ULTRA-RAPIDE PARALLÉLISÉE ★★★
 # ═══════════════════════════════════════════════════════════════
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
-    """★ Réanalyse UNIQUEMENT les candidatures sur des POSTES ACTIFS ★
-    Les postes clôturés conservent leur score existant et ne sont PAS touchés."""
+    """Réanalyse PARALLÈLE ultra-rapide des postes actifs uniquement."""
     try:
         if not supabase:
             return jsonify({'error': 'Supabase non configuré'}), 500
@@ -2538,12 +2459,27 @@ def reanalyze_all_candidates():
         keys = response.data if response.data else []
         if not keys:
             return jsonify({'message': 'Aucune candidature à réanalyser'}), 200
-        # ★ FILTRAGE : uniquement les postes actifs ★
         candidates_to_reanalyze = [data for data in keys if data.get('poste') in POSTES_ACTIFS]
         candidates_skipped = len(keys) - len(candidates_to_reanalyze)
-        reanalyzed_count = 0
+        if not candidates_to_reanalyze:
+            return jsonify({
+                'message': 'Aucun candidat sur poste actif à réanalyser',
+                'skipped_closed_posts': candidates_skipped
+            }), 200
+        tokens_to_update = [c.get('token') for c in candidates_to_reanalyze if c.get('cv_filename')]
+        now_iso = datetime.datetime.now().isoformat()
+        for token in tokens_to_update:
+            try:
+                supabase.table('candidats').update({
+                    "analyse_status": "reanalyzing",
+                    "reanalyze_trigger": now_iso,
+                    "reanalyze_reason": "Réanalyse parallélisée (postes actifs)"
+                }).eq('token', token).execute()
+            except Exception:
+                pass
         errors = []
-        for data in candidates_to_reanalyze:
+        reanalyzed_count = 0
+        def analyze_one(data):
             try:
                 token = data.get('token')
                 cv_fn = data.get('cv_filename')
@@ -2551,22 +2487,34 @@ def reanalyze_all_candidates():
                 att_raw = data.get('attestation_filenames', '[]')
                 poste = data.get('poste')
                 if not cv_fn:
-                    errors.append(f"Token {token}: CV manquant")
-                    continue
-                supabase.table('candidats').update({
-                    "analyse_status": "reanalyzing",
-                    "reanalyze_trigger": datetime.datetime.now().isoformat(),
-                    "reanalyze_reason": "Réanalyse automatique (poste actif uniquement)"
-                }).eq('token', token).execute()
-                threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, False), daemon=True).start()
-                reanalyzed_count += 1
+                    return (token, False, "CV manquant")
+                run_analysis_for_candidat(token, cv_fn, lm_fn, att_raw, poste, False)
+                return (token, True, "OK")
             except Exception as e:
-                errors.append(f"Token {data.get('token')}: {str(e)}")
+                return (data.get('token'), False, str(e))
+        MAX_WORKERS = min(10, len(candidates_to_reanalyze))
+        logger.info(f"🚀 Lancement réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
+        start_time = time.time()
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(analyze_one, c): c for c in candidates_to_reanalyze if c.get('cv_filename')}
+            for future in as_completed(futures):
+                try:
+                    token, success, msg = future.result(timeout=180)
+                    if success:
+                        reanalyzed_count += 1
+                    else:
+                        errors.append(f"Token {token}: {msg}")
+                except Exception as e:
+                    errors.append(f"Timeout ou erreur: {str(e)}")
+        elapsed = time.time() - start_time
+        logger.info(f"✅ Réanalyse terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)} succès")
         return jsonify({
-            'message': f'Réanalyse lancée pour {reanalyzed_count} candidature(s) sur postes actifs',
+            'message': f'Réanalyse ultra-rapide terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)} candidatures',
             'reanalyzed_count': reanalyzed_count,
             'skipped_closed_posts': candidates_skipped,
             'postes_actifs_concernes': POSTES_ACTIFS,
+            'workers_used': MAX_WORKERS,
+            'elapsed_seconds': round(elapsed, 1),
             'errors': errors[:10]
         }), 202
     except Exception as e:
@@ -2577,14 +2525,12 @@ def reanalyze_all_candidates():
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
-    """★ Réanalyse uniquement si le poste est ACTIF ★
-    Les postes clôturés sont refusés avec message explicite."""
+    """Réanalyse PARALLÈLE d'un poste actif spécifique."""
     if poste not in POSTES:
         return jsonify({'error': f'Poste inconnu: {poste}'}), 400
-    # ★ BLOCAGE : refus si poste clôturé ★
     if not is_poste_actif(poste):
         return jsonify({
-            'error': f'Le poste "{poste}" est clôturé. La réanalyse automatique est désactivée pour les postes clôturés.',
+            'error': f'Le poste "{poste}" est clôturé. La réanalyse automatique est désactivée.',
             'poste': poste,
             'statut': 'clôturé',
             'postes_actifs': POSTES_ACTIFS
@@ -2594,33 +2540,200 @@ def reanalyze_by_poste(poste):
             return jsonify({'error': 'Supabase non configuré'}), 500
         response = supabase.table('candidats').select('*').eq('poste', poste).execute()
         keys = response.data if response.data else []
-        reanalyzed_count = 0
-        errors = []
+        if not keys:
+            return jsonify({'message': f'Aucune candidature pour le poste "{poste}"'}), 200
+        now_iso = datetime.datetime.now().isoformat()
         for data in keys:
+            if data.get('cv_filename'):
+                try:
+                    supabase.table('candidats').update({
+                        "analyse_status": "reanalyzing",
+                        "reanalyze_trigger": now_iso,
+                        "reanalyze_reason": f"Réanalyse manuelle parallèle : {poste}"
+                    }).eq('token', data.get('token')).execute()
+                except Exception:
+                    pass
+        def analyze_one(data):
             try:
                 token = data.get('token')
                 cv_fn = data.get('cv_filename')
                 lm_fn = data.get('lettre_filename')
                 att_raw = data.get('attestation_filenames', '[]')
                 if not cv_fn:
-                    errors.append(f"Token {token}: CV manquant")
-                    continue
-                supabase.table('candidats').update({
-                    "analyse_status": "reanalyzing",
-                    "reanalyze_trigger": datetime.datetime.now().isoformat(),
-                    "reanalyze_reason": f"Réanalyse manuelle du poste actif: {poste}"
-                }).eq('token', token).execute()
-                threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, True), daemon=True).start()
-                reanalyzed_count += 1
+                    return (token, False, "CV manquant")
+                run_analysis_for_candidat(token, cv_fn, lm_fn, att_raw, poste, True)
+                return (token, True, "OK")
             except Exception as e:
-                errors.append(f"Token {data.get('token')}: {str(e)}")
+                return (data.get('token'), False, str(e))
+        MAX_WORKERS = min(10, len([k for k in keys if k.get('cv_filename')]))
+        reanalyzed_count = 0
+        errors = []
+        start_time = time.time()
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = [executor.submit(analyze_one, c) for c in keys if c.get('cv_filename')]
+            for future in as_completed(futures):
+                try:
+                    token, success, msg = future.result(timeout=180)
+                    if success:
+                        reanalyzed_count += 1
+                    else:
+                        errors.append(f"Token {token}: {msg}")
+                except Exception as e:
+                    errors.append(f"Erreur: {str(e)}")
+        elapsed = time.time() - start_time
         return jsonify({
-            'message': f'Réanalyse lancée pour {reanalyzed_count} candidature(s) du poste "{poste}"',
+            'message': f'Réanalyse rapide : {reanalyzed_count}/{len(keys)} candidature(s) du poste "{poste}" en {elapsed:.1f}s',
             'poste': poste,
             'statut': 'actif',
             'reanalyzed_count': reanalyzed_count,
+            'workers_used': MAX_WORKERS,
+            'elapsed_seconds': round(elapsed, 1),
             'errors': errors[:10]
         }), 202
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recruteur/reanalyze-fast', methods=['POST'])
+@jwt_required()
+def reanalyze_fast():
+    """Réanalyse ÉCLAIR : moteur mots-clés UNIQUEMENT, 10x plus rapide que l'IA."""
+    try:
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        response = supabase.table('candidats').select('*').execute()
+        keys = response.data if response.data else []
+        candidates = [d for d in keys if d.get('poste') in POSTES_ACTIFS and d.get('cv_filename')]
+        if not candidates:
+            return jsonify({'message': 'Aucun candidat actif avec CV'}), 200
+        def analyze_fast_only(data):
+            try:
+                token = data.get('token')
+                cv_fn = data.get('cv_filename')
+                lm_fn = data.get('lettre_filename')
+                att_raw = data.get('attestation_filenames', '[]')
+                poste = data.get('poste')
+                cv_text = ""
+                if cv_fn:
+                    cv_bytes = download_file_from_supabase(cv_fn)
+                    if cv_bytes:
+                        cv_text = extract_text_robust_from_bytes(cv_bytes, cv_fn)
+                lm_text = ""
+                if lm_fn:
+                    lm_bytes = download_file_from_supabase(lm_fn)
+                    if lm_bytes:
+                        lm_text = extract_text_robust_from_bytes(lm_bytes, lm_fn)
+                att_texts = []
+                if isinstance(att_raw, str):
+                    try:
+                        att_list = json.loads(att_raw) if att_raw else []
+                    except:
+                        att_list = []
+                else:
+                    att_list = att_raw or []
+                for fn in att_list:
+                    if fn:
+                        att_bytes = download_file_from_supabase(fn)
+                        if att_bytes:
+                            t = extract_text_robust_from_bytes(att_bytes, fn)
+                            if t:
+                                att_texts.append(t)
+                if poste == "Chef de Section Compensation":
+                    result_fb = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
+                    result = {
+                        'score': result_fb['score'],
+                        'checklist': result_fb.get('checklist', {}),
+                        'flags_eliminatoires': result_fb['flags_eliminatoires'],
+                        'signaux_detectes': [],
+                        'details': {'moteur': 'mots-clés (FAST)', 'sous_scores': result_fb['sous_scores']},
+                        'score_breakdown': {
+                            'bloc1_eliminatoire': bool(result_fb['flags_eliminatoires']),
+                            'sous_scores': result_fb['sous_scores'],
+                            'score_final': result_fb['score'],
+                            'score_max': result_fb['score_max'],
+                            'decision': result_fb['decision'],
+                            'note': result_fb['detail']
+                        }
+                    }
+                elif poste == "Chargé(e) d'Administration de Crédit":
+                    result_fb = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
+                    result = {
+                        'score': result_fb['score'],
+                        'checklist': result_fb.get('checklist', {}),
+                        'flags_eliminatoires': result_fb['flags_eliminatoires'],
+                        'signaux_detectes': [],
+                        'details': {'moteur': 'mots-clés (FAST)', 'sous_scores': result_fb['sous_scores']},
+                        'score_breakdown': {
+                            'bloc1_eliminatoire': bool(result_fb['flags_eliminatoires']),
+                            'sous_scores': result_fb['sous_scores'],
+                            'score_final': result_fb['score'],
+                            'score_max': result_fb['score_max'],
+                            'decision': result_fb['decision'],
+                            'note': result_fb['detail']
+                        }
+                    }
+                elif poste in POSTES_AVEC_SCORING_100:
+                    detailed = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
+                    if detailed:
+                        result = {
+                            'score': detailed['score'],
+                            'checklist': {},
+                            'flags_eliminatoires': [],
+                            'signaux_detectes': [],
+                            'details': detailed['details'],
+                            'score_breakdown': {
+                                'bloc1_eliminatoire': False,
+                                'scoring_type': '100_points',
+                                'bloc_cv': detailed['bloc_cv'],
+                                'bloc_lm': detailed['bloc_lm'],
+                                'bloc_diplomes': detailed['bloc_diplomes'],
+                                'score_final': detailed['score'],
+                                'decision': detailed['decision'],
+                                'note': detailed['note']
+                            }
+                        }
+                    else:
+                        result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+                else:
+                    result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+                if supabase:
+                    supabase.table('candidats').update({
+                        "score": str(result['score']),
+                        "checklist": json.dumps(result.get('checklist', {}), ensure_ascii=False),
+                        "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False),
+                        "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False),
+                        "analyse_details": json.dumps(result['details'], ensure_ascii=False),
+                        "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),
+                        "analyse_auto_date": datetime.datetime.now().isoformat(),
+                        "analyse_status": "completed"
+                    }).eq('token', token).execute()
+                return (token, True, result['score'])
+            except Exception as e:
+                return (data.get('token'), False, str(e))
+        start = time.time()
+        success_count = 0
+        errors = []
+        with ThreadPoolExecutor(max_workers=min(10, len(candidates))) as executor:
+            futures = [executor.submit(analyze_fast_only, c) for c in candidates]
+            for future in as_completed(futures):
+                try:
+                    token, ok, msg = future.result(timeout=60)
+                    if ok:
+                        success_count += 1
+                    else:
+                        errors.append(f"{token}: {msg}")
+                except Exception as e:
+                    errors.append(str(e))
+        elapsed = time.time() - start
+        return jsonify({
+            'message': f'⚡ Réanalyse éclair terminée en {elapsed:.1f}s',
+            'success': success_count,
+            'total': len(candidates),
+            'elapsed_seconds': round(elapsed, 1),
+            'speed_per_candidate': round(elapsed / max(1, success_count), 2),
+            'errors': errors[:10]
+        }), 200
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2634,10 +2747,7 @@ def get_reanalyze_status():
             return jsonify({'error': 'Supabase non configuré'}), 500
         response = supabase.table('candidats').select('*').execute()
         keys = response.data if response.data else []
-        
-        # ★ FILTRE CRITIQUE : ne compter QUE les postes ACTIFS ★
         keys = [d for d in keys if d.get('poste') in POSTES_ACTIFS]
-        
         status_counts = {
             'pending': 0, 'reanalyzing': 0, 'completed': 0, 'error': 0,
             'skipped_closed_post': 0, 'closed_post_no_analysis': 0
@@ -2646,12 +2756,11 @@ def get_reanalyze_status():
             status = data.get('analyse_status', 'pending')
             if status in status_counts:
                 status_counts[status] += 1
-        
         return jsonify({
             'total_candidatures': len(keys),
             'status_counts': status_counts,
             'reanalyze_in_progress': status_counts['reanalyzing'] > 0,
-            'postes_concernes': POSTES_ACTIFS  # ← info utile pour le dashboard
+            'postes_concernes': POSTES_ACTIFS
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2753,8 +2862,6 @@ def serve_upload(filename):
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip():
-    import time
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     start_time = time.time()
     print(f"⏱️ Début export ZIP - {datetime.datetime.now()}")
     try:
@@ -2892,6 +2999,42 @@ def test_email():
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ═══════════════════════════════════════════════════════════════
+#  ROUTES DE DIAGNOSTIC ET NETTOYAGE
+# ═══════════════════════════════════════════════════════════════
+@app.route('/api/health-version', methods=['GET'])
+def health_version():
+    """Endpoint de diagnostic — à appeler après déploiement pour vérifier que le bon code est actif."""
+    return jsonify({
+        "version": "v3.0-ultra-fast-parallel",
+        "postes_actifs_defined": 'POSTES_ACTIFS' in globals(),
+        "postes_actifs": POSTES_ACTIFS if 'POSTES_ACTIFS' in globals() else "NON DÉFINI",
+        "is_poste_actif_exists": 'is_poste_actif' in globals(),
+        "parallel_reanalyze": "ENABLED (ThreadPoolExecutor)",
+        "fast_reanalyze_route": "AVAILABLE",
+        "ia_prompt": "AUTHENTICITY STRICT",
+        "cleanup_route_available": True,
+        "deployed_at": datetime.datetime.now().isoformat()
+    }), 200
+
+@app.route('/api/recruteur/cleanup-closed', methods=['POST'])
+@jwt_required()
+def cleanup_closed_statuses():
+    """Remet au statut 'completed' les dossiers de postes clôturés restés bloqués en 'reanalyzing'/'pending'."""
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    response = supabase.table('candidats').select('token, poste, analyse_status').execute()
+    fixed = 0
+    for row in (response.data or []):
+        if row.get('poste') in POSTES_CLOTURES and row.get('analyse_status') in ('reanalyzing', 'pending'):
+            supabase.table('candidats').update({"analyse_status": "completed"}).eq('token', row['token']).execute()
+            fixed += 1
+    return jsonify({
+        'message': f'{fixed} dossier(s) de postes clôturés stabilisés (scores conservés)',
+        'fixed': fixed,
+        'postes_concernes': POSTES_CLOTURES
+    }), 200
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
