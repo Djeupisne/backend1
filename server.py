@@ -1850,50 +1850,160 @@ def generate_ranking_for_poste(poste, candidats_data):
     return pool
 
 def generate_excel_report(candidats_data, poste_filter=None):
+    """Génère un rapport Excel professionnel avec mise en forme avancée"""
     if not OPENPYXL_AVAILABLE:
         return None
+    
     wb = Workbook()
     if 'Sheet' in wb.sheetnames:
         del wb['Sheet']
+    
+    # Feuille de résumé
+    ws_summary = wb.create_sheet(title="Résumé")
+    summary_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    summary_font = Font(color="FFFFFF", bold=True, size=12)
+    summary_border = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'), 
+                           top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
+    
+    # En-tête du résumé
+    ws_summary.merge_cells('A1:D1')
+    title_cell = ws_summary['A1']
+    title_cell.value = "RAPPORT DE RECRUTEMENT - RecrutBank"
+    title_cell.font = Font(bold=True, size=16, color="FFFFFF")
+    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    title_cell.fill = summary_fill
+    ws_summary.row_dimensions[1].height = 35
+    
+    # Date de génération
+    ws_summary['A2'] = f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}"
+    ws_summary['A2'].font = Font(italic=True, size=10)
+    ws_summary.row_dimensions[2].height = 20
+    
+    # Statistiques globales
+    total = len(candidats_data)
+    retenus = sum(1 for c in candidats_data if c.get('statut') == 'retenu')
+    exclus = sum(1 for c in candidats_data if c.get('statut') == 'exclu')
+    entretien = sum(1 for c in candidats_data if c.get('statut') == 'entretien')
+    en_attente = total - retenus - exclus - entretien
+    
+    ws_summary['A4'] = "STATISTIQUES GLOBALES"
+    ws_summary['A4'].font = Font(bold=True, size=12)
+    ws_summary['A4'].fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    ws_summary.row_dimensions[4].height = 25
+    
+    stats_headers = ['Total', 'Retenus', 'En Entretien', 'Exclus', 'En Attente']
+    stats_values = [total, retenus, entretien, exclus, en_attente]
+    
+    for col, (header, value) in enumerate(zip(stats_headers, stats_values), 1):
+        cell_header = ws_summary.cell(row=6, column=col, value=header)
+        cell_header.font = Font(bold=True, size=10)
+        cell_header.alignment = Alignment(horizontal='center')
+        cell_header.border = summary_border
+        cell_header.fill = PatternFill(start_color="F4F4F4", end_color="F4F4F4", fill_type="solid")
+        
+        cell_value = ws_summary.cell(row=7, column=col, value=value)
+        cell_value.font = Font(bold=True, size=11)
+        cell_value.alignment = Alignment(horizontal='center')
+        cell_value.border = summary_border
+        
+        # Coloration conditionnelle
+        if header == 'Retenus':
+            cell_value.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+        elif header == 'Exclus':
+            cell_value.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+        elif header == 'En Entretien':
+            cell_value.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    
+    for col in range(1, 6):
+        ws_summary.column_dimensions[get_column_letter(col)].width = 18
+    ws_summary.row_dimensions[6].height = 25
+    ws_summary.row_dimensions[7].height = 25
+    
+    # Déterminer les postes à exporter
     if poste_filter and poste_filter in POSTES:
         postes_to_export = [poste_filter]
     else:
         postes_to_export = list(dict.fromkeys(c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES))
+    
     if not postes_to_export:
-        ws = wb.create_sheet(title="Aucune donnée")
-        ws['A1'] = "Aucune candidature trouvée"
-        ws['A1'].font = Font(bold=True, size=14)
+        ws_empty = wb.create_sheet(title="Aucune donnée")
+        ws_empty['A1'] = "Aucune candidature trouvée"
+        ws_empty['A1'].font = Font(bold=True, size=14, color="FF0000")
     else:
         for poste in postes_to_export:
             candidats_poste = generate_ranking_for_poste(poste, [c for c in candidats_data if c.get('poste') == poste])
+            
+            # Nom de l'onglet (max 31 caractères)
             sheet_name = poste[:28] if len(poste) > 31 else poste
             ws = wb.create_sheet(title=sheet_name)
-            hfill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-            hfont = Font(color="000000", bold=True, size=11)
-            border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+            
+            # Styles professionnels
+            header_fill = PatternFill(start_color="2F5597", end_color="2F5597", fill_type="solid")
+            header_font = Font(color="FFFFFF", bold=True, size=11)
+            header_border = Border(left=Side(style='medium', color='000000'), 
+                                  right=Side(style='medium', color='000000'),
+                                  top=Side(style='medium', color='000000'), 
+                                  bottom=Side(style='medium', color='000000'))
+            cell_border = Border(left=Side(style='thin', color='CCCCCC'), 
+                                right=Side(style='thin', color='CCCCCC'),
+                                top=Side(style='thin', color='CCCCCC'), 
+                                bottom=Side(style='thin', color='CCCCCC'))
+            
+            # Titre principal
             ws.merge_cells('A1:L1')
-            c = ws['A1']
-            c.value = f"CANDIDATURES - {poste}"
-            c.font = Font(bold=True, size=14, color="000000")
-            c.alignment = Alignment(horizontal='center', vertical='center')
-            c.fill = hfill
-            ws.row_dimensions[1].height = 30
+            title_cell = ws['A1']
+            title_cell.value = f"CANDIDATURES - {poste}"
+            title_cell.font = Font(bold=True, size=14, color="FFFFFF")
+            title_cell.alignment = Alignment(horizontal='center', vertical='center')
+            title_cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            ws.row_dimensions[1].height = 35
+            
+            # Sous-titre avec statistiques
             score_max = get_score_max_for_poste(poste)
+            nb_candidats = len(candidats_poste)
+            meilleur_score = max((c.get('score', 0) for c in candidats_poste), default=0)
+            moyenne_score = sum(c.get('score', 0) for c in candidats_poste) / nb_candidats if nb_candidats > 0 else 0
+            
+            ws.merge_cells('A2:L2')
+            subtitle_cell = ws['A2']
+            subtitle_cell.value = f"{nb_candidats} candidat(s) | Score max: {meilleur_score}/{score_max} | Moyenne: {moyenne_score:.1f}/{score_max}"
+            subtitle_cell.font = Font(italic=True, size=10, color="333333")
+            subtitle_cell.alignment = Alignment(horizontal='center')
+            ws.row_dimensions[2].height = 25
+            
+            # En-têtes de colonnes selon le poste
             if poste == "Chef de Section Compensation":
-                headers = ['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Adéquation (0-3)', 'Exposition BEAC/GIMAC (0-3)', 'Encadrement (0-2)', 'Cohérence (0-2)', 'Qualité CV (0-1)', 'Lettre (0-1)', f'Score /{score_max}', 'Recommandation']
+                headers = ['Rang', 'N° Dossier', 'Email', 'Nom Complet', 'Téléphone', 
+                          'Adéquation\n(0-3)', 'Expertise BEAC/GIMAC\n(0-3)', 'Management\n(0-2)', 
+                          'Cohérence\n(0-2)', 'Qualité CV\n(0-1)', 'Lettre\n(0-1)', 
+                          f'Score Total\n/{score_max}', 'Recommandation']
             elif poste == "Chargé(e) d'Administration de Crédit":
-                headers = ['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Adéquation (0-3)', 'IFRS 9/Portef. (0-3)', 'Rigueur/Outils (0-2)', 'Cohérence (0-2)', 'Qualité CV (0-1)', 'Lettre (0-1)', f'Score /{score_max}', 'Recommandation']
+                headers = ['Rang', 'N° Dossier', 'Email', 'Nom Complet', 'Téléphone',
+                          'Adéquation\n(0-3)', 'IFRS 9/Portefeuille\n(0-3)', 'Rigueur/Outils\n(0-2)',
+                          'Cohérence\n(0-2)', 'Qualité CV\n(0-1)', 'Lettre\n(0-1)',
+                          f'Score Total\n/{score_max}', 'Recommandation']
             else:
-                headers = ['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Adéquation (0-3)', 'Cohérence (0-2)', 'Risque métier (0-3)', 'Qualité CV (0-1)', 'Lettre (0-1)', f'Score /{score_max}', 'Recommandation']
+                headers = ['Rang', 'N° Dossier', 'Email', 'Nom Complet', 'Téléphone',
+                          'Adéquation\n(0-3)', 'Cohérence\n(0-2)', 'Risque Métier\n(0-3)',
+                          'Qualité CV\n(0-1)', 'Lettre\n(0-1)', f'Score Total\n/{score_max}', 
+                          'Recommandation']
+            
+            # Application des en-têtes
             for col, h in enumerate(headers, 1):
                 cell = ws.cell(row=3, column=col, value=h)
-                cell.font = hfont
-                cell.fill = hfill
-                cell.border = border
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = header_border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            
+            ws.row_dimensions[3].height = 50
+            
+            # Remplissage des données
             for row_i, cand in enumerate(candidats_poste, 4):
                 sb = cand.get('score_breakdown_parsed', {})
                 elim = sb.get('bloc1_eliminatoire', False)
+                
+                # Calcul des sous-scores selon le poste
                 if poste == "Chef de Section Compensation":
                     adeq = sb.get('sous_scores', {}).get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0) if not elim else 0
                     expo = sb.get('sous_scores', {}).get("Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)", 0) if not elim else 0
@@ -1917,37 +2027,63 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     qcv = sb.get('qualite_cv', 0) if not elim else 0
                     lm = sb.get('lettre_motivation', 0) if not elim else 0
                     total = adeq + cohe + risq + qcv + lm
+                
                 rang = cand.get('ranking_position', row_i - 3)
-                nom_c = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip()
+                nom_complet = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip() or '–'
                 reco = cand.get('ranking_recommendation', get_recommandation_from_score(total, poste))
                 num_dos = cand.get('numero_dossier', '') or '–'
+                
+                # Construction des données de ligne
                 if poste == "Chef de Section Compensation":
-                    row_data = [rang, num_dos, cand.get('email', '') or '–', nom_c, cand.get('telephone', '') or '–', adeq, expo, enc, coh, qcv, lm, total, reco]
+                    row_data = [rang, num_dos, cand.get('email', '') or '–', nom_complet, 
+                               cand.get('telephone', '') or '–', adeq, expo, enc, coh, qcv, lm, total, reco]
                 elif poste == "Chargé(e) d'Administration de Crédit":
-                    row_data = [rang, num_dos, cand.get('email', '') or '–', nom_c, cand.get('telephone', '') or '–', adeq, ifrs, rig, coh, qcv, lm, total, reco]
+                    row_data = [rang, num_dos, cand.get('email', '') or '–', nom_complet,
+                               cand.get('telephone', '') or '–', adeq, ifrs, rig, coh, qcv, lm, total, reco]
                 else:
-                    row_data = [rang, num_dos, cand.get('email', '') or '–', nom_c, cand.get('telephone', '') or '–', adeq, cohe, risq, qcv, lm, total, reco]
+                    row_data = [rang, num_dos, cand.get('email', '') or '–', nom_complet,
+                               cand.get('telephone', '') or '–', adeq, cohe, risq, qcv, lm, total, reco]
+                
+                # Application des données avec formatage
                 for col, val in enumerate(row_data, 1):
                     cell = ws.cell(row=row_i, column=col, value=val if val is not None else '')
-                    cell.border = border
+                    cell.border = cell_border
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                    
+                    # Formatage conditionnel pour la colonne Recommandation
                     if col == len(headers):
                         rec_color = get_recommandation_color(total, poste)
-                        cell.font = Font(bold=True, color="000000")
+                        cell.font = Font(bold=True, size=10)
                         if rec_color == "00FF00":
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                            cell.value = "✓ " + str(cell.value)
                         elif rec_color == "FFA500":
                             cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+                            cell.value = "⚠ " + str(cell.value)
                         else:
                             cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                            cell.value = "✗ " + str(cell.value)
+                    
+                    # Alternance de couleur de fond pour la lisibilité
+                    if row_i % 2 == 0 and col < len(headers):
+                        if cell.fill.start_color.rgb == "00000000":
+                            cell.fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")
+                
+                ws.row_dimensions[row_i].height = 28
+            
+            # Largeurs de colonnes optimisées
             if poste in ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]:
-                col_widths = [8, 20, 35, 35, 20, 15, 20, 15, 15, 15, 15, 12, 25]
+                col_widths = [8, 18, 32, 30, 18, 14, 18, 14, 14, 12, 12, 14, 22]
             else:
-                col_widths = [8, 20, 35, 35, 20, 15, 15, 20, 15, 15, 12, 25]
+                col_widths = [8, 18, 32, 30, 18, 14, 14, 16, 12, 12, 14, 22]
+            
             for col, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(col)].width = w
-            for row in range(3, ws.max_row + 1):
-                ws.row_dimensions[row].height = 25
+    
+    # Supprimer la feuille par défaut si elle existe
+    if 'Sheet' in wb.sheetnames:
+        del wb['Sheet']
+    
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -1986,53 +2122,155 @@ def generate_csv_report(candidats_data, poste_filter=None):
     return out.getvalue()
 
 def generate_pdf_report(candidats_data, poste_filter=None):
+    """Génère un rapport PDF professionnel avec mise en page soignée"""
     if not REPORTLAB_AVAILABLE:
         return None
+    
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=1*cm, leftMargin=1*cm, topMargin=2*cm, bottomMargin=2*cm)
     els = []
     sty = getSampleStyleSheet()
-    rapport_type = f"CANDIDATURES - {poste_filter}" if poste_filter else "RAPPORT GENERAL"
-    els.append(Paragraph(f"{rapport_type} — RecrutBank", ParagraphStyle('T', parent=sty['Heading1'], fontSize=16, textColor=colors.black, spaceAfter=20, alignment=TA_CENTER)))
-    els.append(Spacer(1, 0.3*cm))
-    els.append(Paragraph(f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", ParagraphStyle('D', parent=sty['Normal'], fontSize=9, textColor=colors.grey)))
-    els.append(Spacer(1, 0.8*cm))
+    
+    # Styles personnalisés pour un rendu professionnel
+    title_style = ParagraphStyle('CustomTitle', parent=sty['Heading1'], fontSize=18, textColor=colors.HexColor('#1F4E79'), 
+                                 spaceAfter=30, alignment=TA_CENTER, fontName='Helvetica-Bold')
+    subtitle_style = ParagraphStyle('CustomSubtitle', parent=sty['Normal'], fontSize=10, textColor=colors.HexColor('#666666'),
+                                    spaceAfter=20, alignment=TA_CENTER, fontName='Helvetica-Oblique')
+    section_style = ParagraphStyle('SectionTitle', parent=sty['Heading2'], fontSize=13, textColor=colors.HexColor('#2F5597'),
+                                   spaceAfter=15, spaceBefore=10, alignment=TA_LEFT, fontName='Helvetica-Bold')
+    
+    # En-tête du rapport
+    rapport_type = f"CANDIDATURES - {poste_filter}" if poste_filter else "RAPPORT GÉNÉRAL DE RECRUTEMENT"
+    els.append(Paragraph(f"{rapport_type}", title_style))
+    els.append(Paragraph(f"RecrutBank — Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}", subtitle_style))
+    els.append(Spacer(1, 0.5*cm))
+    
+    # Statistiques globales (si pas de filtre)
+    if not poste_filter:
+        total = len(candidats_data)
+        retenus = sum(1 for c in candidats_data if c.get('statut') == 'retenu')
+        exclus = sum(1 for c in candidats_data if c.get('statut') == 'exclu')
+        entretien = sum(1 for c in candidats_data if c.get('statut') == 'entretien')
+        en_attente = total - retenus - exclus - entretien
+        
+        els.append(Paragraph("📊 STATISTIQUES GLOBALES", section_style))
+        stats_data = [['Total Candidatures', 'Retenus', 'En Entretien', 'Exclus', 'En Attente'],
+                     [str(total), str(retenus), str(entretien), str(exclus), str(en_attente)]]
+        stats_tbl = Table(stats_data, colWidths=[3.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm])
+        stats_tbl.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4472C4')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (1, 1), (1, 1), colors.Color(0.8, 1, 0.8)),
+            ('BACKGROUND', (3, 1), (3, 1), colors.Color(1, 0.8, 0.8)),
+            ('BACKGROUND', (2, 1), (2, 1), colors.Color(1, 0.9, 0.6)),
+        ]))
+        els.append(stats_tbl)
+        els.append(Spacer(1, 0.5*cm))
+    
+    # Déterminer les postes à exporter
     if poste_filter and poste_filter in POSTES:
         postes_to_export = [poste_filter]
     else:
         postes_to_export = list(dict.fromkeys(c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES))
+    
+    # Génération des tableaux par poste
     for poste in postes_to_export:
         candidats_poste = generate_ranking_for_poste(poste, [c for c in candidats_data if c.get('poste') == poste])
         if not candidats_poste:
             continue
-        els.append(Paragraph(f"📋 {poste}", ParagraphStyle('P', parent=sty['Heading2'], fontSize=12, textColor=colors.black, spaceAfter=10, alignment=TA_LEFT)))
+        
+        els.append(Paragraph(f"📋 {poste}", section_style))
+        
         score_max = get_score_max_for_poste(poste)
+        nb_candidats = len(candidats_poste)
+        meilleur_score = max((c.get('score', 0) for c in candidats_poste), default=0)
+        moyenne_score = sum(c.get('score', 0) for c in candidats_poste) / nb_candidats if nb_candidats > 0 else 0
+        
+        # Sous-titre avec statistiques du poste
+        els.append(Paragraph(f"{nb_candidats} candidat(s) | Score max: {meilleur_score}/{score_max} | Moyenne: {moyenne_score:.1f}/{score_max}", 
+                            ParagraphStyle('PosteStats', parent=sty['Normal'], fontSize=9, textColor=colors.HexColor('#666666'),
+                                          spaceAfter=10, fontName='Helvetica-Oblique')))
+        
+        # En-têtes du tableau
         data = [['Rang', 'N° Dossier', 'Email', 'Candidat', 'Téléphone', 'Poste', f'Score /{score_max}', 'Recommandation']]
+        
         for idx, c in enumerate(candidats_poste, 1):
             score = int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
             reco = get_recommandation_from_score(score, poste)
-            data.append([str(idx), num_dos, c.get('email', '') or '–', f"{c.get('prenom', '')} {c.get('nom', '')}", c.get('telephone', '') or '–', poste, f"{score}/{score_max}", reco])
-        tbl = Table(data, colWidths=[1.5*cm, 3*cm, 5*cm, 4.5*cm, 3*cm, 5*cm, 2.5*cm, 4.5*cm])
-        tbl_style = [('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, 0), 9), ('BOTTOMPADDING', (0, 0), (-1, 0), 10), ('GRID', (0, 0), (-1, -1), 0.5, colors.black), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]
+            nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
+            data.append([str(idx), num_dos, c.get('email', '') or '–', nom_complet, 
+                        c.get('telephone', '') or '–', poste, f"{score}/{score_max}", reco])
+        
+        # Création du tableau avec largeurs optimisées
+        tbl = Table(data, colWidths=[1.2*cm, 2.5*cm, 4.5*cm, 4*cm, 2.5*cm, 4*cm, 2.2*cm, 3.5*cm])
+        
+        # Style de base du tableau
+        tbl_style = [
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2F5597')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ]
+        
+        # Alternance de couleur de fond pour les lignes
+        for row_idx in range(1, len(data)):
+            if row_idx % 2 == 0:
+                tbl_style.append(('BACKGROUND', (0, row_idx), (-1, row_idx), colors.Color(0.97, 0.97, 0.97)))
+        
+        # Coloration conditionnelle de la colonne Recommandation
         for row_idx in range(1, len(data)):
             score = int(candidats_poste[row_idx-1].get('score', 0)) if row_idx <= len(candidats_poste) else 0
+            
             if score_max == 12:
-                if score >= 10: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
-                elif score >= 7: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
-                else: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
+                if score >= 10:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
+                    tbl_style.append(('FONTNAME', (7, row_idx), (7, row_idx), 'Helvetica-Bold'))
+                elif score >= 7:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.95, 0.6)))
+                else:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.85, 0.85)))
             elif score_max == 100:
-                if score >= 80: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
-                elif score >= 70: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.95, 0.6)))
-                elif score >= 60: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
-                else: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
+                if score >= 80:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
+                    tbl_style.append(('FONTNAME', (7, row_idx), (7, row_idx), 'Helvetica-Bold'))
+                elif score >= 70:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.95, 0.6)))
+                elif score >= 60:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
+                else:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.85, 0.85)))
             else:
-                if score >= 8: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
-                elif score >= 6: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
-                else: tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.8, 0.8)))
+                if score >= 8:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(0.8, 1, 0.8)))
+                    tbl_style.append(('FONTNAME', (7, row_idx), (7, row_idx), 'Helvetica-Bold'))
+                elif score >= 6:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.9, 0.6)))
+                else:
+                    tbl_style.append(('BACKGROUND', (7, row_idx), (7, row_idx), colors.Color(1, 0.85, 0.85)))
+        
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
-        els.append(Spacer(1, 0.5*cm))
+        els.append(Spacer(1, 0.8*cm))
+    
+    # Pied de page
+    els.append(Spacer(1, 1*cm))
+    footer_style = ParagraphStyle('Footer', parent=sty['Normal'], fontSize=8, textColor=colors.grey,
+                                  alignment=TA_CENTER, fontName='Helvetica-Oblique')
+    els.append(Paragraph("— Fin du Rapport —", footer_style))
+    els.append(Paragraph(f"Document généré automatiquement par RecrutBank", footer_style))
+    
     doc.build(els)
     buf.seek(0)
     return buf
