@@ -1767,6 +1767,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False),
                 "analyse_details": json.dumps(result['details'], ensure_ascii=False),
                 "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),
+                "decision": result['score_breakdown'].get('decision', ''),
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }).eq('token', token).execute()
