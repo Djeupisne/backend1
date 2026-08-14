@@ -2229,8 +2229,30 @@ def generate_csv_report(candidats_data, poste_filter=None):
     candidats_filtered.sort(key=lambda x: (x.get('poste', ''), x.get('date_candidature', '')), reverse=True)
     for idx, c in enumerate(candidats_filtered, 1):
         sb = c.get('score_breakdown_parsed', {})
-        score = int(c.get('score', 0))
         poste = c.get('poste', '')
+        
+        # Calculer le score total selon le type de poste
+        if poste == "Chef de Section Compensation":
+            sous_scores = sb.get('sous_scores', {})
+            adeq = sous_scores.get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0)
+            expo = sous_scores.get("Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)", 0)
+            enc = sous_scores.get("Capacité d'encadrement et de management d'équipe opérationnelle", 0)
+            coh = sous_scores.get("Cohérence et progression du parcours professionnel", 0)
+            qcv = sous_scores.get("Qualité et clarté du CV (missions précises, livrables, résultats)", 0)
+            lm = sous_scores.get("Lettre de motivation", 0)
+            score = adeq + expo + enc + coh + qcv + lm
+        elif poste == "Chargé(e) d'Administration de Crédit":
+            sous_scores = sb.get('sous_scores', {})
+            adeq = sous_scores.get("Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)", 0)
+            ifrs = sous_scores.get("Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit", 0)
+            rig = sous_scores.get("Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)", 0)
+            coh = sous_scores.get("Cohérence et progression du parcours professionnel", 0)
+            qcv = sous_scores.get("Qualité et clarté du CV (missions précises, livrables, résultats)", 0)
+            lm = sous_scores.get("Lettre de motivation", 0)
+            score = adeq + ifrs + rig + coh + qcv + lm
+        else:
+            score = int(c.get('score', 0))
+        
         reco = get_recommandation_from_score(score, poste)
         adeq_val = sb.get('adequation_experience', 0)
         if not adeq_val:
@@ -2393,7 +2415,8 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 if risq >= 2.5: points_forts.append("Expérience métier")
                 analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
             
-            score = int(c.get('score', 0))
+            # Utiliser le score calculé (total) pour la recommandation, pas c.get('score')
+            score = total if poste in POSTES_AVEC_SCORING_12 else int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
             reco = get_recommandation_from_score(score, poste)
             nom = c.get('nom', '') or '–'
