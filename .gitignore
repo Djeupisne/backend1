@@ -4,36 +4,34 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Environment
+.Python
+env/
+venv/
+.venv/
+.ENV
+.ENV.local
 .env
 .env.local
-*.env.*
-
-# Editors
-.vscode/
-.idea/
-
-# Dependencies
-.venv/
-venv/
-node_modules/
-
-# Build artifacts
-dist/
-build/
-target/
-
-# Coverage
+.env.*
+.env.local.*
+.env.vault
+.pytest_cache/
+.mypy_cache/
 .coverage
 coverage/
 htmlcov/
-
-# Testing
-.pytest_cache/
-.mypy_cache/
+*.coveragerc
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage.*
+.nox/
+noxfile.sessions.log
+.hypothesis/
+.ipython/
+.jupyter/
+.notebook_checkpoints/
+.DS_Store
+Thumbs.db
 ```
