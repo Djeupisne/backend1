@@ -1961,8 +1961,10 @@ def generate_excel_report(candidats_data, poste_filter=None):
             # Sous-titre avec statistiques
             score_max = get_score_max_for_poste(poste)
             nb_candidats = len(candidats_poste)
-            meilleur_score = max((c.get('score', 0) for c in candidats_poste), default=0)
-            moyenne_score = sum(c.get('score', 0) for c in candidats_poste) / nb_candidats if nb_candidats > 0 else 0
+            # Convertir les scores en float pour éviter les erreurs de type
+            scores = [float(c.get('score', 0)) if c.get('score') is not None else 0 for c in candidats_poste]
+            meilleur_score = max(scores) if scores else 0
+            moyenne_score = sum(scores) / nb_candidats if nb_candidats > 0 else 0
             
             ws.merge_cells('A2:L2')
             subtitle_cell = ws['A2']
@@ -2188,8 +2190,10 @@ def generate_pdf_report(candidats_data, poste_filter=None):
         
         score_max = get_score_max_for_poste(poste)
         nb_candidats = len(candidats_poste)
-        meilleur_score = max((c.get('score', 0) for c in candidats_poste), default=0)
-        moyenne_score = sum(c.get('score', 0) for c in candidats_poste) / nb_candidats if nb_candidats > 0 else 0
+        # Convertir les scores en float pour éviter les erreurs de type
+        scores = [float(c.get('score', 0)) if c.get('score') is not None else 0 for c in candidats_poste]
+        meilleur_score = max(scores) if scores else 0
+        moyenne_score = sum(scores) / nb_candidats if nb_candidats > 0 else 0
         
         # Sous-titre avec statistiques du poste
         els.append(Paragraph(f"{nb_candidats} candidat(s) | Score max: {meilleur_score}/{score_max} | Moyenne: {moyenne_score:.1f}/{score_max}", 
