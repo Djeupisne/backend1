@@ -2336,8 +2336,8 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                             ParagraphStyle('PosteStats', parent=sty['Normal'], fontSize=9, textColor=colors.HexColor('#666666'),
                                           spaceAfter=10, fontName='Helvetica-Oblique')))
         
-        # En-têtes du tableau - VERSION DÉTAILLÉE
-        data = [['Rang', 'N° Dossier', 'Candidat', 'Email', 'Statut', f'Score /{score_max}', '% Score', 'Recommandation', 'Analyse']]
+        # En-têtes du tableau - VERSION DÉTAILLÉE AVEC TÉLÉPHONE
+        data = [['Rang', 'N° Dossier', 'Nom', 'Prénom', 'Téléphone', 'Email', 'Statut', f'Score /{score_max}', '% Score', 'Recommandation', 'Analyse']]
         
         for idx, c in enumerate(candidats_poste, 1):
             sb = c.get('score_breakdown_parsed', {})
@@ -2396,18 +2396,20 @@ def generate_pdf_report(candidats_data, poste_filter=None):
             score = int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
             reco = get_recommandation_from_score(score, poste)
-            nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
+            nom = c.get('nom', '') or '–'
+            prenom = c.get('prenom', '') or '–'
+            telephone = c.get('telephone', '') or '–'
             statut = c.get('statut', 'en_attente') or 'en_attente'
             pourcentage = (total / score_max * 100) if score_max > 0 else 0
             
             data.append([
-                str(idx), num_dos, nom_complet, 
+                str(idx), num_dos, nom, prenom, telephone,
                 c.get('email', '') or '–', statut.capitalize(),
                 f"{score}/{score_max}", f"{pourcentage:.0f}%", reco, analyse
             ])
         
-        # Création du tableau avec largeurs optimisées
-        tbl = Table(data, colWidths=[1*cm, 2.2*cm, 3.5*cm, 4*cm, 2*cm, 2*cm, 1.5*cm, 2.5*cm, 5*cm])
+        # Création du tableau avec largeurs optimisées (11 colonnes maintenant)
+        tbl = Table(data, colWidths=[1*cm, 2*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3.5*cm, 1.8*cm, 2*cm, 1.5*cm, 2.5*cm, 5*cm])
         
         # Style de base du tableau
         tbl_style = [
@@ -2427,18 +2429,18 @@ def generate_pdf_report(candidats_data, poste_filter=None):
         # Alternance de couleur de fond pour les lignes
         for row_idx in range(1, len(data)):
             if row_idx % 2 == 0:
-                tbl_style.append(('BACKGROUND', (0, row_idx), (7, row_idx), colors.Color(0.97, 0.97, 0.97)))
+                tbl_style.append(('BACKGROUND', (0, row_idx), (9, row_idx), colors.Color(0.97, 0.97, 0.97)))
         
         # Coloration conditionnelle de la colonne % Score et Recommandation
         for row_idx in range(1, len(data)):
             c = candidats_poste[row_idx-1] if row_idx <= len(candidats_poste) else {}
             score = int(c.get('score', 0)) if c else 0
-            pourcentage_col = 6  # Colonne % Score
-            reco_col = 7  # Colonne Recommandation
+            pourcentage_col = 8  # Colonne % Score
+            reco_col = 9  # Colonne Recommandation
             
             # Coloration % Score
             if row_idx < len(data):
-                pct_val = float(data[row_idx][6].replace('%', '')) if data[row_idx][6] else 0
+                pct_val = float(data[row_idx][8].replace('%', '')) if data[row_idx][8] else 0
                 if pct_val >= 80:
                     tbl_style.append(('BACKGROUND', (pourcentage_col, row_idx), (pourcentage_col, row_idx), colors.Color(0, 0.7, 0)))
                     tbl_style.append(('TEXTCOLOR', (pourcentage_col, row_idx), (pourcentage_col, row_idx), colors.white))
@@ -2479,9 +2481,9 @@ def generate_pdf_report(candidats_data, poste_filter=None):
         
         # Style pour la colonne Analyse
         for row_idx in range(1, len(data)):
-            tbl_style.append(('ALIGNMENT', (8, row_idx), (8, row_idx), 'LEFT'))
-            tbl_style.append(('FONTSIZE', (8, row_idx), (8, row_idx), 7))
-            tbl_style.append(('VALIGN', (8, row_idx), (8, row_idx), 'TOP'))
+            tbl_style.append(('ALIGNMENT', (10, row_idx), (10, row_idx), 'LEFT'))
+            tbl_style.append(('FONTSIZE', (10, row_idx), (10, row_idx), 7))
+            tbl_style.append(('VALIGN', (10, row_idx), (10, row_idx), 'TOP'))
         
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
