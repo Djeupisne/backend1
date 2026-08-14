@@ -2125,12 +2125,14 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_complet = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip() or '–'
-                reco = cand.get('ranking_recommendation', get_recommandation_from_score(total, poste))
+                # Utiliser le score stocké dans la base de données plutôt que le recalculer
+                score_candidat = int(cand.get('score', 0))
+                reco = cand.get('ranking_recommendation') or get_recommandation_from_score(score_candidat, poste)
                 num_dos = cand.get('numero_dossier', '') or '–'
                 statut = cand.get('statut', 'en_attente') or 'en_attente'
                 
-                # Calcul du pourcentage
-                pourcentage = (total / score_max * 100) if score_max > 0 else 0
+                # Calcul du pourcentage basé sur le score réel et le score max du poste
+                pourcentage = (score_candidat / score_max * 100) if score_max > 0 else 0
                 
                 # Construction des données de ligne
                 if poste == "Chef de Section Compensation":
