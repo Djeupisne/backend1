@@ -2255,6 +2255,29 @@ return '<div>'
 }
 
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function getSeuilEntretien(poste) {
+if (!poste) return 7;
+if (POSTES_AVEC_SCORING_12.includes(poste)) return 7; // Seuil pour entretien sur 12 points
+if (NOUVEAUX_POSTES_100PTS.includes(poste)) return 70; // Seuil pour entretien sur 100 points
+return 6; // Seuil par défaut
+}
+
+function getMaxForCriterion(key, poste) {
+// Retourne le score maximum possible pour un critère donné
+const maxScores = {
+"Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": 3,
+"Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": 3,
+"Capacité d'encadrement et de management d'équipe opérationnelle": 2,
+"Cohérence et progression du parcours professionnel": 2,
+"Qualité et clarté du CV (missions précises, livrables, résultats)": 1,
+"Lettre de motivation": 1,
+"Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": 3,
+"Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": 3,
+"Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)": 2
+};
+return maxScores[key] || 3; // Valeur par défaut si non trouvé
+}
 function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/\n/g,'\n'); }
 
 function closeModal() {
@@ -2444,18 +2467,22 @@ points_attention: [
 function renderGrille(poste, checklistJson, scoreBreakdown) {
 const g = GRILLE[poste];
 const el = document.getElementById('grille-content');
-if (!g) {
-el.innerHTML = '<p style="color:var(--text-muted);font-size:.87rem;text-align:center;padding:1rem">Grille non définie pour ce poste.</p>';
-return;
-}
-let checked = {};
-try { checked = JSON.parse(checklistJson || '{}'); } catch {}
 const hasEliminatoire = scoreBreakdown && (
 scoreBreakdown.bloc1_eliminatoire === true ||
 scoreBreakdown.bloc1_eliminatoire === "true" ||
 scoreBreakdown.bloc1_eliminatoire === 1 ||
 scoreBreakdown.bloc1_eliminatoire === "1"
 );
+if (!g) {
+el.innerHTML = '<p style="color:var(--text-muted);font-size:.87rem;text-align:center;padding:1rem">Grille non définie pour ce poste.</p>';
+// Même si la grille est manquante, afficher l'alerte si le candidat est éliminé
+if (hasEliminatoire) {
+showEliminationAlert({});
+}
+return;
+}
+let checked = {};
+try { checked = JSON.parse(checklistJson || '{}'); } catch {}
 const mkSection = (title, color, items, pfx) =>
 '<div class="grille-section">'
 + '<div class="grille-header" style="color:' + color + ';background:' + color + '18;border-left-color:' + color + '">'
@@ -2484,20 +2511,86 @@ const overlay = document.getElementById('elimination-alert-overlay');
 const alert = document.getElementById('elimination-alert');
 const details = document.getElementById('elimination-alert-details');
 const poste = currentC?.poste;
+const sb = currentC?.score_breakdown_parsed;
+const flagsElim = currentC?.flags_eliminatoires_parsed || [];
+const scoreFinal = sb?.score_final || 0;
+const scoreMax = getScoreMax(poste);
+
+// Déterminer le type d'élimination
+let eliminationType = '';
+let eliminationReason = '';
+let detailedReasons = '';
+
+if (sb?.bloc1_eliminatoire === true || sb?.bloc1_eliminatoire === "true" || sb?.bloc1_eliminatoire === 1 || sb?.bloc1_eliminatoire === "1") {
+  eliminationType = 'ÉLIMINATION OBLIGATOIRE';
+  eliminationReason = 'Critères éliminatoires non satisfaits';
+  
+  if (flagsElim.length > 0) {
+    detailedReasons = '<div style="margin-top:.5rem"><strong style="color:#991b1b;font-size:.85rem">Raisons détectées :</strong><ul style="margin:.3rem 0;padding-left:1.5rem">';
+    flagsElim.forEach(flag => {
+      detailedReasons += `<li style="margin:.3rem 0;color:#991b1b">${escHtml(flag)}</li>`;
+    });
+    detailedReasons += '</ul></div>';
+  } else {
+    detailedReasons = '<p style="font-size:.85rem;color:#7f1d1d;margin-top:.5rem">Les critères obligatoires définis pour ce poste ne sont pas tous satisfaits.</p>';
+  }
+} else if (!sb?.bloc1_eliminatoire && scoreFinal < getSeuilEntretien(poste)) {
+  eliminationType = 'MANQUE DE POINTS';
+  eliminationReason = `Score insuffisant (${scoreFinal}/${scoreMax})`;
+  const seuil = getSeuilEntretien(poste);
+  detailedReasons = `<p style="font-size:.85rem;color:#7f1d1d;margin-top:.5rem">
+    Le score obtenu (<strong>${scoreFinal}/${scoreMax}</strong>) est inférieur au seuil requis pour un entretien (seuil : ${seuil}/${scoreMax}).
+  </p>`;
+  
+  // Afficher le détail des sous-scores si disponible
+  if (sb?.sous_scores && Object.keys(sb.sous_scores).length > 0) {
+    detailedReasons += '<div style="margin-top:.8rem;background:#fef2f2;padding:.6rem;border-radius:4px;font-size:.8rem">';
+    detailedReasons += '<strong style="color:#991b1b">Détail du scoring :</strong><br>';
+    Object.entries(sb.sous_scores).forEach(([key, val]) => {
+      const maxPoints = getMaxForCriterion(key, poste);
+      detailedReasons += `<span style="display:inline-block;margin:.2rem .4rem .2rem 0;padding:.15rem .4rem;background:#fee2e2;border-radius:3px">${escHtml(key)}: <strong>${val}/${maxPoints}</strong></span>`;
+    });
+    detailedReasons += '</div>';
+  }
+} else {
+  eliminationType = 'ÉLIMINÉ';
+  eliminationReason = sb?.decision || 'Non retenu';
+  detailedReasons = '<p style="font-size:.85rem;color:#7f1d1d;margin-top:.5rem">Le candidat ne satisfait pas les exigences pour ce poste.</p>';
+}
+
+if (!checked || Object.keys(checked).length === 0) {
+// Appel depuis un poste sans grille ou cas général
+if (sb && (sb.bloc1_eliminatoire || scoreFinal < getSeuilEntretien(poste))) {
+details.innerHTML = `
+<div style="background:#fee2e2;border:1px solid #fecaca;border-radius:6px;padding:.75rem;margin-bottom:.75rem">
+<span style="font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#991b1b">${escapeHtml(eliminationType)}</span>
+<div style="font-size:1.05rem;font-weight:700;color:#7f1d1d;margin-top:.25rem">${escapeHtml(eliminationReason)}</div>
+</div>
+${detailedReasons}
+<p style="font-size:.75rem;color:#991b1b;margin-top:.75rem;padding-top:.5rem;border-top:1px dashed #fecaca">
+<strong>Poste :</strong> "${poste || 'inconnu'}" | 
+<strong>Statut :</strong> ${sb?.decision || 'N/A'}
+</p>
+`;
+overlay.style.display = 'block';
+alert.style.display = 'block';
+}
+return;
+}
 const g = GRILLE[poste];
 if (!g) {
 console.error(`❌ ALERTE ÉLIMINATOIRE : Poste non trouvé dans GRILLE frontend`);
 console.error(`   Poste reçu : "${poste}"`);
-const sb = currentC?.score_breakdown_parsed;
-if (sb?.bloc1_eliminatoire) {
+if (sb?.bloc1_eliminatoire || scoreFinal < getSeuilEntretien(poste)) {
 details.innerHTML = `
-<strong>Candidat éliminé automatiquement</strong>
-<p style="margin:.5rem 0;color:#7f1d1d">
-Critères éliminatoires non satisfaits (poste: "${poste || 'inconnu'}")
-</p>
-<p style="font-size:.8rem;color:#991b1b">
-Si ce poste devrait être supporté, vérifiez que son nom correspond exactement
-à une clé de la grille frontend (accents, espaces, majuscules).
+<div style="background:#fee2e2;border:1px solid #fecaca;border-radius:6px;padding:.75rem;margin-bottom:.75rem">
+<span style="font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#991b1b">${escapeHtml(eliminationType)}</span>
+<div style="font-size:1.05rem;font-weight:700;color:#7f1d1d;margin-top:.25rem">${escapeHtml(eliminationReason)}</div>
+</div>
+${detailedReasons}
+<p style="font-size:.75rem;color:#991b1b;margin-top:.75rem;padding-top:.5rem;border-top:1px dashed #fecaca">
+<strong>Poste :</strong> "${poste || 'inconnu'}" — Grille non configurée dans le frontend.<br>
+Vérifiez que le nom du poste correspond exactement à une clé de la grille (accents, espaces, majuscules).
 </p>
 `;
 overlay.style.display = 'block';
