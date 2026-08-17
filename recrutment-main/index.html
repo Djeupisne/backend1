@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RecrutBank – Portail de Recrutement</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.poste-card.inactive {
+    opacity: 0.45;
+    filter: grayscale(80%);
+    pointer-events: none;
+    position: relative;
+}
+.poste-card.inactive::after {
+    content: "🔒 clôturé";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(26, 58, 92, 0.92);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.03em;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    z-index: 10;
+}
+.poste-card.active {
+    border: 2px solid #2980B9;
+    box-shadow: 0 4px 16px rgba(41, 128, 185, 0.25);
+    position: relative;
+}
+.poste-card.active::before {
+    content: "OUVERT AU RECRUTEMENT";
+    position: absolute;
+    top: -10px;
+    right: 12px;
+    background: #27ae60;
+    color: white;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    box-shadow: 0 2px 6px rgba(39, 174, 96, 0.4);
+}
+select option:disabled {
+    color: #aaa;
+    background: #f5f5f5;
+    font-style: italic;
+}
+
+/* === MESSAGE DE CONFIRMATION CENTRÉ (COMPACT) === */
+.confirmation-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(6px);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+    padding: 1rem;
+    animation: fadeIn 0.3s ease-out;
+}
+.confirmation-overlay.show { display: flex; }
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+.confirmation-box {
+    background: white;
+    border-radius: 14px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    overflow: hidden;
+    animation: slideUp 0.3s ease-out;
+    text-align: center;
+}
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.confirmation-header {
+    background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+    color: white;
+    padding: 1.2rem 1.2rem 1rem;
+}
+.confirmation-icon {
+    width: 52px;
+    height: 52px;
+    background: rgba(255,255,255,0.25);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    margin: 0 auto 0.6rem;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.15);
+    animation: bounce 0.5s ease-out 0.2s both;
+}
+@keyframes bounce {
+    0% { transform: scale(0); }
+    60% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+}
+.confirmation-header h2 {
+    margin: 0 0 0.3rem 0;
+    font-size: 1.15rem;
+    font-weight: 800;
+}
+.confirmation-header p {
+    margin: 0;
+    font-size: 0.82rem;
+    opacity: 0.95;
+}
+.confirmation-body {
+    padding: 1rem 1.2rem 0.8rem;
+}
+.email-notice {
+    background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);
+    border: 1px solid #bfdbfe;
+    border-left: 4px solid #2563eb;
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.9rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    text-align: left;
+}
+.email-notice .icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+.email-notice .content { flex: 1; }
+.email-notice strong {
+    display: block;
+    color: #1e40af;
+    font-size: 0.82rem;
+    margin-bottom: 0.15rem;
+}
+.email-notice p {
+    margin: 0;
+    color: #1e3a8a;
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+.info-grid {
+    display: grid;
+    gap: 0.5rem;
+    margin-bottom: 0.8rem;
+}
+.info-item {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+}
+.info-item .label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.info-item .value {
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1a3a5c;
+    word-break: break-all;
+}
+.info-item .value.dossier {
+    color: #2980B9;
+    font-size: 1rem;
+}
+.confirmation-footer {
+    padding: 0.7rem 1.2rem 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-top: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+.confirmation-footer .btn {
+    flex: 1;
+    min-width: 140px;
+    padding: 0.5rem 0.8rem;
+    font-size: 0.82rem;
+}
+.copy-btn {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    color: #475569;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.copy-btn:hover {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+.copy-btn.copied {
+    background: #dcfce7;
+    color: #166534;
+    border-color: #86efac;
+}
+@media (max-width: 480px) {
+    .confirmation-box { max-width: 100%; }
+    .confirmation-header { padding: 1rem 1rem 0.8rem; }
+    .confirmation-header h2 { font-size: 1.05rem; }
+    .confirmation-body { padding: 0.8rem 1rem 0.6rem; }
+    .confirmation-footer { padding: 0.6rem 0.8rem 0.8rem; }
+    .confirmation-footer .btn { min-width: 100%; font-size: 0.8rem; }
+    .info-item .value { font-size: 0.78rem; }
+    .info-item .value.dossier { font-size: 0.9rem; }
+}
+</style>
+</head>
+<body>
+<nav class="navbar">
+<div class="brand">🏦 <span>RecrutBank</span></div>
+<div class="nav-links">
+<a href="#postes">Postes</a>
+<a href="#postuler">Postuler</a>
+<a href="#suivi">Suivi</a>
+<a href="login.html" class="btn-nav">🔐 Recruteur</a>
+</div>
+</nav>
+<section class="hero">
+<h1>Rejoignez Notre <span>Équipe</span></h1>
+<p>Bienvenue sur le portail de recrutement. Consultez nos offres et déposez votre candidature en ligne.</p>
+<div class="hero-btns">
+<a href="#postuler" class="btn btn-primary">📄 Déposer ma candidature</a>
+<a href="#suivi"    class="btn btn-outline">🔍 Suivre mon dossier</a>
+</div>
+</section>
+<section class="section" id="postes">
+<div class="container">
+<h2 style="text-align:center;font-size:1.7rem;font-weight:800;color:var(--primary);margin-bottom:.5rem">Postes Ouverts</h2>
+<p style="text-align:center;color:var(--text-muted);margin-bottom:2.5rem">Opportunités dans nos pôles Finance, Crédit, IT, Audit, Risques, Conformité et Opérations</p>
+<div class="postes-grid" id="postes-list">
+<div class="empty-state"><div class="empty-icon">⏳</div><p>Chargement des postes...</p></div>
+</div>
+</div>
+</section>
+<section class="section" id="postuler" style="background:#fff">
+<div class="container">
+<h2 style="text-align:center;font-size:1.7rem;font-weight:800;color:var(--primary);margin-bottom:.5rem">Déposer une Candidature</h2>
+<p style="text-align:center;color:var(--text-muted);margin-bottom:2.5rem">Formats acceptés : PDF, DOC, DOCX (max 10 Mo par fichier)</p>
+<div id="info-postes-actifs" style="max-width:700px;margin:0 auto 1.5rem auto;padding:.75rem 1rem;background:#d4edda;border-left:4px solid #27ae60;border-radius:6px;font-size:.85rem;color:#155724;display:none">
+</div>
+<div style="max-width:700px;margin:0 auto 1.5rem auto;padding:.75rem 1rem;background:#EBF5FB;border-left:4px solid #2980B9;border-radius:6px;font-size:.85rem;color:#1a3a5c">
+💡 <strong>Bon à savoir :</strong> Vous pouvez postuler à plusieurs postes distincts avec le même email. Une candidature distincte sera créée pour chaque poste.
+</div>
+<div class="card" style="max-width:700px;margin:0 auto" id="form-card">
+<div id="form-alert"></div>
+<form id="candidature-form" enctype="multipart/form-data">
+<div class="form-row">
+<div class="form-group">
+<label>Prénom *</label>
+<input class="form-control" name="prenom" placeholder="ex. Emmanuel" required>
+</div>
+<div class="form-group">
+<label>Nom *</label>
+<input class="form-control" name="nom" placeholder="ex. Djeupisne" required>
+</div>
+</div>
+<div class="form-row">
+<div class="form-group">
+<label>Email *</label>
+<input class="form-control" type="email" name="email" placeholder="emmanueldjeupisne@email.com" required>
+</div>
+<div class="form-group">
+<label>Téléphone</label>
+<input class="form-control" name="telephone" placeholder="+228 XX XX XX XX">
+</div>
+</div>
+<div class="form-row">
+<div class="form-group">
+<label>N° Dossier</label>
+<input class="form-control" name="numero_dossier" id="numero-dossier" placeholder="Généré automatiquement après soumission" readonly style="font-family:monospace;font-weight:600;letter-spacing:.04em;background:#f8f9fa;cursor:not-allowed">
+<p style="font-size:.72rem;color:var(--text-muted);margin-top:.3rem">Numéro généré automatiquement par le système lors de la soumission.</p>
+</div>
+<div class="form-group">
+<label>Poste souhaité *</label>
+<select class="form-control" name="poste" id="poste-select" required>
+<option value="">— Choisir un poste —</option>
+</select>
+</div>
+</div>
+<div class="form-row">
+<div class="form-group">
+<label>CV *</label>
+<div class="file-input-wrapper">
+<label class="file-label" id="cv-label" for="cv-input">📎 Choisir mon CV</label>
+<input type="file" id="cv-input" name="cv" accept=".pdf,.doc,.docx" required>
+</div>
+<p style="font-size:.72rem;color:var(--text-muted);margin-top:.3rem;display:flex;align-items:center;gap:.4rem">
+<span>🌐</span> Français ou Anglais accepté
+</p>
+</div>
+<div class="form-group">
+<label>Lettre de motivation <span id="lettre-badge" style="display:none;background:#e8f4fd;color:#1a3a5c;font-size:.65rem;padding:2px 6px;border-radius:4px;margin-left:.4rem">Optionnel pour ce poste</span></label>
+<div class="file-input-wrapper">
+<label class="file-label" id="lettre-label" for="lettre-input">📎 Choisir ma lettre</label>
+<input type="file" id="lettre-input" name="lettre" accept=".pdf,.doc,.docx">
+</div>
+</div>
+</div>
+<div class="form-group" style="margin-top:.5rem">
+<label>Certificats / Attestations (optionnel, plusieurs fichiers)</label>
+<div class="file-input-wrapper">
+<label class="file-label" id="attestation-label" for="attestation-input">🎓 Ajouter des certificats</label>
+<input type="file" id="attestation-input" name="attestation" accept=".pdf,.doc,.docx" multiple>
+</div>
+<p style="font-size:.75rem;color:var(--text-muted);margin-top:.3rem">
+Ex: Attestation de travail, certificats de formation, diplômes… (tous analysés ensemble)
+</p>
+<div id="attestation-list" style="margin-top:.5rem;font-size:.8rem;color:var(--text-muted)"></div>
+</div>
+<button type="submit" class="btn btn-primary btn-full" id="submit-btn">
+🚀 Soumettre ma candidature
+</button>
+</form>
+</div>
+<div id="candidature-success" class="card" style="max-width:700px;margin:1.5rem auto;display:none;text-align:center">
+<div style="font-size:3rem;margin-bottom:1rem">🎉</div>
+<h3 style="color:var(--success);font-size:1.3rem;margin-bottom:.5rem">Candidature soumise avec succès !</h3>
+<p style="color:var(--text-muted);margin-bottom:1.2rem">Conservez précieusement vos références de suivi :</p>
+<div style="margin-bottom:.8rem">
+<p style="font-size:.78rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem">N° Dossier</p>
+<div style="background:#EBF5FB;border:2px solid #2980B9;border-radius:8px;padding:.7rem 1rem;font-family:monospace;font-size:1rem;font-weight:700;color:#1a3a5c" id="dossier-display"></div>
+</div>
+<div>
+<p style="font-size:.78rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem">Numéro de suivi en ligne</p>
+<div style="background:#f4f6fa;border:2px dashed var(--border);border-radius:8px;padding:.7rem 1rem;font-family:monospace;font-size:.88rem;font-weight:700;color:var(--primary);word-break:break-all" id="token-display"></div>
+</div>
+<p style="margin-top:1rem;font-size:.85rem;color:var(--text-muted)">
+🔍 Votre dossier (CV + lettre + certificats) est en cours d'analyse automatique.<br>
+Utilisez le numéro de suivi dans la section <strong>Suivi de dossier</strong> ci-dessous.
+</p>
+<div style="margin-top:1.4rem;display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap">
+<button class="btn btn-blue" onclick="resetForm()">📄 Postuler à un autre poste</button>
+<button class="btn btn-outline" onclick="document.getElementById('suivi-token').value=document.getElementById('token-display').textContent;document.getElementById('suivi').scrollIntoView({behavior:'smooth'})">🔍 Suivre ce dossier</button>
+</div>
+</div>
+</section>
+<section class="section" id="suivi">
+<div class="container">
+<h2 style="text-align:center;font-size:1.7rem;font-weight:800;color:var(--primary);margin-bottom:.5rem">Suivi de Dossier</h2>
+<p style="text-align:center;color:var(--text-muted);margin-bottom:2.5rem">Entrez votre numéro de suivi pour connaître l'état de votre candidature</p>
+<div class="card" style="max-width:540px;margin:0 auto">
+<div style="display:flex;gap:.8rem">
+<input class="form-control" id="suivi-token" placeholder="Entrez votre numéro de suivi...">
+<button class="btn btn-primary" onclick="checkSuivi()">Rechercher</button>
+</div>
+<div id="suivi-result" style="margin-top:1.2rem"></div>
+</div>
+</div>
+</section>
+<footer style="background:var(--primary);color:rgba(255,255,255,.65);text-align:center;padding:1.5rem;font-size:.83rem">
+<p>© 2026 RecrutBank · Portail de Recrutement · Confidentiel</p>
+</footer>
+
+<!-- === MESSAGE DE CONFIRMATION CENTRÉ (MODAL) === -->
+<div class="confirmation-overlay" id="confirmation-overlay">
+<div class="confirmation-box">
+<div class="confirmation-header">
+<div class="confirmation-icon"></div>
+<h2>Candidature soumise avec succès !</h2>
+<p>Votre dossier a bien été reçu et est en cours de traitement</p>
+</div>
+<div class="confirmation-body">
+<div class="email-notice">
+<span class="icon">📧</span>
+<div class="content">
+<strong>Email de confirmation envoyé</strong>
+<p>Un email de confirmation vient d'être envoyé à l'adresse que vous avez renseignée. Vérifiez votre boîte de réception (et vos spams) dans les prochaines minutes.</p>
+</div>
+</div>
+
+<div class="info-grid">
+<div class="info-item">
+<div class="label">🗂️ N° de Dossier</div>
+<div class="value dossier" id="conf-dossier">–</div>
+</div>
+<div class="info-item">
+<div class="label">🔑 Numéro de suivi en ligne
+<button class="copy-btn" id="copy-token-btn" onclick="copyToken()">📋 Copier</button>
+</div>
+<div class="value" id="conf-token">–</div>
+</div>
+<div class="info-item">
+<div class="label">💼 Poste</div>
+<div class="value" id="conf-poste" style="font-family:inherit;font-size:.9rem">–</div>
+</div>
+</div>
+</div>
+<div class="confirmation-footer">
+<button class="btn btn-primary" onclick="closeConfirmationAndScrollToSuivi()">🔍 Suivre mon dossier</button>
+<button class="btn btn-outline" onclick="closeConfirmationAndReset()">📄 Nouvelle candidature</button>
+</div>
+</div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+<script src="script.js"></script>
+<script>
+const API = 'https://backend1-fiq5.onrender.com/api';
+
+// Métadonnées d'affichage pour chaque poste
+const POSTES_INFO = {
+    "Responsable Administration de Crédit": { icon:"🏛️", desc:"Gestion portefeuille, conformité COBAC/IFRS", category:"credit", senior: false },
+    "Analyste Crédit CCB":                  { icon:"📊", desc:"Analyse financière, montage et suivi de crédits", category:"credit", senior: false },
+    "Archiviste (Administration Crédit)":   { icon:"🗂️", desc:"Gestion documentaire et archivage des dossiers", category:"credit", senior: false },
+    "Senior Finance Officer":               { icon:"💰", desc:"Pilotage financier et reporting senior", category:"finance", senior: true },
+    "Market Risk Officer":                  { icon:"📈", desc:"Gestion et modélisation des risques de marché", category:"risque", senior: false },
+    "IT Réseau & Infrastructure":           { icon:"🖥️", desc:"Administration réseau, sécurité et infrastructure", category:"it", senior: false, badge: "technique" },
+    "Auditeur interne":                     { icon:"🔍", desc:"Audit interne et contrôle des processus", category:"audit", senior: false },
+    "Chef service contrôle des engagements":{ icon:"📋", desc:"Contrôle des engagements et garanties", category:"risque", senior: true },
+    "Chef service IT (maintenance/support)":{ icon:"🛠️", desc:"Maintenance et support informatique", category:"it", senior: true, badge: "technique" },
+    "Chef service finance":                 { icon:"💵", desc:"Management de la fonction finance", category:"finance", senior: true },
+    "Chef service risques de marché":       { icon:"📉", desc:"Gestion des risques financiers et de marché", category:"risque", senior: true },
+    "Chef service reporting réglementaire": { icon:"📑", desc:"Reporting prudentiel et réglementaire", category:"conformite", senior: true },
+    "Chef de Section Compensation":         {
+        icon: "💳",
+        desc: "Supervision des opérations de compensation interbancaire (BEAC/GIMAC)",
+        category: "operations",
+        senior: true,
+        highlight: "beac-gimac"
+    },
+    "Chargé(e) d'Administration de Crédit": {
+        icon: "📑",
+        desc: "Gestion du cycle de crédit, garanties, reporting IFRS 9 et COBAC",
+        category: "credit",
+        senior: false
+    }
+};
+
+// ★ APPEL API MIS À JOUR pour la nouvelle structure {postes, postes_actifs, postes_clotures} ★
+fetch(`${API}/postes`)
+.then(r => r.json())
+.then(data => {
+    // Support de l'ancienne structure (simple tableau) ET de la nouvelle (objet)
+    const postes = Array.isArray(data) ? data : (data.postes || []);
+    const postesActifs = Array.isArray(data) ? [] : (data.postes_actifs || []);
+    
+    const grid = document.getElementById("postes-list");
+    const sel  = document.getElementById("poste-select");
+    const infoBox = document.getElementById("info-postes-actifs");
+    grid.innerHTML = "";
+    
+    // Affichage du message d'information sur les postes actifs
+    if (postesActifs.length > 0 && infoBox) {
+        if (postesActifs.length === 1) {
+            infoBox.innerHTML = `<strong>Un seul poste est actuellement ouvert au recrutement :</strong> ${postesActifs[0]}. Les autres postes seront ouverts prochainement.`;
+        } else {
+            infoBox.innerHTML = `<strong>${postesActifs.length} postes sont actuellement ouverts au recrutement :</strong> ${postesActifs.join(', ')}.`;
+        }
+        infoBox.style.display = 'block';
+    }
+    
+    // Génération des cartes et des options du select
+    postes.forEach(p => {
+        const info = POSTES_INFO[p] || { icon:"💼", desc:"", category:"" };
+        
+        // ★ SOURCE DE VÉRITÉ : le backend décide si un poste est actif ★
+        const isActive = postesActifs.includes(p);
+        
+        const catBadge = info.category ? `<span style="display:inline-block;font-size:.65rem;background:#e8f4fd;color:#1a3a5c;padding:2px 6px;border-radius:4px;margin-left:.4rem">${info.category}</span>` : "";
+        const certHighlight = info.highlight === "certifications" ? `<div style="font-size:.75rem;color:#1e7e34;margin-top:.3rem">🎯 <strong>Certifications requises</strong></div>` : "";
+        const beacHighlight = info.highlight === "beac-gimac" ? `<div style="font-size:.75rem;color:#1a3a5c;margin-top:.3rem">🏦 <strong>Expertise BEAC/GIMAC requise</strong></div>` : "";
+        const techBadge = info.badge === "technique" ? `<span style="display:inline-block;font-size:.65rem;background:#d4edda;color:#155724;padding:2px 6px;border-radius:4px;margin-left:.4rem">Technique</span>` : "";
+        const seniorIndicator = info.senior ? `<div style="font-size:.75rem;color:#e67e22;margin-top:.3rem">⚠️ Niveau Senior Requis (> 7 ans)</div>` : "";
+        
+        const cardClass = isActive ? "poste-card active" : "poste-card inactive";
+        
+        grid.innerHTML += `
+<div class="${cardClass}">
+    <div style="font-size:1.8rem;margin-bottom:.6rem;display:flex;align-items:center">${info.icon}${techBadge}</div>
+    <h3>${p}${catBadge}</h3>
+    <p>${info.desc || 'Poste à pourvoir prochainement.'}</p>
+    ${certHighlight}
+    ${beacHighlight}
+    ${seniorIndicator}
+    ${isActive ? `<a href="#postuler" style="display:inline-block;margin-top:.8rem;font-size:.82rem;font-weight:600;color:var(--accent)">Postuler →</a>` : ''}
+</div>`;
+        
+        const optionDisabled = isActive ? "" : "disabled";
+        const optionLabel = isActive ? p : `🔒 ${p} (clôturé)`;
+        sel.innerHTML += `<option value="${p}" ${optionDisabled} data-category="${info.category||""}" data-senior="${info.senior||false}" data-reduce-letter="${info.reduceLetter||false}" data-active="${isActive}">${optionLabel}</option>`;
+    });
+    
+    // Gestion du badge "Lettre optionnelle"
+    sel.addEventListener("change", function() {
+        const selectedOpt = this.options[this.selectedIndex];
+        const reduceLetter = selectedOpt.dataset.reduceLetter === "true";
+        const badge = document.getElementById("lettre-badge");
+        if (badge) { badge.style.display = reduceLetter ? "inline-block" : "none"; }
+    });
+})
+.catch(() => {
+    document.getElementById("postes-list").innerHTML =
+        '<div class="empty-state"><div class="empty-icon">⚠️</div><p>Impossible de charger les postes. Vérifiez la connexion au serveur.</p></div>';
+});
+
+['cv','lettre'].forEach(name => {
+    const input = document.getElementById(`${name}-input`);
+    const label = document.getElementById(`${name}-label`);
+    if (input && label) {
+        input.addEventListener('change', function() {
+            if (this.files[0]) {
+                label.textContent = '✅ ' + this.files[0].name;
+                label.classList.add('has-file');
+            } else {
+                const defaults = { cv: '📎 Choisir mon CV', lettre: '📎 Choisir ma lettre' };
+                label.textContent = defaults[name] || ' Choisir un fichier';
+                label.classList.remove('has-file');
+            }
+        });
+    }
+});
+
+const attestationInput = document.getElementById('attestation-input');
+const attestationLabel = document.getElementById('attestation-label');
+const attestationList  = document.getElementById('attestation-list');
+if (attestationInput && attestationLabel && attestationList) {
+    attestationInput.addEventListener('change', function() {
+        const files = Array.from(this.files);
+        if (files.length === 0) {
+            attestationLabel.textContent = '🎓 Ajouter des certificats';
+            attestationLabel.classList.remove('has-file');
+            attestationList.innerHTML = '';
+            return;
+        }
+        attestationLabel.textContent = `✅ ${files.length} fichier${files.length>1?'s':''} sélectionné${files.length>1?'s':''}`;
+        attestationLabel.classList.add('has-file');
+        attestationList.innerHTML = files.map(f =>
+            `<div style="padding:.2rem 0;border-bottom:1px dashed #e2e8f0">📄 ${escHtml(f.name)} (${formatFileSize(f.size)})</div>`
+        ).join('');
+    });
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Octet';
+    const k = 1024;
+    const sizes = ['Octets', 'Ko', 'Mo', 'Go'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function clearFormFields() {
+    document.getElementById('candidature-form').reset();
+    ['cv','lettre'].forEach(n => {
+        const lbl = document.getElementById(`${n}-label`);
+        const defaults = { cv: '📎 Choisir mon CV', lettre: '📎 Choisir ma lettre' };
+        if (lbl) { lbl.textContent = defaults[n] || '📎 Choisir un fichier'; lbl.classList.remove('has-file'); }
+    });
+    if (attestationLabel && attestationList) {
+        attestationLabel.textContent = '🎓 Ajouter des certificats';
+        attestationLabel.classList.remove('has-file');
+        attestationList.innerHTML = '';
+    }
+}
+
+function showConfirmationModal(data) {
+    const overlay = document.getElementById('confirmation-overlay');
+    document.getElementById('conf-dossier').textContent = data.numero_dossier || '–';
+    document.getElementById('conf-token').textContent = data.token || '–';
+    document.getElementById('conf-poste').textContent = data.poste || '–';
+    overlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeConfirmationModal() {
+    const overlay = document.getElementById('confirmation-overlay');
+    overlay.classList.remove('show');
+    document.body.style.overflow = '';
+}
+
+function closeConfirmationAndScrollToSuivi() {
+    const token = document.getElementById('conf-token').textContent;
+    closeConfirmationModal();
+    document.getElementById('suivi-token').value = token;
+    setTimeout(() => {
+        document.getElementById('suivi').scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+}
+
+function closeConfirmationAndReset() {
+    closeConfirmationModal();
+}
+
+function copyToken() {
+    const token = document.getElementById('conf-token').textContent;
+    const btn = document.getElementById('copy-token-btn');
+    if (!token || token === '–') return;
+    
+    navigator.clipboard.writeText(token).then(() => {
+        btn.textContent = '✅ Copié !';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = '📋 Copier';
+            btn.classList.remove('copied');
+        }, 2000);
+    }).catch(() => {
+        const textarea = document.createElement('textarea');
+        textarea.value = token;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        btn.textContent = '✅ Copié !';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = '📋 Copier';
+            btn.classList.remove('copied');
+        }, 2000);
+    });
+}
+
+document.getElementById('confirmation-overlay').addEventListener('click', function(e) {
+    if (e.target === this) { closeConfirmationModal(); }
+});
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const overlay = document.getElementById('confirmation-overlay');
+        if (overlay.classList.contains('show')) { closeConfirmationModal(); }
+    }
+});
+
+document.getElementById('candidature-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const btn      = document.getElementById('submit-btn');
+    const alertDiv = document.getElementById('form-alert');
+    alertDiv.innerHTML = '';
+    btn.innerHTML = '<span class="spinner"></span> Envoi en cours...';
+    btn.disabled = true;
+    try {
+        const fd  = new FormData(this);
+        const posteSelect = document.getElementById('poste-select');
+        const posteText = posteSelect.options[posteSelect.selectedIndex].text;
+        const res = await fetch(`${API}/candidats/postuler`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (res.ok) {
+            clearFormFields();
+            const oldSuccess = document.getElementById('candidature-success');
+            if (oldSuccess) oldSuccess.style.display = 'none';
+            showConfirmationModal({
+                numero_dossier: data.numero_dossier || '–',
+                token: data.token,
+                poste: posteText
+            });
+            if(typeof showToast === 'function') showToast('Candidature soumise avec succès ! Analyse automatique en cours...', 'success');
+        } else {
+            alertDiv.innerHTML = `<div class="alert alert-error">❌ ${data.error}</div>`;
+        }
+    } catch (err) {
+        console.error(err);
+        alertDiv.innerHTML = `<div class="alert alert-error">⚠️ Impossible de contacter le serveur. Vérifiez votre connexion.</div>`;
+    }
+    btn.innerHTML = '🚀 Soumettre ma candidature';
+    btn.disabled  = false;
+});
+
+async function checkSuivi() {
+    const token = document.getElementById('suivi-token').value.trim();
+    if (!token) return;
+    const area = document.getElementById('suivi-result');
+    area.innerHTML = '<p style="color:var(--text-muted);text-align:center">🔍 Recherche...</p>';
+    try {
+        const r = await fetch(`${API}/candidats/statut/${token}`);
+        const d = await r.json();
+        if (!r.ok) { area.innerHTML = `<div class="alert alert-error">❌ ${d.error}</div>`; return; }
+        const badges   = { en_attente:'badge-pending', retenu:'badge-retained', rejete:'badge-rejected', entretien:'badge-interview' };
+        const labels   = { en_attente:'⏳ En attente', retenu:'✅ Retenu(e)', rejete:'❌ Non retenu(e)', entretien:'📅 Convoqué(e) en entretien' };
+        const messages = {
+            en_attente: "Votre dossier est en cours d'examen. Nous vous contacterons dès que possible.",
+            retenu:     "Félicitations ! Votre candidature a été retenue. Nous vous contacterons très prochainement.",
+            rejete:     "Votre candidature n'a pas été retenue pour cette sélection. Merci de votre intérêt.",
+            entretien:  "Votre profil nous a intéressé. Vous serez contacté(e) pour un entretien."
+        };
+        const icons = { en_attente:'⏳', retenu:'🎉', rejete:'😔', entretien:'🤝' };
+        const numDossierBlock = d.numero_dossier
+            ? `<div style="margin:.6rem auto;max-width:240px;padding:.4rem .8rem;background:#EBF5FB;border-radius:6px;font-family:monospace;font-size:.85rem;font-weight:700;color:#1a3a5c">🗂️ Dossier : ${escHtml(d.numero_dossier)}</div>`
+            : '';
+        area.innerHTML = `
+<div style="text-align:center;padding:1rem 0">
+<div style="font-size:2.5rem;margin-bottom:.6rem">${icons[d.statut]||'📋'}</div>
+<div style="font-weight:700;font-size:1.05rem">${escHtml(d.prenom)} ${escHtml(d.nom)}</div>
+<div style="color:var(--text-muted);font-size:.85rem;margin-bottom:.5rem">${escHtml(d.poste)}</div>
+${numDossierBlock}
+<span class="badge ${badges[d.statut]||'badge-pending'}" style="font-size:.88rem;padding:.4rem 1rem">${labels[d.statut]||d.statut}</span>
+<p style="margin-top:1rem;font-size:.88rem;color:var(--text)">${messages[d.statut]||''}</p>
+${d.note ? `<div style="margin-top:.8rem;padding:.8rem;background:#f8fafd;border-radius:6px;font-size:.85rem;border-left:3px solid var(--accent)"><strong>Message RH :</strong> ${escHtml(d.note)}</div>` : ''}
+<div style="margin-top:.8rem;font-size:.78rem;color:var(--text-muted)">
+Dossier déposé le ${new Date(d.date_candidature).toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'})}
+</div>
+</div>`;
+    } catch {
+        area.innerHTML = `<div class="alert alert-error">⚠️ Erreur de connexion au serveur.</div>`;
+    }
+}
+
+document.getElementById('suivi-token').addEventListener('keypress', e => { if(e.key==='Enter') checkSuivi(); });
+</script>
+</body>
+</html>
