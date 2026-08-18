@@ -2228,7 +2228,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     
                     # Formatage conditionnel pour la colonne Recommandation
                     if col == 15:  # Colonne Recommandation
-                        rec_color = get_recommandation_color(total, poste)
+                        rec_color = get_recommandation_color(score_candidat, poste)
                         cell.font = Font(bold=True, size=10)
                         if rec_color == "00FF00":
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -3274,11 +3274,38 @@ def export_candidates(fmt):
                 continue
             if statut_filter and c.get('statut') != statut_filter:
                 continue
+            # Parsing des champs JSON pour l'export Excel
             if c.get('score_breakdown'):
                 try:
                     c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
+                except Exception as e:
+                    logger.warning(f"Erreur parsing score_breakdown pour {c.get('token')}: {e}")
+                    c['score_breakdown_parsed'] = {}
+            
+            if c.get('checklist'):
+                try:
+                    c['checklist_parsed'] = json.loads(c['checklist'])
                 except Exception:
                     pass
+            
+            if c.get('flags_eliminatoires'):
+                try:
+                    c['flags_eliminatoires_parsed'] = json.loads(c['flags_eliminatoires'])
+                except Exception:
+                    pass
+            
+            if c.get('signaux_detectes'):
+                try:
+                    c['signaux_detectes_parsed'] = json.loads(c['signaux_detectes'])
+                except Exception:
+                    pass
+            
+            if c.get('analyse_details'):
+                try:
+                    c['analyse_details_parsed'] = json.loads(c['analyse_details'])
+                except Exception:
+                    pass
+            
             result.append(c)
         result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3340,6 +3367,41 @@ def email_preview(token):
         sujet = f"Réponse à votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'intérêt que vous portez à notre institution.\nAprès examen attentif de votre dossier pour le poste de {poste}, nous avons le regret de vous informer que votre candidature n'a pas été retenue.\nNous vous encourageons à postuler à nouveau." + sign
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
+
+@app.route('/api/recruteur/debug/export-check', methods=['GET'])
+@jwt_required()
+def debug_export_check():
+    """Debug endpoint to check export data"""�rifie les donn�es avant export"""
+    if not supabase:
+        return jsonify({'error': 'Supabase non configure'}), 500�'}), 500
+    
+    poste = request.args.get('poste', "Charge(e) d'Administration de Credit")�(e) d'Administration de Cr�dit")
+    response = supabase.table('candidats').select('token, score, score_breakdown, statut').eq('poste', poste).limit(5).execute()
+    
+    result = []
+    for c in response.data or []:
+        sb_parsed = {}
+        if c.get('score_breakdown'):
+            try:
+                sb_parsed = json.loads(c['score_breakdown'])
+            except Exception:
+                pass
+        
+        result.append({
+            'token': c.get('token'),
+            'score_raw': c.get('score'),
+            'score_int': int(c.get('score', 0)),
+            'statut': c.get('statut'),
+            'score_breakdown_exists': bool(c.get('score_breakdown')),
+            'sous_scores': sb_parsed.get('sous_scores', {}),
+            'note': sb_parsed.get('note', '')
+        })
+    
+    return jsonify({
+        'poste': poste,
+        'candidats': result,
+        'total': len(result)
+    }), 200
 
 @app.route('/api/recruteur/uploads/<path:filename>', methods=['GET'])
 def serve_upload(filename):
