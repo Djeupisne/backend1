@@ -2053,6 +2053,17 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 # Récupération des sous-scores détaillés
                 sous_scores = sb.get('sous_scores', {})
                 
+                # Récupération des critères éliminatoires et alertes réelles du système
+                flags_eliminatoires = cand.get('flags_eliminatoires', []) or sb.get('flags_eliminatoires', [])
+                criteres_valides_bloc2 = []
+                alertes_attention = []
+                
+                # Essayer de récupérer depuis details si disponible
+                details_analyse = cand.get('analyse_details', {}) or sb.get('details', {})
+                if isinstance(details_analyse, dict):
+                    criteres_valides_bloc2 = details_analyse.get('criteres_valides_bloc2', [])
+                    alertes_attention = details_analyse.get('alertes_attention', [])
+                
                 # Calcul des sous-scores selon le poste
                 if poste == "Chef de Section Compensation":
                     adeq = sous_scores.get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0) if not elim else 0
@@ -2063,21 +2074,44 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                     total = adeq + expo + enc + coh + qcv + lm
                     
-                    # Analyse détaillée
-                    points_forts = []
-                    points_faibles = []
-                    if adeq >= 2.5: points_forts.append("Expérience pertinente")
-                    if adeq < 1.5: points_faibles.append("Expérience limitée")
-                    if expo >= 2.5: points_forts.append("Expertise BEAC/GIMAC")
-                    if expo < 1.5: points_faibles.append("Manque d'expertise BEAC/GIMAC")
-                    if enc >= 1.5: points_forts.append("Leadership")
-                    if enc < 1: points_faibles.append("Management à renforcer")
-                    if coh >= 1.5: points_forts.append("Parcours cohérent")
-                    if coh < 1: points_faibles.append("Parcours discontinu")
+                    # Analyse détaillée basée sur les VRAIS critères du système
+                    analyse_parts = []
                     
-                    analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
-                    if points_faibles:
-                        analyse += " | ⚠ " + "; ".join(points_faibles[:2])
+                    # Ajouter les critères éliminatoires détectés (priorité absolue)
+                    if flags_eliminatoires:
+                        for flag in flags_eliminatoires[:3]:  # Limiter à 3 pour la lisibilité
+                            analyse_parts.append(f"❌ {flag}")
+                    
+                    # Ajouter les alertes attention
+                    if alertes_attention:
+                        for alerte in alertes_attention[:2]:
+                            analyse_parts.append(f"⚠️ {alerte}")
+                    
+                    # Si éliminatoire, afficher clairement
+                    if elim and flags_eliminatoires:
+                        analyse = f"ÉLIMINATOIRE: {'; '.join(flags_eliminatoires[:3])}"
+                    else:
+                        # Points forts basés sur les scores réels
+                        points_forts = []
+                        if adeq >= 2.5: points_forts.append("Expérience pertinente")
+                        if adeq < 1.5: points_forts.append("Expérience limitée")
+                        if expo >= 2.5: points_forts.append("Expertise BEAC/GIMAC")
+                        if expo < 1.5: points_forts.append("Manque d'expertise BEAC/GIMAC")
+                        if enc >= 1.5: points_forts.append("Leadership")
+                        if enc < 1: points_forts.append("Management à renforcer")
+                        if coh >= 1.5: points_forts.append("Parcours cohérent")
+                        if coh < 1: points_forts.append("Parcours discontinu")
+                        
+                        if points_forts:
+                            analyse = "; ".join(points_forts[:4])
+                        elif analyse_parts:
+                            analyse = "; ".join(analyse_parts)
+                        else:
+                            analyse = "Profil standard"
+                    
+                    # Combiner avec les alertes s'il y en a
+                    if alertes_attention and not elim:
+                        analyse += " | ⚠ " + "; ".join(alertes_attention[:2])
                         
                 elif poste == "Chargé(e) d'Administration de Crédit":
                     adeq = sous_scores.get("Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)", 0) if not elim else 0
@@ -2088,19 +2122,27 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                     total = adeq + ifrs + rig + coh + qcv + lm
                     
-                    # Analyse détaillée
-                    points_forts = []
-                    points_faibles = []
-                    if adeq >= 2.5: points_forts.append("Expérience crédit")
-                    if adeq < 1.5: points_faibles.append("Expérience crédit limitée")
-                    if ifrs >= 2.5: points_forts.append("Maîtrise IFRS 9")
-                    if ifrs < 1.5: points_faibles.append("IFRS 9 à renforcer")
-                    if rig >= 1.5: points_forts.append("Rigueur opérationnelle")
-                    if rig < 1: points_faibles.append("Outils à améliorer")
+                    # Analyse détaillée basée sur les VRAIS critères du système
+                    if elim and flags_eliminatoires:
+                        analyse = f"ÉLIMINATOIRE: {'; '.join(flags_eliminatoires[:3])}"
+                    else:
+                        points_forts = []
+                        if adeq >= 2.5: points_forts.append("Expérience crédit")
+                        if adeq < 1.5: points_forts.append("Expérience crédit limitée")
+                        if ifrs >= 2.5: points_forts.append("Maîtrise IFRS 9")
+                        if ifrs < 1.5: points_forts.append("IFRS 9 à renforcer")
+                        if rig >= 1.5: points_forts.append("Rigueur opérationnelle")
+                        if rig < 1: points_forts.append("Outils à améliorer")
+                        
+                        if points_forts:
+                            analyse = "; ".join(points_forts[:4])
+                        elif flags_eliminatoires:
+                            analyse = f"⚠ {'; '.join(flags_eliminatoires[:2])}"
+                        else:
+                            analyse = "Profil standard"
                     
-                    analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
-                    if points_faibles:
-                        analyse += " | ⚠ " + "; ".join(points_faibles[:2])
+                    if alertes_attention and not elim:
+                        analyse += " | ⚠ " + "; ".join(alertes_attention[:2])
                         
                 else:
                     adeq = sb.get('adequation_experience', 0) if not elim else 0
@@ -2110,19 +2152,27 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     lm = sb.get('lettre_motivation', 0) if not elim else 0
                     total = adeq + cohe + risq + qcv + lm
                     
-                    # Analyse détaillée générique
-                    points_forts = []
-                    points_faibles = []
-                    if adeq >= 2.5: points_forts.append("Bonne adéquation")
-                    if adeq < 1.5: points_faibles.append("Adéquation faible")
-                    if cohe >= 1.5: points_forts.append("Parcours cohérent")
-                    if cohe < 1: points_faibles.append("Parcours irrégulier")
-                    if risq >= 2.5: points_forts.append("Expérience métier")
-                    if risq < 1.5: points_faibles.append("Expérience limitée")
+                    # Analyse détaillée basée sur les VRAIS critères du système
+                    if elim and flags_eliminatoires:
+                        analyse = f"ÉLIMINATOIRE: {'; '.join(flags_eliminatoires[:3])}"
+                    else:
+                        points_forts = []
+                        if adeq >= 2.5: points_forts.append("Bonne adéquation")
+                        if adeq < 1.5: points_forts.append("Adéquation faible")
+                        if cohe >= 1.5: points_forts.append("Parcours cohérent")
+                        if cohe < 1: points_forts.append("Parcours irrégulier")
+                        if risq >= 2.5: points_forts.append("Expérience métier")
+                        if risq < 1.5: points_forts.append("Expérience limitée")
+                        
+                        if points_forts:
+                            analyse = "; ".join(points_forts[:4])
+                        elif flags_eliminatoires:
+                            analyse = f"⚠ {'; '.join(flags_eliminatoires[:2])}"
+                        else:
+                            analyse = "Profil standard"
                     
-                    analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
-                    if points_faibles:
-                        analyse += " | ⚠ " + "; ".join(points_faibles[:2])
+                    if alertes_attention and not elim:
+                        analyse += " | ⚠ " + "; ".join(alertes_attention[:2])
                 
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_complet = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip() or '–'
