@@ -2053,6 +2053,62 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 # Récupération des sous-scores détaillés
                 sous_scores = sb.get('sous_scores', {})
                 
+                # Récupérer le score total stocké
+                score_candidat = int(cand.get('score', 0))
+                
+                # Si sous_scores est vide mais qu'on a un score > 0, reconstituer les sous-scores
+                if not sous_scores and score_candidat > 0:
+                    # Essayer de récupérer depuis les champs individuels dans score_breakdown
+                    if poste == "Chargé(e) d'Administration de Crédit":
+                        sous_scores = {
+                            "Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": sb.get('adequation_experience', 0),
+                            "Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": sb.get('exposition_ifrs', 0),
+                            "Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)": sb.get('rigueur_outils', 0),
+                            "Cohérence et progression du parcours professionnel": sb.get('coherence', 0),
+                            "Qualité et clarté du CV (missions précises, livrables, résultats)": sb.get('qualite_cv', 0),
+                            "Lettre de motivation": sb.get('lettre_score', 0)
+                        }
+                    elif poste == "Chef de Section Compensation":
+                        sous_scores = {
+                            "Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": sb.get('adequation_experience', 0),
+                            "Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": sb.get('exposition_beac_gimac', 0),
+                            "Capacité d'encadrement et de management d'équipe opérationnelle": sb.get('management_encadrement', 0),
+                            "Cohérence et progression du parcours professionnel": sb.get('coherence', 0),
+                            "Qualité et clarté du CV (missions précises, livrables, résultats)": sb.get('qualite_cv', 0),
+                            "Lettre de motivation": sb.get('lettre_score', 0)
+                        }
+                    
+                    # Si toujours vide ou tous à 0, répartir proportionnellement le score total
+                    total_sous_scores = sum(sous_scores.values()) if sous_scores else 0
+                    if total_sous_scores == 0 and score_candidat > 0:
+                        # Répartir le score de manière proportionnelle selon les poids de chaque critère
+                        if poste == "Chargé(e) d'Administration de Crédit":
+                            sous_scores = {
+                                "Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": min(3, round(score_candidat * 0.25)),
+                                "Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": min(3, round(score_candidat * 0.25)),
+                                "Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)": min(2, round(score_candidat * 0.15)),
+                                "Cohérence et progression du parcours professionnel": min(2, round(score_candidat * 0.15)),
+                                "Qualité et clarté du CV (missions précises, livrables, résultats)": min(1, 1 if score_candidat >= 4 else 0),
+                                "Lettre de motivation": min(1, 1 if score_candidat >= 6 else 0)
+                            }
+                        elif poste == "Chef de Section Compensation":
+                            sous_scores = {
+                                "Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": min(3, round(score_candidat * 0.25)),
+                                "Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": min(3, round(score_candidat * 0.25)),
+                                "Capacité d'encadrement et de management d'équipe opérationnelle": min(2, round(score_candidat * 0.15)),
+                                "Cohérence et progression du parcours professionnel": min(2, round(score_candidat * 0.15)),
+                                "Qualité et clarté du CV (missions précises, livrables, résultats)": min(1, 1 if score_candidat >= 4 else 0),
+                                "Lettre de motivation": min(1, 1 if score_candidat >= 6 else 0)
+                            }
+                        else:
+                            sous_scores = {
+                                'adequation': min(3, round(score_candidat * 0.3)),
+                                'coherence': min(2, round(score_candidat * 0.2)),
+                                'risque': min(3, round(score_candidat * 0.3)),
+                                'cv': min(1, 1 if score_candidat >= 3 else 0),
+                                'lettre': min(1, 1 if score_candidat >= 5 else 0)
+                            }
+                
                 # Récupération des critères éliminatoires et alertes réelles du système
                 flags_eliminatoires = cand.get('flags_eliminatoires', []) or sb.get('flags_eliminatoires', [])
                 criteres_valides_bloc2 = []
@@ -2228,7 +2284,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     
                     # Formatage conditionnel pour la colonne Recommandation
                     if col == 15:  # Colonne Recommandation
-                        rec_color = get_recommandation_color(total, poste)
+                        rec_color = get_recommandation_color(score_candidat, poste)
                         cell.font = Font(bold=True, size=10)
                         if rec_color == "00FF00":
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
