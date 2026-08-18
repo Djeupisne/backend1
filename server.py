@@ -2120,6 +2120,41 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     criteres_valides_bloc2 = details_analyse.get('criteres_valides_bloc2', [])
                     alertes_attention = details_analyse.get('alertes_attention', [])
                 
+                # Fonction helper pour formater les raisons d'élimination
+                def formater_raisons_eliminatoire(flags):
+                    """Formate les flags éliminatoires en raisons claires et concises"""
+                    if not flags:
+                        return []
+                    
+                    raisons = []
+                    mapping_raisons = {
+                        "Diplôme non reconnu": "❌ Diplôme non reconnu",
+                        "Expérience insuffisante": "❌ Expérience insuffisante",
+                        "Compétences techniques manquantes": "❌ Compétences techniques manquantes",
+                        "Parcours incohérent": "❌ Parcours incohérent",
+                        "Mobilité non assurée": "❌ Mobilité non assurée",
+                        "Prétentions salariales hors grille": "❌ Prétentions hors grille",
+                        "Disponibilité incompatible": "❌ Disponibilité incompatible",
+                        "Absence expérience secteur bancaire": "❌ Pas d'expérience bancaire",
+                        "Formation non adaptée au poste": "❌ Formation inadaptée",
+                        "Maîtrise insuffisante outils métiers": "❌ Outils métiers maîtrisés"
+                    }
+                    
+                    for flag in flags[:3]:  # Limiter à 3 raisons maximum
+                        # Chercher une correspondance ou utiliser le flag tel quel
+                        raison_trouvee = False
+                        for key, valeur in mapping_raisons.items():
+                            if key.lower() in flag.lower() or flag.lower() in key.lower():
+                                raisons.append(valeur)
+                                raison_trouvee = True
+                                break
+                        if not raison_trouvee:
+                            # Formater le flag brut de manière plus lisible
+                            flag_clean = flag.replace('_', ' ').replace('-', ' ').strip()
+                            raisons.append(f"❌ {flag_clean}")
+                    
+                    return raisons
+                
                 # Calcul des sous-scores selon le poste
                 if poste == "Chef de Section Compensation":
                     adeq = sous_scores.get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0) if not elim else 0
@@ -2135,17 +2170,19 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     
                     # Ajouter les critères éliminatoires détectés (priorité absolue)
                     if flags_eliminatoires:
-                        for flag in flags_eliminatoires[:3]:  # Limiter à 3 pour la lisibilité
-                            analyse_parts.append(f"❌ {flag}")
+                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                        for raison in raisons_formatees:
+                            analyse_parts.append(raison)
                     
                     # Ajouter les alertes attention
                     if alertes_attention:
                         for alerte in alertes_attention[:2]:
                             analyse_parts.append(f"⚠️ {alerte}")
                     
-                    # Si éliminatoire, afficher clairement
+                    # Si éliminatoire, afficher clairement les raisons
                     if elim and flags_eliminatoires:
-                        analyse = f"ÉLIMINATOIRE: {'; '.join(flags_eliminatoires[:3])}"
+                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                        analyse = "; ".join(raisons_formatees)
                     else:
                         # Points forts basés sur les scores réels
                         points_forts = []
@@ -2180,7 +2217,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     
                     # Analyse détaillée basée sur les VRAIS critères du système
                     if elim and flags_eliminatoires:
-                        analyse = f"ÉLIMINATOIRE: {'; '.join(flags_eliminatoires[:3])}"
+                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                        analyse = "; ".join(raisons_formatees)
                     else:
                         points_forts = []
                         if adeq >= 2.5: points_forts.append("Expérience crédit")
@@ -2193,7 +2231,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         if points_forts:
                             analyse = "; ".join(points_forts[:4])
                         elif flags_eliminatoires:
-                            analyse = f"⚠ {'; '.join(flags_eliminatoires[:2])}"
+                            raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                            analyse = "; ".join(raisons_formatees[:2])
                         else:
                             analyse = "Profil standard"
                     
@@ -2210,7 +2249,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     
                     # Analyse détaillée basée sur les VRAIS critères du système
                     if elim and flags_eliminatoires:
-                        analyse = f"ÉLIMINATOIRE: {'; '.join(flags_eliminatoires[:3])}"
+                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                        analyse = "; ".join(raisons_formatees)
                     else:
                         points_forts = []
                         if adeq >= 2.5: points_forts.append("Bonne adéquation")
@@ -2223,7 +2263,8 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         if points_forts:
                             analyse = "; ".join(points_forts[:4])
                         elif flags_eliminatoires:
-                            analyse = f"⚠ {'; '.join(flags_eliminatoires[:2])}"
+                            raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                            analyse = "; ".join(raisons_formatees[:2])
                         else:
                             analyse = "Profil standard"
                     
