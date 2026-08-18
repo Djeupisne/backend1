@@ -3270,15 +3270,43 @@ def export_candidates(fmt):
         result = []
         for c in all_candidats:
             c['id'] = c.get('token', '')
+            
+            # Parser les champs JSON pour l'export
+            if c.get('score_breakdown'):
+                try:
+                    c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
+                except Exception as e:
+                    logger.warning(f"Erreur parsing score_breakdown pour {c.get('token')}: {e}")
+                    c['score_breakdown_parsed'] = {}
+            
+            if c.get('checklist'):
+                try:
+                    c['checklist_parsed'] = json.loads(c['checklist'])
+                except Exception:
+                    pass
+            
+            if c.get('flags_eliminatoires'):
+                try:
+                    c['flags_eliminatoires_parsed'] = json.loads(c['flags_eliminatoires'])
+                except Exception:
+                    pass
+            
+            if c.get('signaux_detectes'):
+                try:
+                    c['signaux_detectes_parsed'] = json.loads(c['signaux_detectes'])
+                except Exception:
+                    pass
+            
+            if c.get('analyse_details'):
+                try:
+                    c['analyse_details_parsed'] = json.loads(c['analyse_details'])
+                except Exception:
+                    pass
+            
             if poste_filter and c.get('poste') != poste_filter:
                 continue
             if statut_filter and c.get('statut') != statut_filter:
                 continue
-            if c.get('score_breakdown'):
-                try:
-                    c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
-                except Exception:
-                    pass
             result.append(c)
         result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
