@@ -2128,16 +2128,16 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     
                     raisons = []
                     mapping_raisons = {
-                        "Diplôme non reconnu": "❌ Diplôme non reconnu",
-                        "Expérience insuffisante": "❌ Expérience insuffisante",
-                        "Compétences techniques manquantes": "❌ Compétences techniques manquantes",
-                        "Parcours incohérent": "❌ Parcours incohérent",
-                        "Mobilité non assurée": "❌ Mobilité non assurée",
-                        "Prétentions salariales hors grille": "❌ Prétentions hors grille",
-                        "Disponibilité incompatible": "❌ Disponibilité incompatible",
-                        "Absence expérience secteur bancaire": "❌ Pas d'expérience bancaire",
-                        "Formation non adaptée au poste": "❌ Formation inadaptée",
-                        "Maîtrise insuffisante outils métiers": "❌ Outils métiers maîtrisés"
+                        "Diplôme non reconnu": "Diplôme non reconnu",
+                        "Expérience insuffisante": "Expérience insuffisante",
+                        "Compétences techniques manquantes": "Compétences manquantes",
+                        "Parcours incohérent": "Parcours incohérent",
+                        "Mobilité non assurée": "Mobilité non assurée",
+                        "Prétentions salariales hors grille": "Prétentions hors grille",
+                        "Disponibilité incompatible": "Disponibilité incompatible",
+                        "Absence expérience secteur bancaire": "Pas d'expérience bancaire",
+                        "Formation non adaptée au poste": "Formation inadaptée",
+                        "Maîtrise insuffisante outils métiers": "Outils métiers insuffisants"
                     }
                     
                     for flag in flags[:3]:  # Limiter à 3 raisons maximum
@@ -2151,7 +2151,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         if not raison_trouvee:
                             # Formater le flag brut de manière plus lisible
                             flag_clean = flag.replace('_', ' ').replace('-', ' ').strip()
-                            raisons.append(f"❌ {flag_clean}")
+                            raisons.append(flag_clean)
                     
                     return raisons
                 
