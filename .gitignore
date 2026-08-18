@@ -11,8 +11,7 @@ __pycache__/
 *.out
 *.so
 *.dll
-*.a
-*.class
+*.exe
 
 # Dependencies
 .venv/
@@ -38,8 +37,5 @@ htmlcov/
 # Distribution / packaging
 dist/
 build/
-*.tar.gz
-*.whl
-*.egg
 *.egg-info/
 ```
