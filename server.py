@@ -2122,38 +2122,68 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 
                 # Fonction helper pour formater les raisons d'élimination
                 def formater_raisons_eliminatoire(flags):
-                    """Formate les flags éliminatoires en raisons claires et concises"""
+                    """Formate les flags éliminatoires en mots-clés clairs et concis"""
                     if not flags:
                         return []
                     
                     raisons = []
-                    mapping_raisons = {
-                        "Diplôme non reconnu": "Diplôme non reconnu",
-                        "Expérience insuffisante": "Expérience insuffisante",
-                        "Compétences techniques manquantes": "Compétences manquantes",
-                        "Parcours incohérent": "Parcours incohérent",
-                        "Mobilité non assurée": "Mobilité non assurée",
-                        "Prétentions salariales hors grille": "Prétentions hors grille",
-                        "Disponibilité incompatible": "Disponibilité incompatible",
-                        "Absence expérience secteur bancaire": "Pas d'expérience bancaire",
-                        "Formation non adaptée au poste": "Formation inadaptée",
-                        "Maîtrise insuffisante outils métiers": "Outils métiers insuffisants"
+                    mapping_mots_cles = {
+                        "diplome": "Diplôme inadéquat",
+                        "diplôme": "Diplôme inadéquat",
+                        "formation": "Formation inadaptée",
+                        "experience": "Expérience insuffisante",
+                        "expérience": "Expérience insuffisante",
+                        "competence": "Compétences manquantes",
+                        "compétence": "Compétences manquantes",
+                        "technique": "Compétences techniques",
+                        "parcours": "Parcours incohérent",
+                        "coherence": "Parcours incohérent",
+                        "cohérence": "Parcours incohérent",
+                        "mobilite": "Mobilité impossible",
+                        "mobilité": "Mobilité impossible",
+                        "salaire": "Prétentions excessives",
+                        "pretention": "Prétentions excessives",
+                        "prétention": "Prétentions excessives",
+                        "disponibilite": "Disponibilité incompatible",
+                        "disponibilité": "Disponibilité incompatible",
+                        "bancaire": "Expérience bancaire absente",
+                        "secteur bancaire": "Expérience bancaire absente",
+                        "outil": "Outils maîtrisés insuffisants",
+                        "excel": "Maîtrise Excel insuffisante",
+                        "ifrs": "Connaissance IFRS insuffisante",
+                        "norme": "Normes non maîtrisées",
+                        "gestion": "Expérience gestion insuffisante",
+                        "management": "Expérience management insuffisante",
+                        "encadrement": "Expérience encadrement insuffisante",
+                        "analyse": "Capacité analyse insuffisante",
+                        "risque": "Gestion risques insuffisante",
+                        "credit": "Expérience crédit insuffisante",
+                        "compensation": "Expérience compensation insuffisante"
                     }
                     
                     for flag in flags[:3]:  # Limiter à 3 raisons maximum
-                        # Chercher une correspondance ou utiliser le flag tel quel
-                        raison_trouvee = False
-                        for key, valeur in mapping_raisons.items():
-                            if key.lower() in flag.lower() or flag.lower() in key.lower():
-                                raisons.append(valeur)
-                                raison_trouvee = True
-                                break
-                        if not raison_trouvee:
-                            # Formater le flag brut de manière plus lisible
-                            flag_clean = flag.replace('_', ' ').replace('-', ' ').strip()
-                            raisons.append(flag_clean)
+                        flag_lower = flag.lower()
+                        mot_cle_trouve = False
+                        
+                        # Chercher le mot-clé le plus pertinent
+                        for key, valeur in mapping_mots_cles.items():
+                            if key in flag_lower:
+                                if valeur not in raisons:  # Éviter les doublons
+                                    raisons.append(valeur)
+                                    mot_cle_trouve = True
+                                    break
+                        
+                        if not mot_cle_trouve:
+                            # Extraire les mots significatifs du flag brut
+                            mots_ignore = ['le', 'la', 'les', 'un', 'une', 'des', 'de', 'du', 'pas', 'sans', 'non', 'absence', 'manque', 'insuffisante', 'insuffisant']
+                            mots_significatifs = [m for m in flag_lower.replace('_', ' ').replace('-', ' ').split() if len(m) > 3 and m not in mots_ignore]
+                            if mots_significatifs:
+                                # Prendre les 2 premiers mots significatifs et capitaliser
+                                mot_cle = ' '.join(mots_significatifs[:2]).title()
+                                if mot_cle not in raisons:
+                                    raisons.append(mot_cle)
                     
-                    return raisons
+                    return raisons[:3]  # Maximum 3 raisons
                 
                 # Calcul des sous-scores selon le poste
                 if poste == "Chef de Section Compensation":
