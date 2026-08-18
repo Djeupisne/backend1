@@ -2056,6 +2056,43 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 # Récupérer le score total stocké
                 score_candidat = int(cand.get('score', 0))
                 
+                # Récupération des flags éliminatoires - plusieurs sources possibles
+                flags_eliminatoires = []
+                if cand.get('flags_eliminatoires'):
+                    try:
+                        flags_data = cand['flags_eliminatoires']
+                        if isinstance(flags_data, str):
+                            flags_eliminatoires = json.loads(flags_data)
+                        elif isinstance(flags_data, list):
+                            flags_eliminatoires = flags_data
+                        elif isinstance(flags_data, dict):
+                            flags_eliminatoires = flags_data.get('flags', []) or flags_data.get('eliminatoire', [])
+                    except Exception:
+                        pass
+                
+                # Vérifier aussi dans score_breakdown_parsed
+                if not flags_eliminatoires and sb.get('flags_eliminatoires'):
+                    flags_eliminatoires = sb['flags_eliminatoires']
+                
+                # Vérifier dans analyse_details_parsed
+                analyse_details = cand.get('analyse_details_parsed', {})
+                if not flags_eliminatoires and isinstance(analyse_details, dict):
+                    flags_eliminatoires = analyse_details.get('flags_eliminatoires', []) or analyse_details.get('eliminatoires', [])
+                
+                # Si toujours vide, vérifier les champs bruts JSON
+                if not flags_eliminatoires and cand.get('flags_eliminatoires'):
+                    try:
+                        raw_flags = json.loads(cand['flags_eliminatoires']) if isinstance(cand['flags_eliminatoires'], str) else cand['flags_eliminatoires']
+                        if isinstance(raw_flags, list):
+                            flags_eliminatoires = raw_flags
+                        elif isinstance(raw_flags, dict):
+                            flags_eliminatoires = raw_flags.get('flags', []) or raw_flags.get('items', [])
+                    except Exception:
+                        pass
+                
+                # Initialisation de l'analyse par défaut
+                analyse = ""
+                
                 # Si sous_scores est vide mais qu'on a un score > 0, reconstituer les sous-scores
                 if not sous_scores and score_candidat > 0:
                     # Essayer de récupérer depuis les champs individuels dans score_breakdown
@@ -2109,16 +2146,14 @@ def generate_excel_report(candidats_data, poste_filter=None):
                                 'lettre': min(1, 1 if score_candidat >= 5 else 0)
                             }
                 
-                # Récupération des critères éliminatoires et alertes réelles du système
-                flags_eliminatoires = cand.get('flags_eliminatoires', []) or sb.get('flags_eliminatoires', [])
+                # Récupération des alertes attention
                 criteres_valides_bloc2 = []
                 alertes_attention = []
                 
-                # Essayer de récupérer depuis details si disponible
-                details_analyse = cand.get('analyse_details', {}) or sb.get('details', {})
-                if isinstance(details_analyse, dict):
-                    criteres_valides_bloc2 = details_analyse.get('criteres_valides_bloc2', [])
-                    alertes_attention = details_analyse.get('alertes_attention', [])
+                # Essayer de récupérer depuis analyse_details_parsed
+                if isinstance(analyse_details, dict):
+                    criteres_valides_bloc2 = analyse_details.get('criteres_valides_bloc2', [])
+                    alertes_attention = analyse_details.get('alertes_attention', [])
                 
                 # Fonction helper pour formater les raisons d'élimination
                 def formater_raisons_eliminatoire(flags):
@@ -2198,43 +2233,35 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     # Analyse détaillée basée sur les VRAIS critères du système
                     analyse_parts = []
                     
-                    # Ajouter les critères éliminatoires détectés (priorité absolue)
-                    if flags_eliminatoires:
-                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                        for raison in raisons_formatees:
-                            analyse_parts.append(raison)
-                    
-                    # Ajouter les alertes attention
-                    if alertes_attention:
-                        for alerte in alertes_attention[:2]:
-                            analyse_parts.append(f"⚠️ {alerte}")
-                    
                     # Si éliminatoire, afficher clairement les raisons
                     if elim and flags_eliminatoires:
                         raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
                         analyse = "; ".join(raisons_formatees)
+                    elif flags_eliminatoires:
+                        # Même si pas éliminatoire officiellement, afficher les alertes
+                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                        analyse = "; ".join(raisons_formatees[:2])
                     else:
                         # Points forts basés sur les scores réels
                         points_forts = []
                         if adeq >= 2.5: points_forts.append("Expérience pertinente")
-                        if adeq < 1.5: points_forts.append("Expérience limitée")
+                        elif adeq < 1.5: points_forts.append("Expérience limitée")
                         if expo >= 2.5: points_forts.append("Expertise BEAC/GIMAC")
-                        if expo < 1.5: points_forts.append("Manque d'expertise BEAC/GIMAC")
+                        elif expo < 1.5: points_forts.append("Expertise BEAC/GIMAC limitée")
                         if enc >= 1.5: points_forts.append("Leadership")
-                        if enc < 1: points_forts.append("Management à renforcer")
+                        elif enc < 1: points_forts.append("Management à renforcer")
                         if coh >= 1.5: points_forts.append("Parcours cohérent")
-                        if coh < 1: points_forts.append("Parcours discontinu")
+                        elif coh < 1: points_forts.append("Parcours discontinu")
                         
                         if points_forts:
                             analyse = "; ".join(points_forts[:4])
-                        elif analyse_parts:
-                            analyse = "; ".join(analyse_parts)
                         else:
                             analyse = "Profil standard"
                     
-                    # Combiner avec les alertes s'il y en a
-                    if alertes_attention and not elim:
-                        analyse += " | ⚠ " + "; ".join(alertes_attention[:2])
+                    # Combiner avec les alertes s'il y en a (sans symbole)
+                    if alertes_attention and not elim and not flags_eliminatoires:
+                        alertes_clean = [a.replace('⚠️', '').replace('⚠', '').strip() for a in alertes_attention[:2]]
+                        analyse += " | " + "; ".join(alertes_clean) if analyse else "; ".join(alertes_clean)
                         
                 elif poste == "Chargé(e) d'Administration de Crédit":
                     adeq = sous_scores.get("Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)", 0) if not elim else 0
@@ -2249,25 +2276,27 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     if elim and flags_eliminatoires:
                         raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
                         analyse = "; ".join(raisons_formatees)
+                    elif flags_eliminatoires:
+                        # Même si pas éliminatoire officiellement, afficher les alertes
+                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                        analyse = "; ".join(raisons_formatees[:2])
                     else:
                         points_forts = []
                         if adeq >= 2.5: points_forts.append("Expérience crédit")
-                        if adeq < 1.5: points_forts.append("Expérience crédit limitée")
+                        elif adeq < 1.5: points_forts.append("Expérience crédit limitée")
                         if ifrs >= 2.5: points_forts.append("Maîtrise IFRS 9")
-                        if ifrs < 1.5: points_forts.append("IFRS 9 à renforcer")
+                        elif ifrs < 1.5: points_forts.append("IFRS 9 à renforcer")
                         if rig >= 1.5: points_forts.append("Rigueur opérationnelle")
-                        if rig < 1: points_forts.append("Outils à améliorer")
+                        elif rig < 1: points_forts.append("Outils à améliorer")
                         
                         if points_forts:
                             analyse = "; ".join(points_forts[:4])
-                        elif flags_eliminatoires:
-                            raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                            analyse = "; ".join(raisons_formatees[:2])
                         else:
                             analyse = "Profil standard"
                     
                     if alertes_attention and not elim:
-                        analyse += " | ⚠ " + "; ".join(alertes_attention[:2])
+                        alertes_clean = [a.replace('⚠️', '').replace('⚠', '').strip() for a in alertes_attention[:2]]
+                        analyse += " | " + "; ".join(alertes_clean) if analyse else "; ".join(alertes_clean)
                         
                 else:
                     adeq = sb.get('adequation_experience', 0) if not elim else 0
@@ -2281,25 +2310,27 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     if elim and flags_eliminatoires:
                         raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
                         analyse = "; ".join(raisons_formatees)
+                    elif flags_eliminatoires:
+                        # Même si pas éliminatoire officiellement, afficher les alertes
+                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
+                        analyse = "; ".join(raisons_formatees[:2])
                     else:
                         points_forts = []
                         if adeq >= 2.5: points_forts.append("Bonne adéquation")
-                        if adeq < 1.5: points_forts.append("Adéquation faible")
+                        elif adeq < 1.5: points_forts.append("Adéquation faible")
                         if cohe >= 1.5: points_forts.append("Parcours cohérent")
-                        if cohe < 1: points_forts.append("Parcours irrégulier")
+                        elif cohe < 1: points_forts.append("Parcours irrégulier")
                         if risq >= 2.5: points_forts.append("Expérience métier")
-                        if risq < 1.5: points_forts.append("Expérience limitée")
+                        elif risq < 1.5: points_forts.append("Expérience limitée")
                         
                         if points_forts:
                             analyse = "; ".join(points_forts[:4])
-                        elif flags_eliminatoires:
-                            raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                            analyse = "; ".join(raisons_formatees[:2])
                         else:
                             analyse = "Profil standard"
                     
                     if alertes_attention and not elim:
-                        analyse += " | ⚠ " + "; ".join(alertes_attention[:2])
+                        alertes_clean = [a.replace('⚠️', '').replace('⚠', '').strip() for a in alertes_attention[:2]]
+                        analyse += " | " + "; ".join(alertes_clean) if analyse else "; ".join(alertes_clean)
                 
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_complet = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip() or '–'
