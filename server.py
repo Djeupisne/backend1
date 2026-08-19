@@ -256,11 +256,12 @@ POSTES = [
     "Chef service risques de marché",
     "Chef service reporting réglementaire",
     "Chef de Section Compensation",
-    "Chargé(e) d'Administration de Crédit"
+    "Chargé(e) d'Administration de Crédit",
+    "Chef de Division Local Corporate"
 ]
 
 # ═══ STATUTS : ACTIFS vs CLOTURÉS ═══
-POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit"]
+POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 
 def is_poste_actif(poste):
@@ -388,6 +389,44 @@ GRILLE = {
             "Absence totale de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)",
             "Trous inexpliqués dans le parcours professionnel"
         ]
+    },
+    "Chef de Division Local Corporate": {
+        "eliminatoire": [
+            "Aucune expérience dans le secteur bancaire ou financier réglementé",
+            "Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)",
+            "Moins de 5 ans d'expérience professionnelle, dont une partie significative en banque",
+            "Aucune expérience en gestion d'un portefeuille de clients Corporate ou d'entreprises",
+            "Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale",
+            "Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)"
+        ],
+        "a_verifier": [
+            "Pilotage d'une activité Corporate ou d'un segment entreprises avec des objectifs chiffrés (revenus, volumes, marges)",
+            "Gestion d'un portefeuille de clients Corporate et capacité à le développer",
+            "Encadrement et évaluation d'une équipe commerciale ou bancaire",
+            "Suivi de la qualité du portefeuille de crédit (NPL, CIR, provisions) et reporting à la direction",
+            "Développement de ventes croisées (cross-selling) ou de partenariats interdépartementaux",
+            "Production ou supervision de rapports de performance commerciale et financière",
+            "Exposition à la réglementation bancaire locale (COBAC, BEAC) ou internationale"
+        ],
+        "signaux_forts": [
+            "Pilotage d'une division ou d'une ligne Corporate avec atteinte des objectifs de revenus et de portefeuille",
+            "Gestion active du ratio NPL et du ratio coût/revenu (CIR) — résultats chiffrés mentionnés",
+            "Expérience avérée en cross-selling avec des équipes TSG, Trade Finance ou Cash Management",
+            "Développement réel du portefeuille Corporate : acquisition de clients, fidélisation, nombre de produits par client",
+            "Leadership démontré : constitution d'équipe, développement des collaborateurs, vivier de talents",
+            "Certification Ecobank, Moody's ou ITB (Institut Technique de Banque) ou équivalent",
+            "Connaissance du marché corporate tchadien ou de la zone CEMAC / UEMOA",
+            "Exposition aux plateformes numériques bancaires (OMNI, Cash Management ou équivalent)",
+            "Résultats commerciaux quantifiés et vérifiables dans le CV (chiffres d'affaires, taux de croissance, NPS)"
+        ],
+        "points_attention": [
+            "Parcours exclusivement back-office ou risques sans expérience commerciale Corporate",
+            "Profil techniquement solide (crédit, analyse) mais sans expérience managériale ni pilotage d'une P&L",
+            "Expériences très courtes (moins de 2 ans par poste) ou trajectoire sans progression hiérarchique visible",
+            "CV sans aucun résultat chiffré : missions décrites en responsabilités sans livrables ni indicateurs atteints",
+            "Mobilité géographique ou sectorielle excessive sans ancrage dans le secteur bancaire Corporate",
+            "Trous inexpliqués dans le parcours ou incohérences entre les postes déclarés"
+        ]
     }
 }
 
@@ -400,6 +439,7 @@ SCORING_CONFIG = {
     "IT Réseau & Infrastructure": None,
     "Chef de Section Compensation": None,
     "Chargé(e) d'Administration de Crédit": None,
+    "Chef de Division Local Corporate": None,
     "Auditeur interne": {"CV_Exp": 25, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 15, "CV_Progression": 5, "CV_Management": 0, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
     "Chef service contrôle des engagements": {"CV_Exp": 20, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 20, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
     "Chef service IT (maintenance/support)": {"CV_Exp": 15, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 25, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
@@ -410,6 +450,7 @@ SCORING_CONFIG = {
 
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]
+POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate"]
 
 # ═══════════════════════════════════════════════════════════════
 #  MOTS-CLÉS SECTORIELS
@@ -1272,6 +1313,15 @@ SCORING_RUBRIQUES = {
         "Cohérence et progression du parcours professionnel": 2,
         "Qualité et clarté du CV (missions précises, livrables, résultats)": 1,
         "Lettre de motivation": 1
+    },
+    "Chef de Division Local Corporate": {
+        "Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints": 3,
+        "Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L": 3,
+        "Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions": 2,
+        "Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance": 2,
+        "Cohérence et progression du parcours professionnel avec séniorité et responsabilités croissantes": 2,
+        "Qualité du CV avec résultats chiffrés et précision des missions, ainsi que qualité de la lettre de motivation": 1,
+        "Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": 1
     }
 }
 
