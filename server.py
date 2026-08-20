@@ -176,7 +176,9 @@ def _get_supabase_client():
             follow_redirects=True
         )
     try:
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY, http_client=_http_client)
+        # La version récente de supabase n'accepte pas http_client directement
+        # Les timeouts sont gérés au niveau des requêtes individuelles
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
         return supabase_client
     except Exception as e:
         logger.error(f"Erreur création client Supabase: {e}")
