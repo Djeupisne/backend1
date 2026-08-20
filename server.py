@@ -256,7 +256,8 @@ POSTES = [
     "Chef service risques de marché",
     "Chef service reporting réglementaire",
     "Chef de Section Compensation",
-    "Chargé(e) d'Administration de Crédit"
+    "Chargé(e) d'Administration de Crédit",
+    "Chef de Division Local Corporate"
 ]
 
 # ═══ STATUTS : ACTIFS vs CLOTURÉS ═══
@@ -388,6 +389,44 @@ GRILLE = {
             "Absence totale de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)",
             "Trous inexpliqués dans le parcours professionnel"
         ]
+    },
+    "Chef de Division Local Corporate": {
+        "eliminatoire": [
+            "Aucune expérience dans le secteur bancaire ou financier réglementé",
+            "Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)",
+            "Moins de 5 ans d'expérience professionnelle, dont une partie significative en banque",
+            "Aucune expérience en gestion d'un portefeuille de clients Corporate ou d'entreprises",
+            "Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale",
+            "Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)"
+        ],
+        "a_verifier": [
+            "Pilotage d'une activité Corporate ou d'un segment entreprises avec des objectifs chiffrés (revenus, volumes, marges)",
+            "Gestion d'un portefeuille de clients Corporate et capacité à le développer",
+            "Encadrement et évaluation d'une équipe commerciale ou bancaire",
+            "Suivi de la qualité du portefeuille de crédit (NPL, CIR, provisions) et reporting à la direction",
+            "Développement de ventes croisées (cross-selling) ou de partenariats interdépartementaux",
+            "Production ou supervision de rapports de performance commerciale et financière",
+            "Exposition à la réglementation bancaire locale (COBAC, BEAC) ou internationale"
+        ],
+        "signaux_forts": [
+            "Pilotage d'une division ou d'une ligne Corporate avec atteinte des objectifs de revenus et de portefeuille",
+            "Gestion active du ratio NPL et du ratio coût/revenu (CIR) — résultats chiffrés mentionnés",
+            "Expérience avérée en cross-selling avec des équipes TSG, Trade Finance ou Cash Management",
+            "Développement réel du portefeuille Corporate : acquisition de clients, fidélisation, nombre de produits par client",
+            "Leadership démontré : constitution d'équipe, développement des collaborateurs, vivier de talents",
+            "Certification Ecobank, Moody's ou ITB (Institut Technique de Banque) ou équivalent",
+            "Connaissance du marché corporate tchadien ou de la zone CEMAC / UEMOA",
+            "Exposition aux plateformes numériques bancaires (OMNI, Cash Management ou équivalent)",
+            "Résultats commerciaux quantifiés et vérifiables dans le CV (chiffres d'affaires, taux de croissance, NPS)"
+        ],
+        "points_attention": [
+            "Parcours exclusivement back-office ou risques sans expérience commerciale Corporate",
+            "Profil techniquement solide (crédit, analyse) mais sans expérience managériale ni pilotage d'une P&L",
+            "Expériences très courtes (moins de 2 ans par poste) ou trajectoire sans progression hiérarchique visible",
+            "CV sans aucun résultat chiffré : missions décrites en responsabilités sans livrables ni indicateurs atteints",
+            "Mobilité géographique ou sectorielle excessive sans ancrage dans le secteur bancaire Corporate",
+            "Trous inexpliqués dans le parcours ou incohérences entre les postes déclarés"
+        ]
     }
 }
 
@@ -400,6 +439,7 @@ SCORING_CONFIG = {
     "IT Réseau & Infrastructure": None,
     "Chef de Section Compensation": None,
     "Chargé(e) d'Administration de Crédit": None,
+    "Chef de Division Local Corporate": {"CV_Exp_Corporate": 3, "CV_Management": 3, "CV_Risque": 2, "CV_CrossSelling": 2, "CV_Progression": 2, "CV_Qualite": 1, "CV_Certification": 1},
     "Auditeur interne": {"CV_Exp": 25, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 15, "CV_Progression": 5, "CV_Management": 0, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
     "Chef service contrôle des engagements": {"CV_Exp": 20, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 20, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
     "Chef service IT (maintenance/support)": {"CV_Exp": 15, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 25, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
@@ -410,6 +450,7 @@ SCORING_CONFIG = {
 
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]
+POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate"]
 
 # ═══════════════════════════════════════════════════════════════
 #  MOTS-CLÉS SECTORIELS
@@ -1315,11 +1356,15 @@ def build_analysis_user_message(cv_text, lettre_text, attestation_texts_list, po
         return "\n".join(f"  {i+1}. {c}" for i, c in enumerate(items)) if items else "  (aucun)"
     if poste in POSTES_AVEC_SCORING_100:
         rubrique_txt = "\n".join(f"  - {SCORING_CODE_LABELS.get(nom, nom)} [clé: \"{nom}\"] : 0 à {pts} pts" for nom, pts in rubrique.items())
+    elif poste in POSTES_AVEC_SCORING_14:
+        rubrique_txt = "\n".join(f"  - {SCORING_CODE_LABELS.get(nom, nom)} [clé: \"{nom}\"] : 0 à {pts} pts" for nom, pts in rubrique.items())
     else:
         rubrique_txt = "\n".join(f"  - {nom} : 0 à {pts} pts" for nom, pts in rubrique.items())
     att_txt = "\n".join(attestation_texts_list) if attestation_texts_list else "(aucune)"
     if poste in POSTES_AVEC_SCORING_12:
         seuils_txt = "10-12 : Entretien prioritaire | 7-9 : Vivier | <7 : Rejet"
+    elif poste in POSTES_AVEC_SCORING_14:
+        seuils_txt = "11-14 : Entretien prioritaire | 7-10 : Potentiel à évaluer | <7 : Rejet"
     elif poste in POSTES_AVEC_SCORING_100:
         seuils_txt = "≥80 : Shortlist | 70-79 : À considérer | 60-69 : Faible | <60 : Rejet"
     else:
@@ -1786,6 +1831,10 @@ def get_recommandation_from_score(score, poste=None):
         if s >= 10: return "🥇 Entretien prioritaire"
         elif s >= 7: return "🥈 Entretien si besoin (vivier de réserve)"
         else: return "❌ Rejet"
+    if poste and poste in POSTES_AVEC_SCORING_14:
+        if s >= 11: return "🥇 Entretien prioritaire"
+        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"
+        else: return "❌ Rejet"
     if poste and poste in POSTES_AVEC_SCORING_100:
         if s >= 80: return "Shortlist"
         elif s >= 70: return "À considérer"
@@ -1796,7 +1845,7 @@ def get_recommandation_from_score(score, poste=None):
     else: return "❌ Rejet"
 
 def get_decision_from_score(score, poste=None):
-    if not poste or (poste not in POSTES_AVEC_SCORING_100 and poste not in POSTES_AVEC_SCORING_12):
+    if not poste or (poste not in POSTES_AVEC_SCORING_100 and poste not in POSTES_AVEC_SCORING_12 and poste not in POSTES_AVEC_SCORING_14):
         return None
     return get_recommandation_from_score(score, poste)
 
@@ -1804,6 +1853,10 @@ def get_recommandation_color(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
         if s >= 10: return "00FF00"
+        elif s >= 7: return "FFA500"
+        else: return "FF0000"
+    if poste and poste in POSTES_AVEC_SCORING_14:
+        if s >= 11: return "00FF00"
         elif s >= 7: return "FFA500"
         else: return "FF0000"
     if poste and poste in POSTES_AVEC_SCORING_100:
@@ -1818,6 +1871,8 @@ def get_recommandation_color(score, poste=None):
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
         return 12
+    if poste in POSTES_AVEC_SCORING_14:
+        return 14
     if poste in POSTES_AVEC_SCORING_100:
         return 100
     return 10
