@@ -159,7 +159,31 @@ jwt = JWTManager(app)
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+# Configuration HTTP personnalisée pour plus de stabilité
+import httpx
+_http_client = None
+
+def _get_supabase_client():
+    global _http_client
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    if _http_client is None:
+        # Client HTTP avec timeouts plus longs et retry automatique
+        _http_client = httpx.Client(
+            timeout=httpx.Timeout(30.0, connect=10.0, read=30.0, write=10.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            follow_redirects=True
+        )
+    try:
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY, http_client=_http_client)
+        return supabase_client
+    except Exception as e:
+        logger.error(f"Erreur création client Supabase: {e}")
+        _http_client = None
+        return None
+
+supabase: Client = _get_supabase_client()
 
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
@@ -179,24 +203,46 @@ def allowed_file(filename):
 # ═══════════════════════════════════════════════════════════════
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     if not supabase:
+        logger.error("Client Supabase non initialisé pour upload")
         return None
     try:
         file_bytes = file_obj.read()
-        supabase.storage.from_(SUPABASE_STORAGE_BUCKET).upload(
-            blob_name, file_bytes,
-            {"content-type": content_type or "application/octet-stream", "upsert": "true"}
-        )
-        return blob_name
+        # Retry logique pour les uploads
+        for attempt in range(3):
+            try:
+                supabase.storage.from_(SUPABASE_STORAGE_BUCKET).upload(
+                    blob_name, file_bytes,
+                    {"content-type": content_type or "application/octet-stream", "upsert": "true"}
+                )
+                return blob_name
+            except Exception as e:
+                logger.warning(f"Tentative upload {attempt + 1} échouée: {e}")
+                if attempt < 2:
+                    time.sleep(0.5)
+                else:
+                    logger.error(f"Échec upload après 3 tentatives: {e}")
+                    return None
     except Exception as e:
         logger.error(f"Upload error: {e}")
         return None
 
 def download_file_from_supabase(blob_name):
     if not supabase:
+        logger.error("Client Supabase non initialisé pour download")
         return None
     try:
-        response = supabase.storage.from_(SUPABASE_STORAGE_BUCKET).download(blob_name)
-        return response
+        # Retry logique pour les downloads
+        for attempt in range(3):
+            try:
+                response = supabase.storage.from_(SUPABASE_STORAGE_BUCKET).download(blob_name)
+                return response
+            except Exception as e:
+                logger.warning(f"Tentative download {attempt + 1} échouée: {e}")
+                if attempt < 2:
+                    time.sleep(0.5)
+                else:
+                    logger.error(f"Échec download après 3 tentatives: {e}")
+                    return None
     except Exception as e:
         logger.error(f"Download error: {e}")
         return None
@@ -2901,13 +2947,30 @@ def login():
         return jsonify({'error': 'JSON manquant'}), 400
     email = data.get('email', '').strip().lower()
     pwd = hash_pwd(data.get('password', ''))
-    if supabase:
-        response = supabase.table('recruteurs').select('*').eq('email', email).execute()
-        if response.data and len(response.data) > 0:
-            r = response.data[0]
-            if r.get("password") == pwd:
-                token = create_access_token(identity=str(r["id"]))
-                return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
+    if not supabase:
+        logger.error("Client Supabase non initialisé")
+        return jsonify({'error': 'Service indisponible'}), 503
+    try:
+        # Retry logique pour gérer les problèmes de connexion
+        for attempt in range(3):
+            try:
+                response = supabase.table('recruteurs').select('*').eq('email', email).execute()
+                if response.data and len(response.data) > 0:
+                    r = response.data[0]
+                    if r.get("password") == pwd:
+                        token = create_access_token(identity=str(r["id"]))
+                        return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
+                break  # Succès, sortir de la boucle
+            except Exception as e:
+                logger.warning(f"Tentative {attempt + 1} échouée: {e}")
+                if attempt < 2:
+                    time.sleep(0.5)  # Attendre avant de réessayer
+                else:
+                    logger.error(f"Échec login après 3 tentatives: {e}")
+                    return jsonify({'error': 'Erreur de connexion au serveur'}), 500
+    except Exception as e:
+        logger.error(f"Erreur login: {e}")
+        return jsonify({'error': 'Erreur interne du serveur'}), 500
     return jsonify({'error': 'Identifiants incorrects'}), 401
 
 @app.route('/api/candidats/postuler', methods=['POST'])
