@@ -261,7 +261,7 @@ POSTES = [
 ]
 
 # ═══ STATUTS : ACTIFS vs CLOTURÉS ═══
-POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit"]
+POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 
 def is_poste_actif(poste):
