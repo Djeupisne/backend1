@@ -1915,10 +1915,12 @@ const NOUVEAUX_POSTES_100PTS = [
     "Chef service reporting réglementaire"
 ];
 const POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"];
+const POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate"];
 
 function getScoreMax(poste) {
     if (!poste) return 10;
     if (POSTES_AVEC_SCORING_12.includes(poste)) return 12;
+    if (POSTES_AVEC_SCORING_14.includes(poste)) return 14;
     if (NOUVEAUX_POSTES_100PTS.includes(poste)) return 100;
     return 10;
 }
@@ -1927,6 +1929,11 @@ function getDecisionFromScore(score, poste) {
     const s = parseInt(score) || 0;
     if (poste && POSTES_AVEC_SCORING_12.includes(poste)) {
         if (s >= 10) return "Entretien prioritaire";
+        if (s >= 7) return "Entretien si besoin (vivier de réserve)";
+        return "Rejet";
+    }
+    if (poste && POSTES_AVEC_SCORING_14.includes(poste)) {
+        if (s >= 11) return "Entretien prioritaire";
         if (s >= 7) return "Entretien si besoin (vivier de réserve)";
         return "Rejet";
     }
@@ -1960,6 +1967,18 @@ const LABELS_12 = {
     }
 };
 
+const LABELS_14 = {
+    "Chef de Division Local Corporate": {
+        "Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints": "Expérience Corporate/Portefeuille",
+        "Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L": "Management/Encadrement",
+        "Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions": "Risque crédit (NPL, CIR)",
+        "Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance": "Cross-selling/TSG",
+        "Cohérence et progression du parcours professionnel avec séniorité et responsabilités croissantes": "Progression/cohérence parcours",
+        "Qualité du CV avec résultats chiffrés et précision des missions, ainsi que qualité de la lettre de motivation": "Qualité CV + lettre",
+        "Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": "Certifications/CEMAC"
+    }
+};
+
 function renderTable(data) {
 const tbody = document.getElementById('candidats-tbody');
 if (!data.length) {
@@ -1988,6 +2007,13 @@ scoreTitle += `\nÉliminatoire: ${sb.bloc1_eliminatoire ? 'OUI' : 'NON'}`;
 if (POSTES_AVEC_SCORING_12.includes(c.poste)) {
 const sousScores = sb.sous_scores || {};
 const currentLabels = LABELS_12[c.poste] || {};
+Object.entries(sousScores).forEach(([k, v]) => {
+const label = currentLabels[k] || k;
+scoreTitle += `\n${label}: ${v}`;
+});
+} else if (POSTES_AVEC_SCORING_14.includes(c.poste)) {
+const sousScores = sb.sous_scores || {};
+const currentLabels = LABELS_14[c.poste] || {};
 Object.entries(sousScores).forEach(([k, v]) => {
 const label = currentLabels[k] || k;
 scoreTitle += `\n${label}: ${v}`;
@@ -2123,6 +2149,40 @@ const max = max12[key] || 0;
 html += `<div class="sb-row"><span class="sb-label">${label}</span><span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}">${val} / ${max}</span></div>`;
 });
 html += `<div class="sb-row"><span class="sb-label">Score total</span><span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}" style="color:${decisionColor}">${scoreFinal} / 12</span></div>`;
+html += '</div>';
+} else if (POSTES_AVEC_SCORING_14.includes(c.poste)) {
+const sousScores = sb.sous_scores || {};
+const scoreFinal = sb.bloc1_eliminatoire ? 0 : (sb.score_final || 0);
+const decision = sb.bloc1_eliminatoire ? '❌ Rejet (éliminatoire)' : (sb.decision || getDecisionFromScore(scoreFinal, c.poste));
+const decisionColor = {
+'🥇 Entretien prioritaire': '#166534',
+'🥈 Entretien si besoin (vivier de réserve)': '#3B6D11',
+'❌ Rejet': '#991b1b',
+'❌ Rejet (éliminatoire)': '#991b1b'
+}[decision] || '#1a2433';
+html += `<div style="text-align:center;margin-bottom:.8rem">
+<span style="font-size:1.6rem;font-weight:800;color:${decisionColor}">${scoreFinal}/14</span>
+<span style="margin-left:.6rem;font-size:.9rem;font-weight:700;color:${decisionColor};background:${decisionColor}18;padding:.2rem .6rem;border-radius:4px">${decision}</span>
+</div>`;
+html += '<div class="score-breakdown">';
+
+const currentLabels = LABELS_14[c.poste] || LABELS_14["Chef de Division Local Corporate"];
+const max14 = {
+"Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints": 3,
+"Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L": 3,
+"Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions": 2,
+"Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance": 2,
+"Cohérence et progression du parcours professionnel avec séniorité et responsabilités croissantes": 2,
+"Qualité du CV avec résultats chiffrés et précision des missions, ainsi que qualité de la lettre de motivation": 1,
+"Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": 1
+};
+
+Object.entries(currentLabels).forEach(([key, label]) => {
+const val = sb.bloc1_eliminatoire ? 0 : (sousScores[key] || 0);
+const max = max14[key] || 0;
+html += `<div class="sb-row"><span class="sb-label">${label}</span><span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}">${val} / ${max}</span></div>`;
+});
+html += `<div class="sb-row"><span class="sb-label">Score total</span><span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}" style="color:${decisionColor}">${scoreFinal} / 14</span></div>`;
 html += '</div>';
 if (details.synthese_recruteur) {
 html += `<div class="bloc-alert signal" style="margin-top:.8rem">
@@ -2437,6 +2497,44 @@ points_attention: [
 "Absence totale de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)",
 "Trous inexpliqués dans le parcours professionnel"
 ]
+},
+"Chef de Division Local Corporate": {
+eliminatoire: [
+"Aucune expérience dans le secteur bancaire ou financier réglementé",
+"Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)",
+"Moins de 5 ans d'expérience professionnelle, dont une partie significative en banque",
+"Aucune expérience en gestion d'un portefeuille de clients Corporate ou d'entreprises",
+"Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale",
+"Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)"
+],
+a_verifier: [
+"Pilotage d'une activité Corporate ou d'un segment entreprises avec des objectifs chiffrés (revenus, volumes, marges)",
+"Gestion d'un portefeuille de clients Corporate et capacité à le développer",
+"Encadrement et évaluation d'une équipe commerciale ou bancaire",
+"Suivi de la qualité du portefeuille de crédit (NPL, CIR, provisions) et reporting à la direction",
+"Développement de ventes croisées (cross-selling) ou de partenariats interdépartementaux",
+"Production ou supervision de rapports de performance commerciale et financière",
+"Exposition à la réglementation bancaire locale (COBAC, BEAC) ou internationale"
+],
+signaux_forts: [
+"Pilotage d'une division ou d'une ligne Corporate avec atteinte des objectifs de revenus et de portefeuille",
+"Gestion active du ratio NPL et du ratio coût/revenu (CIR) — résultats chiffrés mentionnés",
+"Expérience avérée en cross-selling avec des équipes TSG, Trade Finance ou Cash Management",
+"Développement réel du portefeuille Corporate : acquisition de clients, fidélisation, nombre de produits par client",
+"Leadership démontré : constitution d'équipe, développement des collaborateurs, vivier de talents",
+"Certification Ecobank, Moody's ou ITB (Institut Technique de Banque) ou équivalent",
+"Connaissance du marché corporate tchadien ou de la zone CEMAC / UEMOA",
+"Exposition aux plateformes numériques bancaires (OMNI, Cash Management ou équivalent)",
+"Résultats commerciaux quantifiés et vérifiables dans le CV (chiffres d'affaires, taux de croissance, NPS)"
+],
+points_attention: [
+"Parcours exclusivement back-office ou risques sans expérience commerciale Corporate",
+"Profil techniquement solide (crédit, analyse) mais sans expérience managériale ni pilotage d'une P&L",
+"Expériences très courtes (moins de 2 ans par poste) ou trajectoire sans progression hiérarchique visible",
+"CV sans aucun résultat chiffré : missions décrites en responsabilités sans livrables ni indicateurs atteints",
+"Mobilité géographique ou sectorielle excessive sans ancrage dans le secteur bancaire Corporate",
+"Trous inexpliqués dans le parcours ou incohérences entre les postes déclarés"
+]
 }
 };
 
@@ -2565,7 +2663,7 @@ const sel = document.getElementById('email-type');
 const poste = currentC.poste;
 const decision = currentC.score_breakdown_parsed?.decision || '';
 const statut = currentC.statut;
-if (POSTES_AVEC_SCORING_12.includes(poste)) {
+if (POSTES_AVEC_SCORING_12.includes(poste) || POSTES_AVEC_SCORING_14.includes(poste)) {
 if (decision.includes('Entretien prioritaire')) sel.value = '🥇 Entretien prioritaire';
 else if (decision.includes('vivier')) sel.value = '🥈 Entretien si besoin (vivier de réserve)';
 else sel.value = '❌ Rejet';
@@ -2585,7 +2683,7 @@ const sel = document.getElementById('email-type');
 const poste = c.poste;
 const decision = c.score_breakdown_parsed?.decision || '';
 const statut = c.statut;
-if (POSTES_AVEC_SCORING_12.includes(poste)) {
+if (POSTES_AVEC_SCORING_12.includes(poste) || POSTES_AVEC_SCORING_14.includes(poste)) {
 if (decision.includes('Entretien prioritaire')) sel.value = '🥇 Entretien prioritaire';
 else if (decision.includes('vivier')) sel.value = '🥈 Entretien si besoin (vivier de réserve)';
 else sel.value = '❌ Rejet';
@@ -2643,7 +2741,7 @@ return subjects[type] || '';
 
 function emailBody(type, nom, poste) {
 const sign = '\n\nCordialement,\nL\'équipe Ressources Humaines\nRecrutBank';
-if (POSTES_AVEC_SCORING_12.includes(poste)) {
+if (POSTES_AVEC_SCORING_12.includes(poste) || POSTES_AVEC_SCORING_14.includes(poste)) {
 if (type === '🥇 Entretien prioritaire' || type === 'retenu')
 return 'Madame, Monsieur ' + nom + ',\n\nFélicitations ! Votre candidature pour le poste de ' + poste + ' a été retenue en priorité à l\'issue de notre processus de présélection.\n\nVotre profil présente une excellente adéquation avec les exigences du poste.\n\nNous vous contacterons dans les plus brefs délais pour convenir d\'un entretien.\n\nCordialement,' + sign;
 if (type === '🥈 Entretien si besoin (vivier de réserve)' || type === 'entretien')
