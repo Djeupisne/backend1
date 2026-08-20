@@ -159,33 +159,7 @@ jwt = JWTManager(app)
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
-
-# Configuration HTTP personnalisée pour plus de stabilité
-import httpx
-_http_client = None
-
-def _get_supabase_client():
-    global _http_client
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return None
-    if _http_client is None:
-        # Client HTTP avec timeouts plus longs et retry automatique
-        _http_client = httpx.Client(
-            timeout=httpx.Timeout(30.0, connect=10.0, read=30.0, write=10.0),
-            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-            follow_redirects=True
-        )
-    try:
-        # La version récente de supabase n'accepte pas http_client directement
-        # Les timeouts sont gérés au niveau des requêtes individuelles
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        return supabase_client
-    except Exception as e:
-        logger.error(f"Erreur création client Supabase: {e}")
-        _http_client = None
-        return None
-
-supabase: Client = _get_supabase_client()
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
@@ -205,46 +179,24 @@ def allowed_file(filename):
 # ═══════════════════════════════════════════════════════════════
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     if not supabase:
-        logger.error("Client Supabase non initialisé pour upload")
         return None
     try:
         file_bytes = file_obj.read()
-        # Retry logique pour les uploads
-        for attempt in range(3):
-            try:
-                supabase.storage.from_(SUPABASE_STORAGE_BUCKET).upload(
-                    blob_name, file_bytes,
-                    {"content-type": content_type or "application/octet-stream", "upsert": "true"}
-                )
-                return blob_name
-            except Exception as e:
-                logger.warning(f"Tentative upload {attempt + 1} échouée: {e}")
-                if attempt < 2:
-                    time.sleep(0.5)
-                else:
-                    logger.error(f"Échec upload après 3 tentatives: {e}")
-                    return None
+        supabase.storage.from_(SUPABASE_STORAGE_BUCKET).upload(
+            blob_name, file_bytes,
+            {"content-type": content_type or "application/octet-stream", "upsert": "true"}
+        )
+        return blob_name
     except Exception as e:
         logger.error(f"Upload error: {e}")
         return None
 
 def download_file_from_supabase(blob_name):
     if not supabase:
-        logger.error("Client Supabase non initialisé pour download")
         return None
     try:
-        # Retry logique pour les downloads
-        for attempt in range(3):
-            try:
-                response = supabase.storage.from_(SUPABASE_STORAGE_BUCKET).download(blob_name)
-                return response
-            except Exception as e:
-                logger.warning(f"Tentative download {attempt + 1} échouée: {e}")
-                if attempt < 2:
-                    time.sleep(0.5)
-                else:
-                    logger.error(f"Échec download après 3 tentatives: {e}")
-                    return None
+        response = supabase.storage.from_(SUPABASE_STORAGE_BUCKET).download(blob_name)
+        return response
     except Exception as e:
         logger.error(f"Download error: {e}")
         return None
@@ -304,12 +256,11 @@ POSTES = [
     "Chef service risques de marché",
     "Chef service reporting réglementaire",
     "Chef de Section Compensation",
-    "Chargé(e) d'Administration de Crédit",
-    "Chef de Division Local Corporate"
+    "Chargé(e) d'Administration de Crédit"
 ]
 
 # ═══ STATUTS : ACTIFS vs CLOTURÉS ═══
-POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate"]
+POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 
 def is_poste_actif(poste):
@@ -437,44 +388,6 @@ GRILLE = {
             "Absence totale de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)",
             "Trous inexpliqués dans le parcours professionnel"
         ]
-    },
-    "Chef de Division Local Corporate": {
-        "eliminatoire": [
-            "Aucune expérience dans le secteur bancaire ou financier réglementé",
-            "Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)",
-            "Moins de 5 ans d'expérience professionnelle, dont une partie significative en banque",
-            "Aucune expérience en gestion d'un portefeuille de clients Corporate ou d'entreprises",
-            "Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale",
-            "Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)"
-        ],
-        "a_verifier": [
-            "Pilotage d'une activité Corporate ou d'un segment entreprises avec des objectifs chiffrés (revenus, volumes, marges)",
-            "Gestion d'un portefeuille de clients Corporate et capacité à le développer",
-            "Encadrement et évaluation d'une équipe commerciale ou bancaire",
-            "Suivi de la qualité du portefeuille de crédit (NPL, CIR, provisions) et reporting à la direction",
-            "Développement de ventes croisées (cross-selling) ou de partenariats interdépartementaux",
-            "Production ou supervision de rapports de performance commerciale et financière",
-            "Exposition à la réglementation bancaire locale (COBAC, BEAC) ou internationale"
-        ],
-        "signaux_forts": [
-            "Pilotage d'une division ou d'une ligne Corporate avec atteinte des objectifs de revenus et de portefeuille",
-            "Gestion active du ratio NPL et du ratio coût/revenu (CIR) — résultats chiffrés mentionnés",
-            "Expérience avérée en cross-selling avec des équipes TSG, Trade Finance ou Cash Management",
-            "Développement réel du portefeuille Corporate : acquisition de clients, fidélisation, nombre de produits par client",
-            "Leadership démontré : constitution d'équipe, développement des collaborateurs, vivier de talents",
-            "Certification Ecobank, Moody's ou ITB (Institut Technique de Banque) ou équivalent",
-            "Connaissance du marché corporate tchadien ou de la zone CEMAC / UEMOA",
-            "Exposition aux plateformes numériques bancaires (OMNI, Cash Management ou équivalent)",
-            "Résultats commerciaux quantifiés et vérifiables dans le CV (chiffres d'affaires, taux de croissance, NPS)"
-        ],
-        "points_attention": [
-            "Parcours exclusivement back-office ou risques sans expérience commerciale Corporate",
-            "Profil techniquement solide (crédit, analyse) mais sans expérience managériale ni pilotage d'une P&L",
-            "Expériences très courtes (moins de 2 ans par poste) ou trajectoire sans progression hiérarchique visible",
-            "CV sans aucun résultat chiffré : missions décrites en responsabilités sans livrables ni indicateurs atteints",
-            "Mobilité géographique ou sectorielle excessive sans ancrage dans le secteur bancaire Corporate",
-            "Trous inexpliqués dans le parcours ou incohérences entre les postes déclarés"
-        ]
     }
 }
 
@@ -487,7 +400,6 @@ SCORING_CONFIG = {
     "IT Réseau & Infrastructure": None,
     "Chef de Section Compensation": None,
     "Chargé(e) d'Administration de Crédit": None,
-    "Chef de Division Local Corporate": None,
     "Auditeur interne": {"CV_Exp": 25, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 15, "CV_Progression": 5, "CV_Management": 0, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
     "Chef service contrôle des engagements": {"CV_Exp": 20, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 20, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
     "Chef service IT (maintenance/support)": {"CV_Exp": 15, "CV_Niveau": 10, "CV_Secteur": 10, "CV_Tech": 25, "CV_Progression": 5, "CV_Management": 5, "CV_Stabilite": 5, "LM_Comprehension": 5, "LM_Coherence": 5, "LM_Motivation": 5, "LM_Qualite": 5, "D_Niveau": 4, "D_Specialisation": 3, "D_Certif": 3},
@@ -498,7 +410,6 @@ SCORING_CONFIG = {
 
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]
-POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate"]
 
 # ═══════════════════════════════════════════════════════════════
 #  MOTS-CLÉS SECTORIELS
@@ -1361,15 +1272,6 @@ SCORING_RUBRIQUES = {
         "Cohérence et progression du parcours professionnel": 2,
         "Qualité et clarté du CV (missions précises, livrables, résultats)": 1,
         "Lettre de motivation": 1
-    },
-    "Chef de Division Local Corporate": {
-        "Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints": 3,
-        "Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L": 3,
-        "Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions": 2,
-        "Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance": 2,
-        "Cohérence et progression du parcours professionnel avec séniorité et responsabilités croissantes": 2,
-        "Qualité du CV avec résultats chiffrés et précision des missions, ainsi que qualité de la lettre de motivation": 1,
-        "Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": 1
     }
 }
 
@@ -2151,173 +2053,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 # Récupération des sous-scores détaillés
                 sous_scores = sb.get('sous_scores', {})
                 
-                # Récupérer le score total stocké
-                score_candidat = int(cand.get('score', 0))
-                
-                # Récupération des flags éliminatoires - plusieurs sources possibles
-                flags_eliminatoires = []
-                if cand.get('flags_eliminatoires'):
-                    try:
-                        flags_data = cand['flags_eliminatoires']
-                        if isinstance(flags_data, str):
-                            flags_eliminatoires = json.loads(flags_data)
-                        elif isinstance(flags_data, list):
-                            flags_eliminatoires = flags_data
-                        elif isinstance(flags_data, dict):
-                            flags_eliminatoires = flags_data.get('flags', []) or flags_data.get('eliminatoire', [])
-                    except Exception:
-                        pass
-                
-                # Vérifier aussi dans score_breakdown_parsed
-                if not flags_eliminatoires and sb.get('flags_eliminatoires'):
-                    flags_eliminatoires = sb['flags_eliminatoires']
-                
-                # Vérifier dans analyse_details_parsed
-                analyse_details = cand.get('analyse_details_parsed', {})
-                if not flags_eliminatoires and isinstance(analyse_details, dict):
-                    flags_eliminatoires = analyse_details.get('flags_eliminatoires', []) or analyse_details.get('eliminatoires', [])
-                
-                # Si toujours vide, vérifier les champs bruts JSON
-                if not flags_eliminatoires and cand.get('flags_eliminatoires'):
-                    try:
-                        raw_flags = json.loads(cand['flags_eliminatoires']) if isinstance(cand['flags_eliminatoires'], str) else cand['flags_eliminatoires']
-                        if isinstance(raw_flags, list):
-                            flags_eliminatoires = raw_flags
-                        elif isinstance(raw_flags, dict):
-                            flags_eliminatoires = raw_flags.get('flags', []) or raw_flags.get('items', [])
-                    except Exception:
-                        pass
-                
-                # Initialisation de l'analyse par défaut
-                analyse = ""
-                
-                # Si sous_scores est vide mais qu'on a un score > 0, reconstituer les sous-scores
-                if not sous_scores and score_candidat > 0:
-                    # Essayer de récupérer depuis les champs individuels dans score_breakdown
-                    if poste == "Chargé(e) d'Administration de Crédit":
-                        sous_scores = {
-                            "Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": sb.get('adequation_experience', 0),
-                            "Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": sb.get('exposition_ifrs', 0),
-                            "Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)": sb.get('rigueur_outils', 0),
-                            "Cohérence et progression du parcours professionnel": sb.get('coherence', 0),
-                            "Qualité et clarté du CV (missions précises, livrables, résultats)": sb.get('qualite_cv', 0),
-                            "Lettre de motivation": sb.get('lettre_score', 0)
-                        }
-                    elif poste == "Chef de Section Compensation":
-                        sous_scores = {
-                            "Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": sb.get('adequation_experience', 0),
-                            "Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": sb.get('exposition_beac_gimac', 0),
-                            "Capacité d'encadrement et de management d'équipe opérationnelle": sb.get('management_encadrement', 0),
-                            "Cohérence et progression du parcours professionnel": sb.get('coherence', 0),
-                            "Qualité et clarté du CV (missions précises, livrables, résultats)": sb.get('qualite_cv', 0),
-                            "Lettre de motivation": sb.get('lettre_score', 0)
-                        }
-                    
-                    # Si toujours vide ou tous à 0, répartir proportionnellement le score total
-                    total_sous_scores = sum(sous_scores.values()) if sous_scores else 0
-                    if total_sous_scores == 0 and score_candidat > 0:
-                        # Répartir le score de manière proportionnelle selon les poids de chaque critère
-                        if poste == "Chargé(e) d'Administration de Crédit":
-                            sous_scores = {
-                                "Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": min(3, round(score_candidat * 0.25)),
-                                "Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": min(3, round(score_candidat * 0.25)),
-                                "Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)": min(2, round(score_candidat * 0.15)),
-                                "Cohérence et progression du parcours professionnel": min(2, round(score_candidat * 0.15)),
-                                "Qualité et clarté du CV (missions précises, livrables, résultats)": min(1, 1 if score_candidat >= 4 else 0),
-                                "Lettre de motivation": min(1, 1 if score_candidat >= 6 else 0)
-                            }
-                        elif poste == "Chef de Section Compensation":
-                            sous_scores = {
-                                "Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": min(3, round(score_candidat * 0.25)),
-                                "Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": min(3, round(score_candidat * 0.25)),
-                                "Capacité d'encadrement et de management d'équipe opérationnelle": min(2, round(score_candidat * 0.15)),
-                                "Cohérence et progression du parcours professionnel": min(2, round(score_candidat * 0.15)),
-                                "Qualité et clarté du CV (missions précises, livrables, résultats)": min(1, 1 if score_candidat >= 4 else 0),
-                                "Lettre de motivation": min(1, 1 if score_candidat >= 6 else 0)
-                            }
-                        else:
-                            sous_scores = {
-                                'adequation': min(3, round(score_candidat * 0.3)),
-                                'coherence': min(2, round(score_candidat * 0.2)),
-                                'risque': min(3, round(score_candidat * 0.3)),
-                                'cv': min(1, 1 if score_candidat >= 3 else 0),
-                                'lettre': min(1, 1 if score_candidat >= 5 else 0)
-                            }
-                
-                # Récupération des alertes attention
-                criteres_valides_bloc2 = []
-                alertes_attention = []
-                
-                # Essayer de récupérer depuis analyse_details_parsed
-                if isinstance(analyse_details, dict):
-                    criteres_valides_bloc2 = analyse_details.get('criteres_valides_bloc2', [])
-                    alertes_attention = analyse_details.get('alertes_attention', [])
-                
-                # Fonction helper pour formater les raisons d'élimination
-                def formater_raisons_eliminatoire(flags):
-                    """Formate les flags éliminatoires en mots-clés clairs et concis"""
-                    if not flags:
-                        return []
-                    
-                    raisons = []
-                    mapping_mots_cles = {
-                        "diplome": "Diplôme inadéquat",
-                        "diplôme": "Diplôme inadéquat",
-                        "formation": "Formation inadaptée",
-                        "experience": "Expérience insuffisante",
-                        "expérience": "Expérience insuffisante",
-                        "competence": "Compétences manquantes",
-                        "compétence": "Compétences manquantes",
-                        "technique": "Compétences techniques",
-                        "parcours": "Parcours incohérent",
-                        "coherence": "Parcours incohérent",
-                        "cohérence": "Parcours incohérent",
-                        "mobilite": "Mobilité impossible",
-                        "mobilité": "Mobilité impossible",
-                        "salaire": "Prétentions excessives",
-                        "pretention": "Prétentions excessives",
-                        "prétention": "Prétentions excessives",
-                        "disponibilite": "Disponibilité incompatible",
-                        "disponibilité": "Disponibilité incompatible",
-                        "bancaire": "Expérience bancaire absente",
-                        "secteur bancaire": "Expérience bancaire absente",
-                        "outil": "Outils maîtrisés insuffisants",
-                        "excel": "Maîtrise Excel insuffisante",
-                        "ifrs": "Connaissance IFRS insuffisante",
-                        "norme": "Normes non maîtrisées",
-                        "gestion": "Expérience gestion insuffisante",
-                        "management": "Expérience management insuffisante",
-                        "encadrement": "Expérience encadrement insuffisante",
-                        "analyse": "Capacité analyse insuffisante",
-                        "risque": "Gestion risques insuffisante",
-                        "credit": "Expérience crédit insuffisante",
-                        "compensation": "Expérience compensation insuffisante"
-                    }
-                    
-                    for flag in flags[:3]:  # Limiter à 3 raisons maximum
-                        flag_lower = flag.lower()
-                        mot_cle_trouve = False
-                        
-                        # Chercher le mot-clé le plus pertinent
-                        for key, valeur in mapping_mots_cles.items():
-                            if key in flag_lower:
-                                if valeur not in raisons:  # Éviter les doublons
-                                    raisons.append(valeur)
-                                    mot_cle_trouve = True
-                                    break
-                        
-                        if not mot_cle_trouve:
-                            # Extraire les mots significatifs du flag brut
-                            mots_ignore = ['le', 'la', 'les', 'un', 'une', 'des', 'de', 'du', 'pas', 'sans', 'non', 'absence', 'manque', 'insuffisante', 'insuffisant']
-                            mots_significatifs = [m for m in flag_lower.replace('_', ' ').replace('-', ' ').split() if len(m) > 3 and m not in mots_ignore]
-                            if mots_significatifs:
-                                # Prendre les 2 premiers mots significatifs et capitaliser
-                                mot_cle = ' '.join(mots_significatifs[:2]).title()
-                                if mot_cle not in raisons:
-                                    raisons.append(mot_cle)
-                    
-                    return raisons[:3]  # Maximum 3 raisons
-                
                 # Calcul des sous-scores selon le poste
                 if poste == "Chef de Section Compensation":
                     adeq = sous_scores.get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0) if not elim else 0
@@ -2328,38 +2063,21 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                     total = adeq + expo + enc + coh + qcv + lm
                     
-                    # Analyse détaillée basée sur les VRAIS critères du système
-                    analyse_parts = []
+                    # Analyse détaillée
+                    points_forts = []
+                    points_faibles = []
+                    if adeq >= 2.5: points_forts.append("Expérience pertinente")
+                    if adeq < 1.5: points_faibles.append("Expérience limitée")
+                    if expo >= 2.5: points_forts.append("Expertise BEAC/GIMAC")
+                    if expo < 1.5: points_faibles.append("Manque d'expertise BEAC/GIMAC")
+                    if enc >= 1.5: points_forts.append("Leadership")
+                    if enc < 1: points_faibles.append("Management à renforcer")
+                    if coh >= 1.5: points_forts.append("Parcours cohérent")
+                    if coh < 1: points_faibles.append("Parcours discontinu")
                     
-                    # Si éliminatoire, afficher clairement les raisons
-                    if elim and flags_eliminatoires:
-                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                        analyse = "; ".join(raisons_formatees)
-                    elif flags_eliminatoires:
-                        # Même si pas éliminatoire officiellement, afficher les alertes
-                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                        analyse = "; ".join(raisons_formatees[:2])
-                    else:
-                        # Points forts basés sur les scores réels
-                        points_forts = []
-                        if adeq >= 2.5: points_forts.append("Expérience pertinente")
-                        elif adeq < 1.5: points_forts.append("Expérience limitée")
-                        if expo >= 2.5: points_forts.append("Expertise BEAC/GIMAC")
-                        elif expo < 1.5: points_forts.append("Expertise BEAC/GIMAC limitée")
-                        if enc >= 1.5: points_forts.append("Leadership")
-                        elif enc < 1: points_forts.append("Management à renforcer")
-                        if coh >= 1.5: points_forts.append("Parcours cohérent")
-                        elif coh < 1: points_forts.append("Parcours discontinu")
-                        
-                        if points_forts:
-                            analyse = "; ".join(points_forts[:4])
-                        else:
-                            analyse = "Profil standard"
-                    
-                    # Combiner avec les alertes s'il y en a (sans symbole)
-                    if alertes_attention and not elim and not flags_eliminatoires:
-                        alertes_clean = [a.replace('⚠️', '').replace('⚠', '').strip() for a in alertes_attention[:2]]
-                        analyse += " | " + "; ".join(alertes_clean) if analyse else "; ".join(alertes_clean)
+                    analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
+                    if points_faibles:
+                        analyse += " | ⚠ " + "; ".join(points_faibles[:2])
                         
                 elif poste == "Chargé(e) d'Administration de Crédit":
                     adeq = sous_scores.get("Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)", 0) if not elim else 0
@@ -2370,31 +2088,19 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                     total = adeq + ifrs + rig + coh + qcv + lm
                     
-                    # Analyse détaillée basée sur les VRAIS critères du système
-                    if elim and flags_eliminatoires:
-                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                        analyse = "; ".join(raisons_formatees)
-                    elif flags_eliminatoires:
-                        # Même si pas éliminatoire officiellement, afficher les alertes
-                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                        analyse = "; ".join(raisons_formatees[:2])
-                    else:
-                        points_forts = []
-                        if adeq >= 2.5: points_forts.append("Expérience crédit")
-                        elif adeq < 1.5: points_forts.append("Expérience crédit limitée")
-                        if ifrs >= 2.5: points_forts.append("Maîtrise IFRS 9")
-                        elif ifrs < 1.5: points_forts.append("IFRS 9 à renforcer")
-                        if rig >= 1.5: points_forts.append("Rigueur opérationnelle")
-                        elif rig < 1: points_forts.append("Outils à améliorer")
-                        
-                        if points_forts:
-                            analyse = "; ".join(points_forts[:4])
-                        else:
-                            analyse = "Profil standard"
+                    # Analyse détaillée
+                    points_forts = []
+                    points_faibles = []
+                    if adeq >= 2.5: points_forts.append("Expérience crédit")
+                    if adeq < 1.5: points_faibles.append("Expérience crédit limitée")
+                    if ifrs >= 2.5: points_forts.append("Maîtrise IFRS 9")
+                    if ifrs < 1.5: points_faibles.append("IFRS 9 à renforcer")
+                    if rig >= 1.5: points_forts.append("Rigueur opérationnelle")
+                    if rig < 1: points_faibles.append("Outils à améliorer")
                     
-                    if alertes_attention and not elim:
-                        alertes_clean = [a.replace('⚠️', '').replace('⚠', '').strip() for a in alertes_attention[:2]]
-                        analyse += " | " + "; ".join(alertes_clean) if analyse else "; ".join(alertes_clean)
+                    analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
+                    if points_faibles:
+                        analyse += " | ⚠ " + "; ".join(points_faibles[:2])
                         
                 else:
                     adeq = sb.get('adequation_experience', 0) if not elim else 0
@@ -2404,31 +2110,19 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     lm = sb.get('lettre_motivation', 0) if not elim else 0
                     total = adeq + cohe + risq + qcv + lm
                     
-                    # Analyse détaillée basée sur les VRAIS critères du système
-                    if elim and flags_eliminatoires:
-                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                        analyse = "; ".join(raisons_formatees)
-                    elif flags_eliminatoires:
-                        # Même si pas éliminatoire officiellement, afficher les alertes
-                        raisons_formatees = formater_raisons_eliminatoire(flags_eliminatoires)
-                        analyse = "; ".join(raisons_formatees[:2])
-                    else:
-                        points_forts = []
-                        if adeq >= 2.5: points_forts.append("Bonne adéquation")
-                        elif adeq < 1.5: points_forts.append("Adéquation faible")
-                        if cohe >= 1.5: points_forts.append("Parcours cohérent")
-                        elif cohe < 1: points_forts.append("Parcours irrégulier")
-                        if risq >= 2.5: points_forts.append("Expérience métier")
-                        elif risq < 1.5: points_forts.append("Expérience limitée")
-                        
-                        if points_forts:
-                            analyse = "; ".join(points_forts[:4])
-                        else:
-                            analyse = "Profil standard"
+                    # Analyse détaillée générique
+                    points_forts = []
+                    points_faibles = []
+                    if adeq >= 2.5: points_forts.append("Bonne adéquation")
+                    if adeq < 1.5: points_faibles.append("Adéquation faible")
+                    if cohe >= 1.5: points_forts.append("Parcours cohérent")
+                    if cohe < 1: points_faibles.append("Parcours irrégulier")
+                    if risq >= 2.5: points_forts.append("Expérience métier")
+                    if risq < 1.5: points_faibles.append("Expérience limitée")
                     
-                    if alertes_attention and not elim:
-                        alertes_clean = [a.replace('⚠️', '').replace('⚠', '').strip() for a in alertes_attention[:2]]
-                        analyse += " | " + "; ".join(alertes_clean) if analyse else "; ".join(alertes_clean)
+                    analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
+                    if points_faibles:
+                        analyse += " | ⚠ " + "; ".join(points_faibles[:2])
                 
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_complet = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip() or '–'
@@ -2484,7 +2178,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     
                     # Formatage conditionnel pour la colonne Recommandation
                     if col == 15:  # Colonne Recommandation
-                        rec_color = get_recommandation_color(score_candidat, poste)
+                        rec_color = get_recommandation_color(total, poste)
                         cell.font = Font(bold=True, size=10)
                         if rec_color == "00FF00":
                             cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -2949,30 +2643,13 @@ def login():
         return jsonify({'error': 'JSON manquant'}), 400
     email = data.get('email', '').strip().lower()
     pwd = hash_pwd(data.get('password', ''))
-    if not supabase:
-        logger.error("Client Supabase non initialisé")
-        return jsonify({'error': 'Service indisponible'}), 503
-    try:
-        # Retry logique pour gérer les problèmes de connexion
-        for attempt in range(3):
-            try:
-                response = supabase.table('recruteurs').select('*').eq('email', email).execute()
-                if response.data and len(response.data) > 0:
-                    r = response.data[0]
-                    if r.get("password") == pwd:
-                        token = create_access_token(identity=str(r["id"]))
-                        return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
-                break  # Succès, sortir de la boucle
-            except Exception as e:
-                logger.warning(f"Tentative {attempt + 1} échouée: {e}")
-                if attempt < 2:
-                    time.sleep(0.5)  # Attendre avant de réessayer
-                else:
-                    logger.error(f"Échec login après 3 tentatives: {e}")
-                    return jsonify({'error': 'Erreur de connexion au serveur'}), 500
-    except Exception as e:
-        logger.error(f"Erreur login: {e}")
-        return jsonify({'error': 'Erreur interne du serveur'}), 500
+    if supabase:
+        response = supabase.table('recruteurs').select('*').eq('email', email).execute()
+        if response.data and len(response.data) > 0:
+            r = response.data[0]
+            if r.get("password") == pwd:
+                token = create_access_token(identity=str(r["id"]))
+                return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
     return jsonify({'error': 'Identifiants incorrects'}), 401
 
 @app.route('/api/candidats/postuler', methods=['POST'])
@@ -3543,43 +3220,15 @@ def export_candidates(fmt):
         result = []
         for c in all_candidats:
             c['id'] = c.get('token', '')
-            
-            # Parser les champs JSON pour l'export
-            if c.get('score_breakdown'):
-                try:
-                    c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
-                except Exception as e:
-                    logger.warning(f"Erreur parsing score_breakdown pour {c.get('token')}: {e}")
-                    c['score_breakdown_parsed'] = {}
-            
-            if c.get('checklist'):
-                try:
-                    c['checklist_parsed'] = json.loads(c['checklist'])
-                except Exception:
-                    pass
-            
-            if c.get('flags_eliminatoires'):
-                try:
-                    c['flags_eliminatoires_parsed'] = json.loads(c['flags_eliminatoires'])
-                except Exception:
-                    pass
-            
-            if c.get('signaux_detectes'):
-                try:
-                    c['signaux_detectes_parsed'] = json.loads(c['signaux_detectes'])
-                except Exception:
-                    pass
-            
-            if c.get('analyse_details'):
-                try:
-                    c['analyse_details_parsed'] = json.loads(c['analyse_details'])
-                except Exception:
-                    pass
-            
             if poste_filter and c.get('poste') != poste_filter:
                 continue
             if statut_filter and c.get('statut') != statut_filter:
                 continue
+            if c.get('score_breakdown'):
+                try:
+                    c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
+                except Exception:
+                    pass
             result.append(c)
         result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
