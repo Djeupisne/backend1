@@ -2724,11 +2724,17 @@ def login():
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
-        nom = (request.form.get('nom') or '').strip()
-        prenom = (request.form.get('prenom') or '').strip()
-        email = (request.form.get('email') or '').strip().lower()
-        telephone = (request.form.get('telephone') or '').strip()
-        poste = (request.form.get('poste') or '').strip()
+        # Gestion robuste de la déconnexion client
+        try:
+            nom = (request.form.get('nom') or '').strip()
+            prenom = (request.form.get('prenom') or '').strip()
+            email = (request.form.get('email') or '').strip().lower()
+            telephone = (request.form.get('telephone') or '').strip()
+            poste = (request.form.get('poste') or '').strip()
+        except werkzeug.exceptions.ClientDisconnected:
+            logger.warning("Client déconnecté pendant l'envoi du formulaire (fichier trop lourd ou connexion instable)")
+            return jsonify({'error': 'La connexion a été interrompue. Vérifiez votre connexion internet ou réduisez la taille du fichier CV.'}), 400
+        
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
         if supabase:
