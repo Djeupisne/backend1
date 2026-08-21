@@ -1,0 +1,2907 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tableau de Bord – Recrutement | RecrutBank</title>
+<link rel="stylesheet" href="style.css">
+<style>
+:root {
+--primary: #1a3a5c;
+--primary-hover: #152d47;
+--primary-light: #e8eef5;
+--success: #16a34a;
+--success-light: #dcfce7;
+--warning: #d97706;
+--warning-light: #fef3c7;
+--danger: #dc2626;
+--danger-light: #fee2e2;
+--info: #2563eb;
+--info-light: #dbeafe;
+--text: #1a2433;
+--text-secondary: #64748b;
+--text-muted: #94a3b8;
+--border: #e2e8f0;
+--bg-light: #f8fafc;
+--bg-white: #ffffff;
+--shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+--shadow: 0 2px 8px rgba(0,0,0,0.06);
+--shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+--radius: 8px;
+--radius-lg: 12px;
+}
+* { box-sizing: border-box; }
+body {
+margin: 0;
+padding: 0;
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+background: var(--bg-light);
+color: var(--text);
+font-size: 14px;
+line-height: 1.5;
+-webkit-font-smoothing: antialiased;
+}
+.navbar {
+background: var(--primary);
+color: white;
+padding: 0 1.5rem;
+height: 60px;
+display: flex;
+align-items: center;
+justify-content: space-between;
+box-shadow: var(--shadow);
+position: sticky;
+top: 0;
+z-index: 100;
+}
+.brand {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+font-size: 1.1rem;
+font-weight: 600;
+}
+.brand-icon {
+width: 32px;
+height: 32px;
+background: rgba(255,255,255,0.15);
+border-radius: 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 1.1rem;
+}
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.brand-text .tag { font-size: 0.7rem; font-weight: 400; opacity: 0.7; }
+.nav-links {
+display: flex;
+align-items: center;
+gap: 1rem;
+}
+.nav-links a {
+color: rgba(255,255,255,0.8);
+text-decoration: none;
+font-size: 0.85rem;
+transition: color 0.2s;
+}
+.nav-links a:hover { color: white; }
+.dash-layout {
+display: grid;
+grid-template-columns: 240px 1fr;
+min-height: calc(100vh - 60px);
+}
+.sidebar {
+background: var(--bg-white);
+border-right: 1px solid var(--border);
+padding: 1.5rem 0;
+}
+.sidebar-user {
+padding: 0 1.25rem 1.5rem;
+border-bottom: 1px solid var(--border);
+margin-bottom: 1rem;
+display: flex;
+align-items: center;
+gap: 0.75rem;
+}
+.avatar {
+width: 40px;
+height: 40px;
+border-radius: 50%;
+background: var(--primary-light);
+color: var(--primary);
+display: flex;
+align-items: center;
+justify-content: center;
+font-weight: 700;
+font-size: 1rem;
+flex-shrink: 0;
+}
+.u-name { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+.u-role { font-size: 0.75rem; color: var(--text-muted); }
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; }
+.sidebar nav a {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+padding: 0.65rem 1.25rem;
+color: var(--text-secondary);
+text-decoration: none;
+font-size: 0.88rem;
+font-weight: 500;
+border-left: 3px solid transparent;
+transition: all 0.15s;
+}
+.sidebar nav a:hover {
+background: var(--bg-light);
+color: var(--text);
+}
+.sidebar nav a.active {
+background: var(--primary-light);
+color: var(--primary);
+border-left-color: var(--primary);
+font-weight: 600;
+}
+.sidebar nav a .icon { font-size: 1rem; width: 20px; text-align: center; }
+.dash-main {
+padding: 2rem;
+overflow-x: hidden;
+}
+.dash-title {
+font-size: 1.5rem;
+font-weight: 700;
+color: var(--text);
+margin: 0 0 0.25rem 0;
+}
+.dash-subtitle {
+color: var(--text-muted);
+font-size: 0.875rem;
+margin: 0 0 1.5rem 0;
+}
+.page-header {
+display: flex;
+justify-content: space-between;
+align-items: flex-start;
+margin-bottom: 1.5rem;
+flex-wrap: wrap;
+gap: 1rem;
+}
+.card {
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+box-shadow: var(--shadow-sm);
+overflow: hidden;
+}
+.card-header {
+padding: 1rem 1.25rem;
+border-bottom: 1px solid var(--border);
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+.card-title {
+font-size: 0.95rem;
+font-weight: 600;
+color: var(--text);
+margin: 0;
+}
+.card-body { padding: 1.25rem; }
+.stats-grid {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+gap: 1rem;
+margin-bottom: 1.5rem;
+}
+.stat-card {
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+padding: 1.25rem;
+box-shadow: var(--shadow-sm);
+position: relative;
+transition: transform 0.2s, box-shadow 0.2s;
+}
+.stat-card:hover {
+transform: translateY(-2px);
+box-shadow: var(--shadow);
+}
+.stat-card::before {
+content: '';
+position: absolute;
+top: 0;
+left: 0;
+right: 0;
+height: 3px;
+background: var(--primary);
+border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.stat-card.blue::before { background: var(--primary); }
+.stat-card.amber::before { background: var(--warning); }
+.stat-card.green::before { background: var(--success); }
+.stat-card.red::before { background: var(--danger); }
+.stat-card.purple::before { background: #7c3aed; }
+.stat-icon {
+width: 36px;
+height: 36px;
+border-radius: 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 1.1rem;
+margin-bottom: 0.75rem;
+}
+.stat-card.blue .stat-icon { background: var(--primary-light); color: var(--primary); }
+.stat-card.amber .stat-icon { background: var(--warning-light); color: var(--warning); }
+.stat-card.green .stat-icon { background: var(--success-light); color: var(--success); }
+.stat-card.red .stat-icon { background: var(--danger-light); color: var(--danger); }
+.stat-card.purple .stat-icon { background: #ede9fe; color: #7c3aed; }
+.stat-value {
+font-size: 1.75rem;
+font-weight: 700;
+color: var(--text);
+line-height: 1;
+margin-bottom: 0.25rem;
+}
+.stat-label {
+font-size: 0.8rem;
+color: var(--text-muted);
+font-weight: 500;
+text-transform: uppercase;
+letter-spacing: 0.3px;
+}
+.chart-grid {
+display: grid;
+grid-template-columns: 1fr 1.5fr;
+gap: 1rem;
+margin-bottom: 1.5rem;
+}
+@media (max-width: 992px) { .chart-grid { grid-template-columns: 1fr; } }
+.chart-box {
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+padding: 1.25rem;
+box-shadow: var(--shadow-sm);
+}
+.chart-box h4 {
+margin: 0 0 1rem 0;
+font-size: 0.95rem;
+font-weight: 600;
+color: var(--text);
+}
+.donut-wrap {
+position: relative;
+width: 180px;
+height: 180px;
+margin: 0 auto 1rem;
+}
+.donut-wrap svg { transform: rotate(-90deg); }
+.donut-center {
+position: absolute;
+inset: 0;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+pointer-events: none;
+}
+.donut-center .dn { font-size: 1.75rem; font-weight: 800; color: var(--text); }
+.donut-center .dl { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.chart-legend {
+display: flex;
+flex-wrap: wrap;
+gap: 0.5rem 1rem;
+justify-content: center;
+font-size: 0.78rem;
+color: var(--text-secondary);
+}
+.legend-dot {
+display: inline-block;
+width: 10px;
+height: 10px;
+border-radius: 50%;
+margin-right: 0.3rem;
+vertical-align: middle;
+}
+.bar-chart { display: flex; flex-direction: column; gap: 0.6rem; }
+.bar-row { display: flex; align-items: center; gap: 0.7rem; font-size: 0.78rem; }
+.bar-label {
+width: 140px;
+min-width: 140px;
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+font-weight: 500;
+color: var(--text-secondary);
+}
+.bar-track {
+flex: 1;
+height: 8px;
+background: var(--bg-light);
+border-radius: 4px;
+overflow: hidden;
+}
+.bar-fill {
+height: 100%;
+background: linear-gradient(90deg, var(--primary), #3b82f6);
+border-radius: 4px;
+transition: width 0.5s;
+}
+.bar-val {
+width: 30px;
+text-align: right;
+font-weight: 700;
+color: var(--text);
+font-size: 0.8rem;
+}
+.btn {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+gap: 0.4rem;
+padding: 0.5rem 1rem;
+border: 1px solid transparent;
+border-radius: 6px;
+font-weight: 500;
+font-size: 0.85rem;
+cursor: pointer;
+transition: all 0.15s;
+text-decoration: none;
+white-space: nowrap;
+font-family: inherit;
+}
+.btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.btn:active { transform: translateY(0); }
+.btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-success { background: var(--success); color: white; }
+.btn-success:hover { background: #15803d; }
+.btn-warning { background: var(--warning); color: white; }
+.btn-warning:hover { background: #b45309; }
+.btn-danger { background: var(--danger); color: white; }
+.btn-danger:hover { background: #b91c1c; }
+.btn-info { background: var(--info); color: white; }
+.btn-info:hover { background: #1d4ed8; }
+.btn-outline {
+background: transparent;
+border: 1px solid var(--border);
+color: var(--text-secondary);
+}
+.btn-outline:hover {
+background: var(--bg-light);
+border-color: var(--text-muted);
+color: var(--text);
+}
+.btn-ghost {
+background: transparent;
+color: var(--text-secondary);
+border: none;
+}
+.btn-ghost:hover { background: var(--bg-light); color: var(--text); }
+.form-control {
+padding: 0.5rem 0.75rem;
+border: 1px solid var(--border);
+border-radius: 6px;
+font-size: 0.85rem;
+font-family: inherit;
+color: var(--text);
+background: var(--bg-white);
+transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-control:focus {
+outline: none;
+border-color: var(--primary);
+box-shadow: 0 0 0 3px rgba(26, 58, 92, 0.1);
+}
+.form-control::placeholder { color: var(--text-muted); }
+.form-group { margin-bottom: 1rem; }
+.form-group label {
+display: block;
+font-size: 0.8rem;
+font-weight: 600;
+color: var(--text-secondary);
+margin-bottom: 0.35rem;
+text-transform: uppercase;
+letter-spacing: 0.3px;
+}
+.export-section {
+background: linear-gradient(135deg, #1e3a5c 0%, #2563eb 100%);
+color: white;
+padding: 1.25rem 1.5rem;
+border-radius: var(--radius-lg);
+margin-bottom: 1rem;
+box-shadow: var(--shadow);
+display: flex;
+align-items: center;
+justify-content: space-between;
+flex-wrap: wrap;
+gap: 1rem;
+}
+.export-section h3 {
+color: white;
+margin: 0;
+font-size: 1rem;
+font-weight: 600;
+display: flex;
+align-items: center;
+gap: 0.5rem;
+}
+.export-section .export-subtitle {
+color: rgba(255,255,255,0.8);
+font-size: 0.8rem;
+margin: 0.25rem 0 0 0;
+font-weight: 400;
+}
+.export-controls {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+flex-wrap: wrap;
+flex: 1;
+justify-content: flex-end;
+}
+.export-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.export-btn {
+padding: 0.5rem 0.9rem;
+border: none;
+border-radius: 6px;
+font-weight: 600;
+font-size: 0.8rem;
+cursor: pointer;
+transition: all 0.15s;
+display: inline-flex;
+align-items: center;
+gap: 0.35rem;
+background: rgba(255,255,255,0.15);
+color: white;
+backdrop-filter: blur(10px);
+}
+.export-btn:hover {
+background: rgba(255,255,255,0.25);
+transform: translateY(-1px);
+}
+.export-btn.solid { background: white; color: var(--primary); }
+.export-btn.solid:hover { background: #f1f5f9; }
+.reanalyze-section {
+background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+color: white;
+padding: 1.25rem 1.5rem;
+border-radius: var(--radius-lg);
+margin-bottom: 1rem;
+box-shadow: var(--shadow);
+display: flex;
+align-items: center;
+justify-content: space-between;
+flex-wrap: wrap;
+gap: 1rem;
+}
+.reanalyze-section h3 {
+color: white;
+margin: 0;
+font-size: 1rem;
+font-weight: 600;
+}
+.reanalyze-section p {
+color: rgba(255,255,255,0.9);
+font-size: 0.8rem;
+margin: 0.25rem 0 0 0;
+}
+.reanalyze-controls {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+flex-wrap: wrap;
+flex: 1;
+justify-content: flex-end;
+}
+.reanalyze-status {
+color: white;
+font-size: 0.8rem;
+font-weight: 600;
+padding: 0.35rem 0.75rem;
+background: rgba(255,255,255,0.2);
+border-radius: 6px;
+backdrop-filter: blur(10px);
+}
+.reanalyze-progress-inline {
+margin-top: 1rem;
+background: rgba(255,255,255,0.95);
+border-radius: 8px;
+padding: 1rem;
+width: 100%;
+color: var(--text);
+}
+.reanalyze-progress-inline .progress-header {
+display: flex;
+justify-content: space-between;
+margin-bottom: 0.5rem;
+font-size: 0.85rem;
+font-weight: 600;
+}
+.progress-bar-bg {
+background: #e5e7eb;
+height: 8px;
+border-radius: 4px;
+overflow: hidden;
+}
+.progress-bar-fill {
+background: linear-gradient(90deg, #d97706, #16a34a);
+height: 100%;
+width: 0%;
+transition: width 0.5s;
+border-radius: 4px;
+}
+.progress-detail {
+margin-top: 0.5rem;
+font-size: 0.75rem;
+color: var(--text-muted);
+}
+.filter-bar {
+display: flex;
+gap: 0.5rem;
+padding: 1rem 1.25rem;
+border-bottom: 1px solid var(--border);
+flex-wrap: wrap;
+align-items: center;
+}
+.filter-bar .form-control { min-width: 160px; }
+.table-wrap { overflow-x: auto; }
+table {
+width: 100%;
+border-collapse: collapse;
+font-size: 0.85rem;
+}
+thead th {
+background: var(--bg-light);
+padding: 0.75rem 1rem;
+text-align: left;
+font-weight: 600;
+color: var(--text-secondary);
+font-size: 0.75rem;
+text-transform: uppercase;
+letter-spacing: 0.3px;
+border-bottom: 1px solid var(--border);
+white-space: nowrap;
+}
+tbody td {
+padding: 0.85rem 1rem;
+border-bottom: 1px solid var(--border);
+vertical-align: middle;
+}
+tbody tr { transition: background 0.1s; }
+tbody tr:hover { background: var(--bg-light); }
+tbody tr:last-child td { border-bottom: none; }
+.td-small { color: var(--text-muted); font-size: 0.78rem; }
+.td-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.badge {
+display: inline-flex;
+align-items: center;
+padding: 0.2rem 0.6rem;
+border-radius: 12px;
+font-size: 0.72rem;
+font-weight: 600;
+white-space: nowrap;
+}
+.badge-pending { background: var(--warning-light); color: #92400e; }
+.badge-retained { background: var(--success-light); color: #166534; }
+.badge-rejected { background: var(--danger-light); color: #991b1b; }
+.badge-interview { background: var(--info-light); color: #1e40af; }
+.empty-state {
+text-align: center;
+padding: 3rem 1rem;
+color: var(--text-muted);
+}
+.empty-icon { font-size: 2.5rem; margin-bottom: 0.5rem; opacity: 0.4; }
+.modal-overlay {
+display: none;
+position: fixed;
+inset: 0;
+background: rgba(15, 23, 42, 0.6);
+backdrop-filter: blur(4px);
+z-index: 1000;
+justify-content: center;
+align-items: center;
+padding: 1rem;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+background: var(--bg-white);
+border-radius: var(--radius-lg);
+box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+max-height: 90vh;
+overflow: hidden;
+display: flex;
+flex-direction: column;
+animation: modalSlideIn 0.2s ease-out;
+}
+@keyframes modalSlideIn {
+from { opacity: 0; transform: translateY(-20px); }
+to { opacity: 1; transform: translateY(0); }
+}
+.modal-header {
+padding: 1.25rem 1.5rem;
+border-bottom: 1px solid var(--border);
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+.modal-header h3 {
+margin: 0;
+font-size: 1.1rem;
+font-weight: 600;
+color: var(--text);
+}
+.modal-close {
+background: none;
+border: none;
+font-size: 1.5rem;
+color: var(--text-muted);
+cursor: pointer;
+padding: 0;
+width: 32px;
+height: 32px;
+display: flex;
+align-items: center;
+justify-content: center;
+border-radius: 6px;
+transition: all 0.15s;
+}
+.modal-close:hover { background: var(--bg-light); color: var(--text); }
+.modal-body {
+padding: 1.5rem;
+overflow-y: auto;
+flex: 1;
+}
+.modal-footer {
+padding: 1rem 1.5rem;
+border-top: 1px solid var(--border);
+display: flex;
+gap: 0.5rem;
+flex-wrap: wrap;
+justify-content: flex-end;
+background: var(--bg-light);
+}
+.tabs {
+display: flex;
+gap: 0;
+border-bottom: 1px solid var(--border);
+margin-bottom: 1.25rem;
+}
+.tab-btn {
+background: none;
+border: none;
+padding: 0.65rem 1.25rem;
+font-size: 0.85rem;
+font-weight: 500;
+color: var(--text-muted);
+cursor: pointer;
+border-bottom: 2px solid transparent;
+margin-bottom: -1px;
+transition: all 0.15s;
+font-family: inherit;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+color: var(--primary);
+border-bottom-color: var(--primary);
+font-weight: 600;
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.readonly-badge {
+display: inline-flex;
+align-items: center;
+gap: 0.25rem;
+background: var(--bg-light);
+color: var(--text-muted);
+font-size: 0.7rem;
+font-weight: 600;
+padding: 0.15rem 0.5rem;
+border-radius: 4px;
+margin-left: 0.5rem;
+border: 1px solid var(--border);
+text-transform: uppercase;
+letter-spacing: 0.3px;
+}
+.readonly-badge::before { content: "🔒"; font-size: 0.7rem; }
+.grille-section { margin-bottom: 1rem; }
+.grille-header {
+display: flex;
+align-items: center;
+gap: 0.5rem;
+font-weight: 600;
+font-size: 0.82rem;
+padding: 0.4rem 0.75rem;
+border-radius: 6px;
+margin-bottom: 0.4rem;
+border-left: 3px solid;
+}
+.grille-item {
+display: flex;
+align-items: center;
+gap: 0.55rem;
+padding: 0.5rem 0.75rem;
+font-size: 0.83rem;
+border-radius: 4px;
+background: var(--bg-white);
+border: 1px solid transparent;
+transition: all 0.12s;
+margin-bottom: 0.25rem;
+}
+.grille-item.checked { background: var(--success-light); border-color: #bbf7d0; }
+.grille-item.not-checked { background: var(--danger-light); border-color: #fecaca; }
+.grille-item.eliminatoire-triggered {
+background: #fee2e2 !important;
+border-color: var(--danger) !important;
+animation: pulse-red 2s infinite;
+}
+@keyframes pulse-red {
+0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.3); }
+50% { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+}
+.grille-item input { margin: 0; cursor: not-allowed; opacity: 0.5; width: 16px; height: 16px; }
+.grille-item .status-icon { margin-left: auto; font-weight: 700; font-size: 1.1rem; }
+.grille-item.checked .status-icon { color: var(--success); }
+.grille-item.not-checked .status-icon { color: var(--danger); }
+.score-breakdown {
+background: var(--bg-light);
+border: 1px solid var(--border);
+border-radius: 8px;
+padding: 1rem;
+margin: 0.8rem 0;
+font-size: 0.82rem;
+}
+.sb-row {
+display: flex;
+justify-content: space-between;
+padding: 0.3rem 0;
+border-bottom: 1px dashed var(--border);
+}
+.sb-row:last-child { border-bottom: none; font-weight: 700; color: var(--primary); font-size: 0.9rem; padding-top: 0.5rem; }
+.sb-label { color: var(--text-secondary); }
+.sb-val { font-weight: 600; }
+.sb-val.elim { color: var(--danger); }
+.sb-val.ok { color: var(--success); }
+.bloc-alert {
+padding: 0.75rem 1rem;
+border-radius: 6px;
+margin: 0.5rem 0;
+font-size: 0.82rem;
+display: flex;
+align-items: flex-start;
+gap: 0.5rem;
+border-left: 4px solid;
+}
+.bloc-alert.elim { background: var(--danger-light); border-color: var(--danger); color: #991b1b; }
+.bloc-alert.attn { background: var(--warning-light); border-color: var(--warning); color: #92400e; }
+.bloc-alert.signal { background: var(--success-light); border-color: var(--success); color: #166534; }
+.bloc-alert strong { display: block; margin-bottom: 0.2rem; font-size: 0.85rem; }
+.star-btn {
+background: none;
+border: none;
+font-size: 1.3rem;
+cursor: default;
+padding: 0 2px;
+line-height: 1;
+}
+.star-btn:disabled { opacity: 0.7; }
+.email-preview {
+background: var(--bg-light);
+border: 1px solid var(--border);
+border-radius: 8px;
+padding: 1rem;
+}
+.ep-field { margin-bottom: 0.4rem; font-size: 0.84rem; }
+.ep-label {
+font-weight: 700;
+color: var(--text-muted);
+font-size: 0.72rem;
+text-transform: uppercase;
+letter-spacing: 0.4px;
+margin-right: 0.4rem;
+}
+.ep-body-area {
+width: 100%;
+margin-top: 0.8rem;
+padding: 0.75rem;
+border: 1px solid var(--border);
+border-radius: 6px;
+font-family: inherit;
+font-size: 0.85rem;
+min-height: 200px;
+resize: vertical;
+background: var(--bg-white);
+line-height: 1.6;
+box-sizing: border-box;
+}
+.alert-info {
+background: var(--info-light);
+color: #1e40af;
+border: 1px solid #bfdbfe;
+padding: 0.75rem 1rem;
+border-radius: 6px;
+font-size: 0.85rem;
+margin-bottom: 1rem;
+}
+.elimination-overlay {
+position: fixed;
+inset: 0;
+background: rgba(15, 23, 42, 0.7);
+z-index: 999;
+backdrop-filter: blur(6px);
+animation: fadeIn 0.3s ease-out;
+}
+@keyframes fadeIn {
+from { opacity: 0; }
+to { opacity: 1; }
+}
+.elimination-alert {
+position: fixed;
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+background: var(--bg-white);
+border: 2px solid var(--danger);
+border-radius: var(--radius-lg);
+padding: 2rem;
+box-shadow: 0 25px 70px rgba(220, 38, 38, 0.35);
+z-index: 1000;
+max-width: 520px;
+width: 90%;
+animation: modalSlideIn 0.3s ease-out;
+text-align: center;
+}
+.elimination-alert-header {
+display: flex;
+align-items: center;
+justify-content: center;
+margin-bottom: 1.5rem;
+padding-bottom: 1rem;
+border-bottom: 1px solid var(--border);
+}
+.elimination-alert-title {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+font-size: 1.3rem;
+font-weight: 700;
+color: var(--danger);
+}
+.elimination-alert-title::before {
+content: "⛔";
+font-size: 1.8rem;
+}
+.elimination-alert-close {
+position: absolute;
+top: 1rem;
+right: 1rem;
+background: var(--danger-light);
+color: var(--danger);
+border: none;
+border-radius: 50%;
+width: 32px;
+height: 32px;
+font-size: 1.2rem;
+cursor: pointer;
+display: flex;
+align-items: center;
+justify-content: center;
+transition: all 0.2s;
+}
+.elimination-alert-close:hover {
+background: var(--danger);
+color: white;
+}
+.elimination-alert-message {
+font-size: 1.05rem;
+font-weight: 600;
+color: var(--danger);
+margin: 1.5rem 0;
+padding: 1rem;
+background: var(--danger-light);
+border-radius: 8px;
+border-left: 4px solid var(--danger);
+text-align: left;
+}
+.elimination-alert-details {
+font-size: 0.88rem;
+color: #7f1d1d;
+margin-top: 1rem;
+padding-top: 1rem;
+border-top: 1px dashed #fecaca;
+text-align: left;
+}
+.elimination-alert-details ul {
+margin: 0.5rem 0;
+padding-left: 1.5rem;
+}
+.elimination-alert-details li {
+margin: 0.4rem 0;
+}
+.modal-reanalyze {
+display: none;
+position: fixed;
+inset: 0;
+background: rgba(15, 23, 42, 0.6);
+z-index: 1001;
+justify-content: center;
+align-items: center;
+backdrop-filter: blur(4px);
+padding: 1rem;
+}
+.modal-reanalyze.open { display: flex; }
+.modal-reanalyze-content {
+background: var(--bg-white);
+border-radius: var(--radius-lg);
+padding: 1.75rem;
+max-width: 500px;
+width: 100%;
+box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+animation: modalSlideIn 0.3s ease-out;
+}
+.modal-reanalyze-content h3 {
+margin: 0 0 0.75rem 0;
+color: var(--text);
+font-size: 1.1rem;
+display: flex;
+align-items: center;
+gap: 0.5rem;
+}
+.modal-reanalyze-content p {
+margin: 0 0 1.25rem 0;
+color: var(--text-secondary);
+line-height: 1.5;
+font-size: 0.9rem;
+}
+.toast-container {
+position: fixed;
+bottom: 1.5rem;
+right: 1.5rem;
+z-index: 2000;
+display: flex;
+flex-direction: column;
+gap: 0.5rem;
+}
+.toast {
+background: var(--bg-white);
+border-left: 4px solid var(--primary);
+padding: 0.85rem 1.25rem;
+border-radius: 6px;
+box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+min-width: 280px;
+max-width: 400px;
+animation: toastSlideIn 0.3s ease-out;
+font-size: 0.88rem;
+}
+.toast.success { border-left-color: var(--success); }
+.toast.error { border-left-color: var(--danger); }
+.toast.info { border-left-color: var(--info); }
+@keyframes toastSlideIn {
+from { opacity: 0; transform: translateX(20px); }
+to { opacity: 1; transform: translateX(0); }
+}
+.floating-progress {
+position: fixed;
+bottom: 24px;
+right: 24px;
+width: 340px;
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+box-shadow: 0 10px 25px rgba(0,0,0,0.12), 0 4px 10px rgba(0,0,0,0.08);
+padding: 1.25rem;
+z-index: 1500;
+display: none;
+animation: slideUp 0.3s ease-out;
+border-left: 4px solid var(--warning);
+transition: all 0.3s ease;
+}
+.floating-progress.active { display: block; }
+.floating-progress.completed { border-left-color: var(--success); }
+.floating-progress-header {
+display: flex;
+justify-content: space-between;
+align-items: center;
+margin-bottom: 0.75rem;
+font-size: 0.9rem;
+font-weight: 600;
+color: var(--text);
+}
+.floating-progress-header .icon {
+margin-right: 0.5rem;
+display: inline-block;
+animation: spin 2s linear infinite;
+}
+.floating-progress.completed .floating-progress-header .icon {
+animation: none;
+}
+@keyframes spin {
+100% { transform: rotate(360deg); }
+}
+.floating-progress .progress-bar-bg {
+background: #e5e7eb;
+height: 8px;
+border-radius: 4px;
+overflow: hidden;
+margin-bottom: 0.5rem;
+}
+.floating-progress .progress-bar-fill {
+background: linear-gradient(90deg, #d97706, #f59e0b);
+height: 100%;
+width: 0%;
+transition: width 0.5s ease;
+border-radius: 4px;
+}
+.floating-progress.completed .progress-bar-fill {
+background: linear-gradient(90deg, #16a34a, #22c55e);
+}
+.floating-progress .progress-detail {
+font-size: 0.78rem;
+color: var(--text-muted);
+line-height: 1.4;
+}
+@keyframes slideUp {
+from { opacity: 0; transform: translateY(20px); }
+to { opacity: 1; transform: translateY(0); }
+}
+.progress-bar-fill.indeterminate {
+width: 30% !important;
+animation: indeterminate 1.5s infinite linear;
+background: linear-gradient(90deg, #d97706, #f59e0b, #d97706);
+background-size: 200% 100%;
+}
+@keyframes indeterminate {
+0% { background-position: 200% 0; }
+100% { background-position: -200% 0; }
+}
+@media (max-width: 992px) {
+.dash-layout { grid-template-columns: 1fr; }
+.sidebar { display: none; }
+.dash-main { padding: 1rem; }
+.export-section, .reanalyze-section { flex-direction: column; align-items: stretch; }
+.export-controls, .reanalyze-controls { justify-content: flex-start; width: 100%; }
+.export-buttons { width: 100%; }
+.export-btn { flex: 1; }
+.floating-progress { width: calc(100% - 2rem); left: 1rem; right: 1rem; bottom: 1rem; }
+}
+@media (max-width: 576px) {
+.export-buttons { flex-direction: column; }
+.export-btn { width: 100%; }
+.td-actions { flex-direction: column; }
+.td-actions .btn { width: 100%; }
+.stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<nav class="navbar">
+<div class="brand">
+<div class="brand-icon">🏦</div>
+<div class="brand-text">
+<span>RecrutBank</span>
+<span class="tag">Espace Recruteur</span>
+</div>
+</div>
+<div class="nav-links">
+<span id="nav-nom" style="color:rgba(255,255,255,.8);font-size:.85rem"></span>
+<a href="index.html">Accueil</a>
+<button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.2);" onclick="logout()">Déconnexion</button>
+</div>
+</nav>
+<div class="dash-layout">
+<aside class="sidebar">
+<div class="sidebar-user">
+<div class="avatar" id="sidebar-avatar">R</div>
+<div>
+<div class="u-name" id="sidebar-nom">Recruteur</div>
+<div class="u-role">Responsable RH</div>
+</div>
+</div>
+<nav>
+<a href="#" id="nav-overview" class="active" onclick="showSection('overview',this);return false;">
+<span class="icon">📊</span> Vue d'ensemble
+</a>
+<a href="#" id="nav-candidats" onclick="showSection('candidats',this);return false;">
+<span class="icon">👥</span> Candidats
+</a>
+</nav>
+</aside>
+<main class="dash-main">
+<div id="section-overview">
+<div class="page-header">
+<div>
+<h1 class="dash-title">Vue d'ensemble</h1>
+<p class="dash-subtitle">Synthèse des candidatures et indicateurs clés</p>
+</div>
+<button class="btn btn-primary btn-sm" onclick="refreshAll()">Actualiser</button>
+</div>
+<div class="stats-grid">
+<div class="stat-card blue">
+<div class="stat-icon">👥</div>
+<div class="stat-value" id="s-total">–</div>
+<div class="stat-label">Candidatures</div>
+</div>
+<div class="stat-card amber">
+<div class="stat-icon">⏳</div>
+<div class="stat-value" id="s-attente">–</div>
+<div class="stat-label">En attente</div>
+</div>
+<div class="stat-card green">
+<div class="stat-icon">✓</div>
+<div class="stat-value" id="s-retenu">–</div>
+<div class="stat-label">Retenus</div>
+</div>
+<div class="stat-card red">
+<div class="stat-icon">✕</div>
+<div class="stat-value" id="s-rejete">–</div>
+<div class="stat-label">Non retenus</div>
+</div>
+<div class="stat-card purple">
+<div class="stat-icon">📅</div>
+<div class="stat-value" id="s-entretien">–</div>
+<div class="stat-label">Entretiens</div>
+</div>
+</div>
+<div class="chart-grid">
+<div class="chart-box">
+<h4>Répartition par statut</h4>
+<div class="donut-wrap">
+<svg id="donut-svg" viewBox="0 0 36 36" width="180" height="180">
+<circle cx="18" cy="18" r="15.915" fill="none" stroke="#e8edf5" stroke-width="3.5"/>
+<circle id="arc-attente" cx="18" cy="18" r="15.915" fill="none" stroke="#d97706" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+<circle id="arc-retenu" cx="18" cy="18" r="15.915" fill="none" stroke="#16a34a" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+<circle id="arc-entretien" cx="18" cy="18" r="15.915" fill="none" stroke="#2563eb" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+<circle id="arc-rejete" cx="18" cy="18" r="15.915" fill="none" stroke="#dc2626" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+</svg>
+<div class="donut-center">
+<span class="dn" id="donut-total">0</span>
+<span class="dl">total</span>
+</div>
+</div>
+<div class="chart-legend">
+<span><span class="legend-dot" style="background:#d97706"></span>En attente</span>
+<span><span class="legend-dot" style="background:#16a34a"></span>Retenu</span>
+<span><span class="legend-dot" style="background:#2563eb"></span>Entretien</span>
+<span><span class="legend-dot" style="background:#dc2626"></span>Non retenu</span>
+</div>
+</div>
+<div class="chart-box">
+<h4>Candidatures par poste</h4>
+<div class="bar-chart" id="bar-chart">
+<div class="empty-state"><p>Chargement...</p></div>
+</div>
+</div>
+</div>
+<div class="export-section">
+<div>
+<h3>Exporter les rapports</h3>
+<p class="export-subtitle">Téléchargez les données au format de votre choix</p>
+</div>
+<div class="export-controls">
+<select id="export-poste-select" class="form-control" style="background:white;max-width:280px;">
+<option value="">Rapport global (tous les postes)</option>
+</select>
+<div class="export-buttons">
+<button class="export-btn solid" onclick="exportReport('excel')">Excel</button>
+<button class="export-btn solid" onclick="exportReport('csv')">CSV</button>
+<button class="export-btn solid" onclick="exportReport('pdf')">PDF</button>
+<button class="export-btn solid" onclick="exportReport('word')">Word</button>
+</div>
+</div>
+</div>
+<div class="export-section" style="background: linear-gradient(135deg, #059669 0%, #10b981 100%);">
+<div>
+<h3>Dossiers candidats</h3>
+<p class="export-subtitle">Téléchargez les pièces jointes par poste et période</p>
+</div>
+<div class="export-controls">
+<select id="dossier-poste-select" class="form-control" style="background:white;max-width:280px;">
+<option value="">Tous les postes</option>
+</select>
+<input type="date" id="dossier-date-start" class="form-control" style="background:white;" title="Date de début">
+<input type="date" id="dossier-date-end" class="form-control" style="background:white;" title="Date de fin">
+<button class="export-btn solid" onclick="downloadAllDossiers()">Télécharger ZIP</button>
+</div>
+</div>
+<div class="reanalyze-section">
+<div style="flex:1;min-width:250px">
+<h3>Réanalyse des candidatures</h3>
+<p>Relance l'analyse automatique avec les règles actuelles (uniquement pour les postes ouverts).</p>
+</div>
+<div class="reanalyze-controls">
+<select id="reanalyze-poste-select" class="form-control" style="background:rgba(255,255,255,0.95);max-width:260px;">
+<option value="">Tous les postes actifs</option>
+</select>
+<button class="export-btn solid" style="color:#d97706;" onclick="openReanalyzeModal()">Lancer la réanalyse</button>
+<span id="reanalyze-status" class="reanalyze-status" style="display:none;"></span>
+</div>
+<div id="reanalyze-progress-inline" class="reanalyze-progress-inline" style="display:none;">
+<div class="progress-header">
+<span id="reanalyze-progress-text">Analyse en cours...</span>
+<span id="reanalyze-progress-count">0/0</span>
+</div>
+<div class="progress-bar-bg">
+<div id="reanalyze-progress-bar" class="progress-bar-fill"></div>
+</div>
+<div id="reanalyze-status-detail" class="progress-detail"></div>
+</div>
+</div>
+<div class="card" style="margin-top:1.5rem">
+<div class="card-header">
+<h3 class="card-title">Dernières candidatures</h3>
+<button class="btn btn-ghost btn-sm" onclick="showSection('candidats', document.getElementById('nav-candidats'))">Voir tout →</button>
+</div>
+<div id="recent-table">
+<div class="empty-state"><div class="empty-icon">⏳</div><p>Chargement...</p></div>
+</div>
+</div>
+</div>
+<div id="section-candidats" style="display:none">
+<div class="page-header">
+<div>
+<h1 class="dash-title">Gestion des Candidats</h1>
+<p class="dash-subtitle">Consultez, évaluez et gérez les dossiers de candidature</p>
+</div>
+</div>
+<div class="card">
+<div class="filter-bar">
+<input class="form-control" id="f-search" placeholder="Rechercher par nom, email..." oninput="applyFilters()" style="min-width:220px;">
+<select class="form-control" id="f-poste" onchange="applyFilters()">
+<option value="">Tous les postes</option>
+</select>
+<select class="form-control" id="f-statut" onchange="applyFilters()">
+<option value="">Tous statuts</option>
+<option value="en_attente">En attente</option>
+<option value="retenu">Retenu</option>
+<option value="entretien">Entretien</option>
+<option value="rejete">Non retenu</option>
+</select>
+<button class="btn btn-primary btn-sm" onclick="fetchCandidats()">Actualiser</button>
+</div>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Candidat</th>
+<th>Poste</th>
+<th>Date</th>
+<th>Statut</th>
+<th>Score</th>
+<th>Fichiers</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody id="candidats-tbody">
+<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">Chargement...</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</main>
+</div>
+<div class="modal-overlay" id="modal-candidat">
+<div class="modal" style="max-width:820px">
+<div class="modal-header">
+<h3 id="modal-title">Dossier <span class="readonly-badge">Analyse automatique</span></h3>
+<button class="modal-close" onclick="closeModal()">×</button>
+</div>
+<div class="modal-body">
+<div id="modal-infos" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1.4rem;margin-bottom:1.1rem;font-size:.87rem"></div>
+<div id="modal-fichiers" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1.3rem"></div>
+<div id="analyse-resume" style="margin:1rem 0;padding:1rem;background:var(--bg-light);border-radius:8px;border:1px solid var(--border);display:none">
+<h4 style="margin:0 0 .5rem 0;font-size:.95rem;display:flex;align-items:center;gap:.4rem">
+Analyse automatique <span class="readonly-badge" style="font-size:.65rem;padding:.1rem .4rem">non modifiable</span>
+</h4>
+<div id="analyse-content"></div>
+</div>
+<div class="tabs">
+<button class="tab-btn active" onclick="switchTab('eval',this)">Évaluation</button>
+<button class="tab-btn" onclick="switchTab('grille',this)">Grille de présélection</button>
+</div>
+<div id="tab-eval" class="tab-content active">
+<div class="form-group" style="margin-bottom:1rem">
+<label>Score <span class="readonly-badge" style="font-size:.65rem">calculé</span></label>
+<div id="stars-row" style="display:flex;gap:0;margin-top:.3rem"></div>
+</div>
+<div class="form-group">
+<label>Notes internes <span style="color:var(--text-muted);font-weight:400;font-size:.8rem;text-transform:none;letter-spacing:0">(vos commentaires)</span></label>
+<textarea class="form-control" id="modal-note" style="min-height:90px" placeholder="Observations, points forts, réserves..."></textarea>
+</div>
+</div>
+<div id="tab-grille" class="tab-content">
+<div id="grille-content" style="padding-top:.4rem"></div>
+<p style="text-align:center;color:var(--text-muted);font-size:.73rem;margin-top:1rem;font-style:italic;border-top:1px dashed var(--border);padding-top:.8rem">
+Résultats de l'analyse automatique — critères validés uniquement si mots-clés exacts trouvés dans les documents
+</p>
+</div>
+</div>
+<div class="modal-footer">
+<button class="btn btn-success btn-sm" onclick="updateStatut('retenu')">Retenir</button>
+<button class="btn btn-warning btn-sm" onclick="updateStatut('entretien')">Entretien</button>
+<button class="btn btn-danger btn-sm" onclick="updateStatut('rejete')">Rejeter</button>
+<button class="btn btn-info btn-sm" onclick="openEmailModal()">Email</button>
+<button class="btn btn-outline btn-sm" onclick="reanalyzeOne()">Réanalyser</button>
+<button class="btn btn-ghost btn-sm" onclick="closeModal()">Fermer</button>
+</div>
+</div>
+</div>
+<div id="elimination-alert-overlay" class="elimination-overlay" style="display:none" onclick="closeEliminationAlert()"></div>
+<div id="elimination-alert" class="elimination-alert" style="display:none">
+<button class="elimination-alert-close" onclick="closeEliminationAlert()">×</button>
+<div class="elimination-alert-header">
+<div class="elimination-alert-title">Critères éliminatoires non satisfaits</div>
+</div>
+<div class="elimination-alert-message">
+Ce candidat ne possède pas les critères requis pour le poste.
+</div>
+<div class="elimination-alert-details" id="elimination-alert-details"></div>
+</div>
+<div class="modal-overlay" id="modal-email">
+<div class="modal" style="max-width:600px">
+<div class="modal-header">
+<h3>Préparer l'Email</h3>
+<button class="modal-close" onclick="document.getElementById('modal-email').classList.remove('open')">×</button>
+</div>
+<div class="modal-body">
+<div class="alert-info">
+Copiez cet email ou ouvrez-le dans votre client de messagerie.
+</div>
+<div class="form-group">
+<label>Type de message</label>
+<select class="form-control" id="email-type" onchange="buildEmail()" style="width:100%">
+<optgroup label="Postes scoring /12 (Compensation & Admin Crédit)">
+<option value="🥇 Entretien prioritaire">Entretien prioritaire (10-12/12)</option>
+<option value="🥈 Entretien si besoin (vivier de réserve)">Vivier de réserve (7-9/12)</option>
+<option value="❌ Rejet">Rejet (&lt;7/12)</option>
+</optgroup>
+<optgroup label="Postes scoring /100">
+<option value="Shortlist">Shortlist - Prioritaire</option>
+<option value="À considérer">À considérer</option>
+<option value="Faible">Faible</option>
+<option value="Rejet">Rejet</option>
+</optgroup>
+<optgroup label="Postes classiques (/10)">
+<option value="retenu">Candidature retenue</option>
+<option value="entretien">Convocation entretien</option>
+<option value="rejete">Email de refus</option>
+</optgroup>
+</select>
+</div>
+<div class="email-preview">
+<div class="ep-field"><span class="ep-label">À :</span><span id="ep-to">–</span></div>
+<div class="ep-field"><span class="ep-label">Objet :</span><span id="ep-subject">–</span></div>
+<textarea class="ep-body-area" id="ep-body"></textarea>
+</div>
+</div>
+<div class="modal-footer">
+<button class="btn btn-primary btn-sm" onclick="copyEmail()">Copier</button>
+<button class="btn btn-info btn-sm" onclick="openMailClient()">Ouvrir dans Mail</button>
+<button class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-email').classList.remove('open')">Fermer</button>
+</div>
+</div>
+</div>
+<div class="modal-reanalyze" id="modal-reanalyze">
+<div class="modal-reanalyze-content">
+<h3 id="reanalyze-modal-title">Réanalyse des candidatures</h3>
+<p id="reanalyze-modal-message">Êtes-vous sûr de vouloir relancer l'analyse des candidatures avec les règles actuelles ?</p>
+<div id="reanalyze-progress-modal" style="display:none;background:var(--bg-light);border:1px solid var(--border);border-radius:8px;padding:1rem;margin-bottom:1rem;">
+<div class="progress-header">
+<span id="reanalyze-progress-text-modal">Lancement...</span>
+<span id="reanalyze-progress-count-modal">0/0</span>
+</div>
+<div class="progress-bar-bg">
+<div id="reanalyze-progress-bar-modal" class="progress-bar-fill"></div>
+</div>
+<div id="reanalyze-status-detail-modal" class="progress-detail"></div>
+</div>
+<div style="display:flex;gap:0.5rem;justify-content:flex-end;">
+<button class="btn btn-ghost btn-sm" id="btn-cancel-reanalyze" onclick="closeReanalyzeModal()">Annuler</button>
+<button class="btn btn-warning btn-sm" id="btn-confirm-reanalyze" onclick="confirmReanalyze()">Confirmer</button>
+</div>
+</div>
+</div>
+<div id="floating-progress" class="floating-progress">
+<div class="floating-progress-header">
+<span><span class="icon">🔄</span> <span id="floating-progress-title">Réanalyse en cours...</span></span>
+<span id="floating-progress-count">0/0</span>
+</div>
+<div class="progress-bar-bg">
+<div id="floating-progress-bar" class="progress-bar-fill"></div>
+</div>
+<div id="floating-progress-detail" class="progress-detail">Préparation...</div>
+</div>
+<div class="toast-container" id="toast-container"></div>
+<script src="script.js"></script>
+<script>
+const API = 'https://backend1-fiq5.onrender.com/api';
+let jwtToken = localStorage.getItem('rh_token');
+let allCandidats = [];
+let currentC = null;
+let currentScore = 0;
+let currentReanalyzeScope = null;
+let reanalyzePollingInterval = null;
+let postesActifs = [];
+
+if (!jwtToken) { window.location.href = 'login.html'; }
+const nomRH = localStorage.getItem('rh_nom') || 'Recruteur';
+document.getElementById('nav-nom').textContent = nomRH;
+document.getElementById('sidebar-nom').textContent = nomRH;
+document.getElementById('sidebar-avatar').textContent = nomRH.charAt(0).toUpperCase();
+
+function logout() { localStorage.clear(); window.location.href = 'login.html'; }
+function authH() { return { 'Authorization': 'Bearer ' + jwtToken, 'Content-Type': 'application/json' }; }
+
+function parseJSONField(raw, fieldName, candidatId, poste) {
+if (!raw) return null;
+try {
+const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+if (fieldName === 'score_breakdown' && parsed?.bloc1_eliminatoire !== undefined) {
+const val = parsed.bloc1_eliminatoire;
+parsed.bloc1_eliminatoire = (val === true || val === "true" || val === 1 || val === "1");
+}
+return parsed;
+} catch (e) {
+console.warn(`⚠️ Échec parsing ${fieldName} pour candidat ${candidatId} (poste: ${poste}):`, e.message);
+return null;
+}
+}
+
+async function fetchPostesStatus() {
+    try {
+        const res = await fetch(API + '/postes');
+        if (res.ok) {
+            const data = await res.json();
+            postesActifs = data.postes_actifs || [];
+        }
+    } catch(e) { console.error(e); }
+}
+
+function populateExportPosteSelect(data) {
+const sel = document.getElementById('export-poste-select');
+if (!sel) return;
+const postes = [...new Set(data.map(c => c.poste).filter(p => p))].sort();
+while (sel.options.length > 1) sel.remove(1);
+postes.forEach(p => {
+const opt = document.createElement('option');
+opt.value = p;
+opt.textContent = p;
+sel.appendChild(opt);
+});
+populateDossierPosteSelect(postes);
+populateReanalyzePosteSelect(postes);
+}
+
+function populateDossierPosteSelect(postes) {
+const sel = document.getElementById('dossier-poste-select');
+if (!sel) return;
+while (sel.options.length > 1) sel.remove(1);
+postes.forEach(p => {
+const opt = document.createElement('option');
+opt.value = p;
+opt.textContent = p;
+sel.appendChild(opt);
+});
+}
+
+function populateReanalyzePosteSelect(postes) {
+const sel = document.getElementById('reanalyze-poste-select');
+if (!sel) return;
+while (sel.options.length > 1) sel.remove(1);
+
+const activePostesToRender = postes.filter(p => postesActifs.length === 0 || postesActifs.includes(p));
+activePostesToRender.forEach(p => {
+const opt = document.createElement('option');
+opt.value = p;
+opt.textContent = p;
+sel.appendChild(opt);
+});
+sel.options[0].textContent = postesActifs.length > 0 ? "Tous les postes actifs" : "Tous les postes";
+}
+
+async function exportReport(format) {
+try {
+const posteSelect = document.getElementById('export-poste-select');
+const posteValue = posteSelect ? posteSelect.value : '';
+const scope = posteValue ? `pour "${posteValue}"` : 'global';
+showToast(`Génération du rapport ${format.toUpperCase()} ${scope}...`, 'info');
+let url = `${API}/recruteur/export/${format}`;
+if (posteValue) { url += `?poste=${encodeURIComponent(posteValue)}`; }
+const response = await fetch(url, { method: 'GET', headers: authH() });
+if (!response.ok) {
+const error = await response.json();
+throw new Error(error.error || 'Erreur lors de l\'export');
+}
+const blob = await response.blob();
+const urlBlob = window.URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = urlBlob;
+const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+const extensions = { excel: 'xlsx', csv: 'csv', pdf: 'pdf', word: 'docx' };
+const posteSuffix = posteValue ? `_${posteValue.replace(/[^a-z0-9]/gi, '_')}` : '_global';
+a.download = `rapport${posteSuffix}_${timestamp}.${extensions[format] || 'xlsx'}`;
+document.body.appendChild(a);
+a.click();
+setTimeout(() => { window.URL.revokeObjectURL(urlBlob); document.body.removeChild(a); }, 100);
+showToast(`Rapport ${format.toUpperCase()} ${scope} téléchargé`, 'success');
+} catch (error) {
+console.error('Erreur export:', error);
+showToast(`Erreur: ${error.message}`, 'error');
+}
+}
+
+async function downloadAllDossiers() {
+try {
+const posteSelect = document.getElementById('dossier-poste-select');
+const dateStart = document.getElementById('dossier-date-start').value;
+const dateEnd = document.getElementById('dossier-date-end').value;
+const posteValue = posteSelect ? posteSelect.value : '';
+let url = `${API}/recruteur/dossiers/zip`;
+const params = new URLSearchParams();
+if (posteValue) params.append('poste', posteValue);
+if (dateStart) params.append('date_start', dateStart);
+if (dateEnd) params.append('date_end', dateEnd);
+if (params.toString()) url += '?' + params.toString();
+const scope = posteValue ? `pour "${posteValue}"` : 'tous les postes';
+const dateInfo = dateStart && dateEnd ? ` (${dateStart} au ${dateEnd})` : (dateStart ? ` (depuis ${dateStart})` : (dateEnd ? ` (jusqu'au ${dateEnd})` : ''));
+showToast(`Génération du ZIP ${scope}${dateInfo}...`, 'info');
+const response = await fetch(url, { method: 'GET', headers: authH() });
+if (!response.ok) {
+const error = await response.json();
+throw new Error(error.error || 'Erreur lors du téléchargement');
+}
+const blob = await response.blob();
+const urlBlob = window.URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = urlBlob;
+const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+const posteSuffix = posteValue ? `_${posteValue.replace(/[^a-z0-9]/gi, '_')}` : '_tous_postes';
+a.download = `dossiers_candidats${posteSuffix}_${timestamp}.zip`;
+document.body.appendChild(a);
+a.click();
+setTimeout(() => { window.URL.revokeObjectURL(urlBlob); document.body.removeChild(a); }, 100);
+showToast(`Dossiers candidats téléchargés`, 'success');
+} catch (error) {
+console.error('Erreur téléchargement ZIP:', error);
+showToast(`Erreur: ${error.message}`, 'error');
+}
+}
+
+function openReanalyzeModal() {
+const posteSelect = document.getElementById('reanalyze-poste-select');
+const posteValue = posteSelect ? posteSelect.value : '';
+currentReanalyzeScope = posteValue;
+const title = document.getElementById('reanalyze-modal-title');
+const message = document.getElementById('reanalyze-modal-message');
+if (posteValue) {
+title.textContent = `Réanalyser : ${posteValue}`;
+message.textContent = `Relancer l'analyse de toutes les candidatures pour le poste "${posteValue}" avec les règles actuelles ?`;
+} else {
+title.textContent = 'Réanalyser tous les dossiers actifs';
+message.textContent = "Relancer l'analyse de toutes les candidatures des postes ouverts avec les règles actuelles ? Cette opération peut prendre plusieurs minutes.";
+}
+document.getElementById('reanalyze-progress-modal').style.display = 'none';
+document.getElementById('btn-confirm-reanalyze').disabled = false;
+document.getElementById('btn-cancel-reanalyze').disabled = false;
+document.getElementById('modal-reanalyze').classList.add('open');
+}
+
+function closeReanalyzeModal() {
+document.getElementById('modal-reanalyze').classList.remove('open');
+}
+
+async function confirmReanalyze() {
+const btnConfirm = document.getElementById('btn-confirm-reanalyze');
+const btnCancel = document.getElementById('btn-cancel-reanalyze');
+btnConfirm.disabled = true;
+btnCancel.disabled = true;
+document.getElementById('reanalyze-progress-modal').style.display = 'block';
+document.getElementById('reanalyze-progress-text-modal').textContent = 'Lancement de la réanalyse...';
+document.getElementById('reanalyze-progress-inline').style.display = 'block';
+showFloatingProgress('Lancement de la réanalyse...', true);
+try {
+let url;
+if (currentReanalyzeScope) {
+url = `${API}/recruteur/reanalyze-poste/${encodeURIComponent(currentReanalyzeScope)}`;
+} else {
+url = `${API}/recruteur/reanalyze-all`;
+}
+const response = await fetch(url, { method: 'POST', headers: authH() });
+const data = await response.json();
+if (!response.ok) throw new Error(data.error || 'Erreur serveur');
+document.getElementById('reanalyze-progress-text-modal').textContent = `Réanalyse lancée : ${data.reanalyzed_count || 0} dossier(s)`;
+const statusEl = document.getElementById('reanalyze-status');
+statusEl.style.display = 'inline-block';
+statusEl.textContent = `Réanalyse en cours...`;
+showToast(`${data.message || 'Réanalyse lancée avec succès'}`, 'success');
+closeReanalyzeModal();
+startReanalyzePolling();
+} catch (error) {
+console.error('Erreur réanalyse:', error);
+document.getElementById('reanalyze-progress-text-modal').innerHTML = `<span style="color:var(--danger)">Erreur : ${error.message}</span>`;
+btnConfirm.disabled = false;
+btnCancel.disabled = false;
+hideFloatingProgress();
+showToast(`Erreur: ${error.message}`, 'error');
+}
+}
+
+function startReanalyzePolling() {
+if (reanalyzePollingInterval) clearInterval(reanalyzePollingInterval);
+checkReanalyzeStatus();
+reanalyzePollingInterval = setInterval(checkReanalyzeStatus, 3000);
+setTimeout(() => {
+if (reanalyzePollingInterval) {
+clearInterval(reanalyzePollingInterval);
+reanalyzePollingInterval = null;
+}
+}, 600000);
+}
+
+async function checkReanalyzeStatus() {
+try {
+const response = await fetch(`${API}/recruteur/reanalyze-status`, { headers: authH() });
+if (!response.ok) {
+if (response.status === 404) {
+updateFloatingProgress(-1, -1, 0, "Analyse en cours (suivi détaillé indisponible)...");
+}
+return;
+}
+const data = await response.json();
+const total = data.total_candidatures || 0;
+const counts = data.status_counts || {};
+const completed = counts.completed || 0;
+const reanalyzing = counts.reanalyzing || 0;
+const pending = counts.pending || 0;
+const errors = counts.error || 0;
+updateFloatingProgress(completed, total, errors, "");
+const statusEl = document.getElementById('reanalyze-status');
+const progressInline = document.getElementById('reanalyze-progress-inline');
+const progressBar = document.getElementById('reanalyze-progress-bar');
+const progressText = document.getElementById('reanalyze-progress-text');
+const progressCount = document.getElementById('reanalyze-progress-count');
+const progressDetail = document.getElementById('reanalyze-status-detail');
+if (reanalyzing > 0 || pending > 0) {
+const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+if(statusEl) {
+statusEl.style.display = 'inline-block';
+statusEl.textContent = `${completed}/${total} (${progress}%)`;
+}
+if(progressInline) progressInline.style.display = 'block';
+if(progressBar) progressBar.style.width = progress + '%';
+if(progressText) progressText.textContent = 'Analyse en cours...';
+if(progressCount) progressCount.textContent = `${completed}/${total}`;
+if(progressDetail) progressDetail.textContent = `Terminés : ${completed} · En cours : ${reanalyzing} · En attente : ${pending}${errors > 0 ? ` · Erreurs : ${errors}` : ''}`;
+} else if (reanalyzing === 0 && pending === 0) {
+if(statusEl) {
+statusEl.style.display = 'inline-block';
+statusEl.textContent = '✅ Analyses à jour';
+statusEl.style.background = 'rgba(22, 163, 74, 0.3)';
+}
+if(progressInline) progressInline.style.display = 'none';
+completeFloatingProgress(completed || total, errors);
+if (reanalyzePollingInterval) {
+clearInterval(reanalyzePollingInterval);
+reanalyzePollingInterval = null;
+}
+fetchCandidats();
+fetchStats();
+}
+} catch (error) {
+console.error('Erreur checkReanalyzeStatus:', error);
+}
+}
+
+function showFloatingProgress(title, isIndeterminate = false) {
+const widget = document.getElementById('floating-progress');
+if (!widget) return;
+widget.classList.add('active');
+widget.classList.remove('completed');
+document.getElementById('floating-progress-title').textContent = title || 'Réanalyse en cours...';
+document.getElementById('floating-progress-count').textContent = '';
+document.getElementById('floating-progress-detail').textContent = 'Préparation des dossiers...';
+const bar = document.getElementById('floating-progress-bar');
+if (isIndeterminate) {
+bar.classList.add('indeterminate');
+bar.style.width = '30%';
+} else {
+bar.classList.remove('indeterminate');
+bar.style.width = '0%';
+}
+}
+
+function updateFloatingProgress(completed, total, errors, customMessage) {
+const widget = document.getElementById('floating-progress');
+if (!widget) return;
+widget.classList.add('active');
+widget.classList.remove('completed');
+const bar = document.getElementById('floating-progress-bar');
+bar.classList.remove('indeterminate');
+if (total > 0) {
+const progress = Math.round((completed / total) * 100);
+bar.style.width = progress + '%';
+document.getElementById('floating-progress-count').textContent = `${completed}/${total} (${progress}%)`;
+document.getElementById('floating-progress-detail').textContent = customMessage || `Terminés : ${completed} · En cours...${errors > 0 ? ` · Erreurs : ${errors}` : ''}`;
+} else {
+bar.classList.add('indeterminate');
+document.getElementById('floating-progress-count').textContent = '';
+document.getElementById('floating-progress-detail').textContent = customMessage || 'Analyse en cours...';
+}
+}
+
+function completeFloatingProgress(completed, errors) {
+const widget = document.getElementById('floating-progress');
+if (!widget) return;
+widget.classList.add('completed');
+document.getElementById('floating-progress-title').textContent = '✅ Réanalyse terminée';
+document.getElementById('floating-progress-count').textContent = `${completed} dossier(s)`;
+document.getElementById('floating-progress-detail').textContent = errors > 0 ? `Terminé avec ${errors} erreur(s)` : 'Tous les dossiers ont été mis à jour.';
+const bar = document.getElementById('floating-progress-bar');
+bar.classList.remove('indeterminate');
+bar.style.width = '100%';
+showToast('Réanalyse terminée avec succès !', 'success');
+setTimeout(() => {
+widget.classList.remove('active');
+}, 8000);
+}
+
+function hideFloatingProgress() {
+const widget = document.getElementById('floating-progress');
+if (widget) widget.classList.remove('active');
+}
+
+async function reanalyzeOne() {
+if (!currentC) { showToast('Aucun candidat sélectionné', 'error'); return; }
+if (!confirm('Relancer l\'analyse de cette candidature avec les règles actuelles ?')) return;
+try {
+const res = await fetch(`${API}/recruteur/candidats/${currentC.id}/analyze`, { method: 'POST', headers: authH() });
+if (res.ok) {
+showToast('Analyse relancée. Résultats disponibles dans quelques instants.', 'success');
+setTimeout(() => {
+fetchCandidats();
+if (currentC) {
+const updated = allCandidats.find(x => x.id === currentC.id);
+if (updated) {
+currentC = updated;
+renderAnalyseResume(updated);
+renderGrille(updated.poste, updated.checklist || '', updated.score_breakdown_parsed);
+}
+}
+}, 3000);
+} else {
+const data = await res.json().catch(() => ({}));
+showToast(data.error || 'Erreur serveur', 'error');
+}
+} catch (e) {
+showToast('Erreur: ' + e.message, 'error');
+}
+}
+
+function showSection(name, el) {
+document.getElementById('section-overview').style.display = name === 'overview' ? 'block' : 'none';
+document.getElementById('section-candidats').style.display = name === 'candidats' ? 'block' : 'none';
+document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.remove('active'));
+if (el) el.classList.add('active');
+if (name === 'candidats') renderTable(allCandidats);
+}
+
+function switchTab(name, btn) {
+document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+btn.classList.add('active');
+document.getElementById('tab-' + name).classList.add('active');
+}
+
+function refreshAll() { fetchStats(); fetchCandidats(); checkReanalyzeStatus(); }
+
+async function fetchStats() {
+try {
+const res = await fetch(API + '/recruteur/stats', { headers: authH() });
+if (res.status === 401) { logout(); return; }
+if (!res.ok) { console.error('Stats HTTP', res.status); return; }
+const d = await res.json();
+document.getElementById('s-total').textContent = d.total;
+document.getElementById('s-attente').textContent = d.en_attente;
+document.getElementById('s-retenu').textContent = d.retenu;
+document.getElementById('s-rejete').textContent = d.rejete;
+document.getElementById('s-entretien').textContent = d.entretien;
+document.getElementById('donut-total').textContent = d.total;
+renderDonut(d);
+renderBarChart(d.by_poste || []);
+} catch (e) { console.error('fetchStats:', e); }
+}
+
+function renderDonut(d) {
+const total = d.total || 1;
+const segs = [
+{ id: 'arc-attente', val: d.en_attente },
+{ id: 'arc-retenu', val: d.retenu },
+{ id: 'arc-entretien', val: d.entretien },
+{ id: 'arc-rejete', val: d.rejete }
+];
+const circ = 100;
+let offset = 25;
+segs.forEach(s => {
+const pct = (s.val / total) * circ;
+const el = document.getElementById(s.id);
+el.setAttribute('stroke-dasharray', pct + ' ' + (circ - pct));
+el.setAttribute('stroke-dashoffset', String(-(offset - 25)));
+offset += pct;
+});
+}
+
+function renderBarChart(byPoste) {
+const el = document.getElementById('bar-chart');
+if (!byPoste.length) {
+el.innerHTML = '<div class="empty-state"><p>Aucune donnée</p></div>';
+return;
+}
+const max = Math.max(...byPoste.map(p => p.n), 1);
+el.innerHTML = byPoste.map(p => {
+const lbl = p.poste.split(' ').slice(0, 3).join(' ');
+const pct = Math.round((p.n / max) * 100);
+return '<div class="bar-row">'
++ '<div class="bar-label" title="' + p.poste + '">' + lbl + '</div>'
++ '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>'
++ '<div class="bar-val">' + p.n + '</div>'
++ '</div>';
+}).join('');
+}
+
+async function fetchCandidats() {
+try {
+const res = await fetch(API + '/recruteur/candidats', { headers: authH() });
+if (res.status === 401) { logout(); return; }
+if (!res.ok) { showToast('Erreur chargement candidats', 'error'); return; }
+allCandidats = await res.json();
+allCandidats.forEach(c => {
+const id = c.id || 'inconnu';
+const poste = c.poste || 'inconnu';
+if (c.score_breakdown && !c.score_breakdown_parsed) {
+c.score_breakdown_parsed = parseJSONField(c.score_breakdown, 'score_breakdown', id, poste);
+}
+if (c.flags_eliminatoires && !c.flags_eliminatoires_parsed) {
+c.flags_eliminatoires_parsed = parseJSONField(c.flags_eliminatoires, 'flags_eliminatoires', id, poste);
+}
+if (c.signaux_detectes && !c.signaux_detectes_parsed) {
+c.signaux_detectes_parsed = parseJSONField(c.signaux_detectes, 'signaux_detectes', id, poste);
+}
+if (c.analyse_details && !c.analyse_details_parsed) {
+c.analyse_details_parsed = parseJSONField(c.analyse_details, 'analyse_details', id, poste);
+}
+// ✅ CORRECTION : Récupération des champs imbriqués pour Chef de Division Local Corporate
+if (c.analyse_details_parsed) {
+    // Si les champs sont dans un sous-objet 'details' (cas du backend)
+    if (c.analyse_details_parsed.details) {
+        if (c.analyse_details_parsed.details.points_forts) {
+            c.analyse_details_parsed.points_forts = c.analyse_details_parsed.details.points_forts;
+        }
+        if (c.analyse_details_parsed.details.points_vigilance) {
+            c.analyse_details_parsed.points_vigilance = c.analyse_details_parsed.details.points_vigilance;
+        }
+        if (c.analyse_details_parsed.details.synthese_recruteur) {
+            c.analyse_details_parsed.synthese_recruteur = c.analyse_details_parsed.details.synthese_recruteur;
+        }
+    }
+    // Si les champs sont directement dans analyse_details_parsed
+    if (c.analyse_details_parsed.points_forts) {
+        // Déjà bien structuré
+    }
+}
+if (c.score_breakdown_parsed?.bloc1_eliminatoire !== undefined) {
+const val = c.score_breakdown_parsed.bloc1_eliminatoire;
+c.score_breakdown_parsed.bloc1_eliminatoire = (val === true || val === "true" || val === 1 || val === "1");
+}
+});
+populatePosteFilter(allCandidats);
+populateExportPosteSelect(allCandidats);
+renderTable(allCandidats);
+renderRecent(allCandidats);
+} catch (e) { console.error('fetchCandidats:', e); showToast('Erreur connexion serveur', 'error'); }
+}
+
+function populatePosteFilter(data) {
+const sel = document.getElementById('f-poste');
+const postes = [...new Set(data.map(c => c.poste))].sort();
+while (sel.options.length > 1) sel.remove(1);
+postes.forEach(p => {
+const opt = document.createElement('option');
+opt.value = p; opt.textContent = p; sel.appendChild(opt);
+});
+}
+
+function applyFilters() {
+const search = document.getElementById('f-search').value.toLowerCase().trim();
+const poste = document.getElementById('f-poste').value;
+const statut = document.getElementById('f-statut').value;
+const result = allCandidats.filter(c => {
+const hay = (c.nom + ' ' + c.prenom + ' ' + c.email).toLowerCase();
+return (!search || hay.includes(search))
+&& (!poste || c.poste === poste)
+&& (!statut || c.statut === statut);
+});
+renderTable(result);
+}
+
+const NOUVEAUX_POSTES_100PTS = [
+    "Auditeur interne",
+    "Chef service contrôle des engagements",
+    "Chef service IT (maintenance/support)",
+    "Chef service finance",
+    "Chef service risques de marché",
+    "Chef service reporting réglementaire"
+];
+const POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"];
+const POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate"];
+
+function getScoreMax(poste) {
+    if (!poste) return 10;
+    if (POSTES_AVEC_SCORING_12.includes(poste)) return 12;
+    if (POSTES_AVEC_SCORING_14.includes(poste)) return 14;
+    if (NOUVEAUX_POSTES_100PTS.includes(poste)) return 100;
+    return 10;
+}
+
+function getDecisionFromScore(score, poste) {
+    const s = parseInt(score) || 0;
+    if (poste && POSTES_AVEC_SCORING_12.includes(poste)) {
+        if (s >= 10) return "Entretien prioritaire";
+        if (s >= 7) return "Entretien si besoin (vivier de réserve)";
+        return "Rejet";
+    }
+    if (poste && POSTES_AVEC_SCORING_14.includes(poste)) {
+        if (s >= 11) return "Entretien prioritaire";
+        if (s >= 7) return "Potentiel à évaluer en entretien";
+        return "Rejet";
+    }
+    if (poste && NOUVEAUX_POSTES_100PTS.includes(poste)) {
+        if (s >= 80) return "Shortlist";
+        if (s >= 70) return "À considérer";
+        if (s >= 60) return "Faible";
+        return "Rejet";
+    }
+    if (s >= 8) return "Entretien prioritaire";
+    if (s >= 6) return "Entretien si besoin";
+    return "Rejet";
+}
+
+const LABELS_12 = {
+    "Chef de Section Compensation": {
+        "Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": "Adéquation expérience",
+        "Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": "Exposition BEAC/GIMAC",
+        "Capacité d'encadrement et de management d'équipe opérationnelle": "Encadrement équipe",
+        "Cohérence et progression du parcours professionnel": "Cohérence parcours",
+        "Qualité et clarté du CV (missions précises, livrables, résultats)": "Qualité CV",
+        "Lettre de motivation": "Lettre motivation"
+    },
+    "Chargé(e) d'Administration de Crédit": {
+        "Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": "Adéquation expérience",
+        "Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": "IFRS 9 / Portefeuille",
+        "Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)": "Rigueur & Outils",
+        "Cohérence et progression du parcours professionnel": "Cohérence parcours",
+        "Qualité et clarté du CV (missions précises, livrables, résultats)": "Qualité CV",
+        "Lettre de motivation": "Lettre motivation"
+    }
+};
+
+const LABELS_14 = {
+    "Chef de Division Local Corporate": {
+        "Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints": "Expérience Corporate/Portefeuille",
+        "Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L": "Management/Encadrement",
+        "Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions": "Risque crédit (NPL, CIR)",
+        "Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance": "Cross-selling/TSG",
+        "Cohérence et progression du parcours professionnel avec séniorité et responsabilités croissantes": "Progression/cohérence parcours",
+        "Qualité du CV avec résultats chiffrés et précision des missions, ainsi que qualité de la lettre de motivation": "Qualité CV + lettre",
+        "Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": "Certifications/CEMAC"
+    }
+};
+
+function renderTable(data) {
+const tbody = document.getElementById('candidats-tbody');
+if (!data.length) {
+tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">Aucun candidat trouvé</td></tr>';
+return;
+}
+tbody.innerHTML = data.map(c => {
+const cvLink = c.cv_filename
+? '<a href="' + API + '/recruteur/uploads/' + c.cv_filename + '" target="_blank" class="btn btn-outline btn-sm">CV</a>'
+: '<span style="color:var(--text-muted);font-size:.78rem">–</span>';
+const lmLink = c.lettre_filename
+? '<a href="' + API + '/recruteur/uploads/' + c.lettre_filename + '" target="_blank" class="btn btn-outline btn-sm">LM</a>'
+: '';
+const attLink = c.attestation_filename
+? '<a href="' + API + '/recruteur/uploads/' + c.attestation_filename + '" target="_blank" class="btn btn-outline btn-sm">Certif</a>'
+: '';
+const scoreMax = getScoreMax(c.poste);
+const scoreRaw = parseInt(c.score) || 0;
+const score = Math.max(0, Math.min(scoreMax, scoreRaw));
+const starUnit = scoreMax / 5;
+const stars = '★'.repeat(Math.floor(score / starUnit)) + '☆'.repeat(5 - Math.floor(score / starUnit));
+let scoreTitle = `Score: ${score}/${scoreMax} (analyse automatique)`;
+if (c.score_breakdown_parsed) {
+const sb = c.score_breakdown_parsed;
+scoreTitle += `\nÉliminatoire: ${sb.bloc1_eliminatoire ? 'OUI' : 'NON'}`;
+if (POSTES_AVEC_SCORING_12.includes(c.poste)) {
+const sousScores = sb.sous_scores || {};
+const currentLabels = LABELS_12[c.poste] || {};
+Object.entries(sousScores).forEach(([k, v]) => {
+const label = currentLabels[k] || k;
+scoreTitle += `\n${label}: ${v}`;
+});
+} else if (POSTES_AVEC_SCORING_14.includes(c.poste)) {
+const sousScores = sb.sous_scores || {};
+const currentLabels = LABELS_14[c.poste] || {};
+Object.entries(sousScores).forEach(([k, v]) => {
+const label = currentLabels[k] || k;
+scoreTitle += `\n${label}: ${v}`;
+});
+} else if (sb.scoring_type === '100_points') {
+scoreTitle += `\nCV: ${sb.bloc_cv?.total || 0}/70`;
+scoreTitle += `\nLM: ${sb.bloc_lm?.total || 0}/20`;
+scoreTitle += `\nDiplôme: ${sb.bloc_diplomes?.total || 0}/10`;
+} else {
+scoreTitle += `\nCohérence: ${sb.bloc2_points || 0} pts`;
+scoreTitle += `\nSignaux: ${sb.bloc3_points || 0} pts`;
+scoreTitle += `\nTotal: ${sb.score_final || 0}/10`;
+}
+if (sb.note) scoreTitle += `\n${sb.note}`;
+}
+return '<tr>'
++ '<td><strong>' + c.prenom + ' ' + c.nom + '</strong>'
++ '<br><span class="td-small">' + c.email + '</span>'
++ (c.telephone ? '<br><span class="td-small">' + c.telephone + '</span>' : '')
++ '</td>'
++ '<td style="font-size:.82rem">' + c.poste + '</td>'
++ '<td style="font-size:.8rem;color:var(--text-muted)">' + fmtDate(c.date_candidature) + '</td>'
++ '<td>' + badgePill(c.statut || c.score_breakdown_parsed?.decision || '') + '</td>'
++ '<td style="font-size:.85rem;letter-spacing:-1px;font-family:monospace" title="' + escAttr(scoreTitle) + '">' + stars + ` <span style="color:var(--text-secondary);font-family:inherit">(${score}/${scoreMax})</span>` + '</td>'
++ '<td style="display:flex;gap:0.25rem;flex-wrap:wrap">' + cvLink + lmLink + attLink + '</td>'
++ '<td class="td-actions">'
++ '<button class="btn btn-primary btn-sm" onclick="openModal(\'' + c.id + '\')">Dossier</button>'
++ '<button class="btn btn-info btn-sm" onclick="quickEmail(\'' + c.id + '\')">Email</button>'
++ '<button class="btn btn-outline btn-sm" onclick="quickReanalyze(\'' + c.id + '\')" title="Réanalyser">↻</button>'
++ '</td></tr>';
+}).join('');
+}
+
+function renderRecent(data) {
+const container = document.getElementById('recent-table');
+const slice = data.slice(0, 8);
+if (!slice.length) {
+container.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><p>Aucune candidature.</p></div>';
+return;
+}
+const rows = slice.map(c => {
+const scoreMax = getScoreMax(c.poste);
+const scoreRaw = parseInt(c.score) || 0;
+const score = Math.max(0, Math.min(scoreMax, scoreRaw));
+const starUnit = scoreMax / 5;
+const stars = '★'.repeat(Math.floor(score / starUnit)) + '☆'.repeat(5 - Math.floor(score / starUnit));
+return '<tr>'
++ '<td><strong>' + c.prenom + ' ' + c.nom + '</strong><br>'
++ '<small style="color:var(--text-muted)">' + c.email + '</small></td>'
++ '<td style="font-size:.82rem">' + c.poste + '</td>'
++ '<td style="font-size:.8rem;color:var(--text-muted)">' + fmtDate(c.date_candidature) + '</td>'
++ '<td>' + badgePill(c.statut || c.score_breakdown_parsed?.decision || '') + '</td>'
++ '<td style="font-size:.9rem;font-family:monospace">' + stars + ` <span style="color:var(--text-secondary);font-family:inherit">(${score}/${scoreMax})</span>` + '</td>'
++ '<td><button class="btn btn-primary btn-sm" onclick="openModal(\'' + c.id + '\')">Voir →</button></td>'
++ '</tr>';
+}).join('');
+container.innerHTML =
+'<div class="table-wrap"><table>'
++ '<thead><tr><th>Candidat</th><th>Poste</th><th>Date</th><th>Statut</th><th>Score</th><th></th></tr></thead>'
++ '<tbody>' + rows + '</tbody></table></div>';
+}
+
+function openModal(id) {
+const c = allCandidats.find(x => x.id === id);
+if (!c) { showToast('Actualisez la liste d\'abord', 'error'); return; }
+currentC = c;
+currentScore = parseInt(c.score) || 0;
+document.getElementById('modal-title').innerHTML = c.prenom + ' ' + c.nom + ' <span class="readonly-badge">Analyse automatique</span>';
+document.getElementById('modal-infos').innerHTML =
+info('Email', c.email) +
+info('Téléphone', c.telephone || '–') +
+info('Poste', '<strong style="color:var(--primary)">' + c.poste + '</strong>', true) +
+info('Statut actuel', badgePill(c.statut || c.score_breakdown_parsed?.decision || ''), true) +
+info('Date candidature', fmtDateLong(c.date_candidature));
+const files = [];
+if (c.cv_filename) files.push('<a href="' + API + '/recruteur/uploads/' + c.cv_filename + '" target="_blank" class="btn btn-primary btn-sm">CV</a>');
+else files.push('<span style="color:var(--text-muted);font-size:.83rem">CV non fourni</span>');
+if (c.lettre_filename) files.push('<a href="' + API + '/recruteur/uploads/' + c.lettre_filename + '" target="_blank" class="btn btn-primary btn-sm">Lettre</a>');
+if (c.attestation_filename) files.push('<a href="' + API + '/recruteur/uploads/' + c.attestation_filename + '" target="_blank" class="btn btn-primary btn-sm">Certificats</a>');
+document.getElementById('modal-fichiers').innerHTML = files.join(' ');
+renderAnalyseResume(c);
+renderStars(currentScore, true);
+document.getElementById('modal-note').value = c.note || '';
+renderGrille(c.poste, c.checklist || '', c.score_breakdown_parsed);
+document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+document.querySelector('.tab-btn').classList.add('active');
+document.getElementById('tab-eval').classList.add('active');
+document.getElementById('modal-candidat').classList.add('open');
+}
+
+function renderAnalyseResume(c) {
+const container = document.getElementById('analyse-resume');
+const content = document.getElementById('analyse-content');
+if (!c.score_breakdown_parsed) { container.style.display = 'none'; return; }
+container.style.display = 'block';
+const sb = c.score_breakdown_parsed;
+const details = c.analyse_details_parsed || {};
+const scoreMax = getScoreMax(c.poste);
+let html = '';
+
+// ✅ CORRECTION : Gestion spécifique pour Chef de Division Local Corporate
+if (POSTES_AVEC_SCORING_14.includes(c.poste)) {
+    
+    // ✅ Récupération des sous-scores
+    const sousScores = sb.sous_scores || details.sous_scores || {};
+    
+    // ✅ Récupération des champs depuis details (structure du backend)
+    let pointsForts = details.points_forts || [];
+    let pointsVigilance = details.points_vigilance || [];
+    let synthese = details.synthese_recruteur || '';
+    
+    // ✅ FALLBACK : Si les champs sont dans un sous-objet 'details'
+    if (details.details) {
+        if (details.details.points_forts) pointsForts = details.details.points_forts;
+        if (details.details.points_vigilance) pointsVigilance = details.details.points_vigilance;
+        if (details.details.synthese_recruteur) synthese = details.details.synthese_recruteur;
+    }
+    
+    // ✅ FALLBACK : Si les champs sont dans score_breakdown
+    if (!pointsForts.length && sb.points_forts) pointsForts = sb.points_forts;
+    if (!pointsVigilance.length && sb.points_vigilance) pointsVigilance = sb.points_vigilance;
+    if (!synthese && sb.synthese_recruteur) synthese = sb.synthese_recruteur;
+
+    // ✅ LOG DE DÉBOGAGE
+    console.log(`🔍 Données Chef Division pour ${c.prenom} ${c.nom}:`, {
+        sousScores: sousScores,
+        pointsForts: pointsForts,
+        pointsVigilance: pointsVigilance,
+        synthese: synthese
+    });
+
+    const scoreFinal = sb.bloc1_eliminatoire ? 0 : (sb.score_final || 0);
+    const decision = sb.bloc1_eliminatoire ? '❌ Rejet (éliminatoire)' : (sb.decision || getDecisionFromScore(scoreFinal, c.poste));
+    
+    const decisionColor = {
+        '🥇 Entretien prioritaire': '#166534',
+        '🥈 Potentiel à évaluer en entretien': '#3B6D11',
+        '🥈 Entretien si besoin (vivier de réserve)': '#3B6D11',
+        '❌ Rejet': '#991b1b',
+        '❌ Rejet (éliminatoire)': '#991b1b'
+    }[decision] || '#1a2433';
+    
+    // Affichage du score
+    html += `<div style="text-align:center;margin-bottom:.8rem">
+        <span style="font-size:1.6rem;font-weight:800;color:${decisionColor}">${scoreFinal}/14</span>
+        <span style="margin-left:.6rem;font-size:.9rem;font-weight:700;color:${decisionColor};background:${decisionColor}18;padding:.2rem .6rem;border-radius:4px">${decision}</span>
+    </div>`;
+    
+    // Affichage des sous-scores
+    html += '<div class="score-breakdown">';
+    
+    const currentLabels = LABELS_14[c.poste] || LABELS_14["Chef de Division Local Corporate"];
+    const max14 = {
+        "Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints": 3,
+        "Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L": 3,
+        "Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions": 2,
+        "Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance": 2,
+        "Cohérence et progression du parcours professionnel avec séniorité et responsabilités croissantes": 2,
+        "Qualité du CV avec résultats chiffrés et précision des missions, ainsi que qualité de la lettre de motivation": 1,
+        "Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": 1
+    };
+    
+    Object.entries(currentLabels).forEach(([key, label]) => {
+        const val = sb.bloc1_eliminatoire ? 0 : (sousScores[key] || 0);
+        const max = max14[key] || 0;
+        html += `<div class="sb-row">
+            <span class="sb-label">${label}</span>
+            <span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}">${val} / ${max}</span>
+        </div>`;
+    });
+    
+    html += `<div class="sb-row">
+        <span class="sb-label">Score total</span>
+        <span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}" style="color:${decisionColor}">${scoreFinal} / 14</span>
+    </div>`;
+    html += '</div>';
+    
+    // ✅ Affichage de la synthèse
+    if (synthese) {
+        html += `<div class="bloc-alert signal" style="margin-top:.8rem">
+            <strong>📝 Synthèse du recruteur</strong>
+            <div style="margin-top:.4rem;font-style:italic">${escHtml(synthese)}</div>
+        </div>`;
+    }
+    
+    // ✅ Affichage des points forts
+    if (pointsForts && pointsForts.length) {
+        html += '<div class="bloc-alert signal"><strong>✅ Points forts</strong><div style="margin-top:.4rem">'
+            + pointsForts.map(p => '• ' + escHtml(p)).join('<br>') + '</div></div>';
+    }
+    
+    // ✅ Affichage des points de vigilance
+    if (pointsVigilance && pointsVigilance.length) {
+        html += '<div class="bloc-alert attn"><strong>⚠️ Points de vigilance</strong><div style="margin-top:.4rem">'
+            + pointsVigilance.map(p => '• ' + escHtml(p)).join('<br>') + '</div></div>';
+    }
+    
+    // ✅ Affichage des critères éliminatoires
+    if (sb.bloc1_eliminatoire) {
+        html += '<div class="bloc-alert elim"><strong>⛔ Critères éliminatoires non satisfaits</strong>';
+        const flags = c.flags_eliminatoires_parsed || [];
+        if (flags.length) {
+            html += '<div style="margin-top:.4rem">';
+            flags.forEach(f => html += '• ' + escHtml(f) + '<br>');
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    
+    content.innerHTML = html;
+    return;
+}
+
+// Gestion pour POSTES_AVEC_SCORING_12
+if (POSTES_AVEC_SCORING_12.includes(c.poste)) {
+const sousScores = sb.sous_scores || {};
+const scoreFinal = sb.bloc1_eliminatoire ? 0 : (sb.score_final || 0);
+const decision = sb.bloc1_eliminatoire ? '❌ Rejet (éliminatoire)' : (sb.decision || getDecisionFromScore(scoreFinal, c.poste));
+const decisionColor = {
+'🥇 Entretien prioritaire': '#166534',
+'🥈 Entretien si besoin (vivier de réserve)': '#3B6D11',
+'❌ Rejet': '#991b1b',
+'❌ Rejet (éliminatoire)': '#991b1b'
+}[decision] || '#1a2433';
+html += `<div style="text-align:center;margin-bottom:.8rem">
+<span style="font-size:1.6rem;font-weight:800;color:${decisionColor}">${scoreFinal}/12</span>
+<span style="margin-left:.6rem;font-size:.9rem;font-weight:700;color:${decisionColor};background:${decisionColor}18;padding:.2rem .6rem;border-radius:4px">${decision}</span>
+</div>`;
+html += '<div class="score-breakdown">';
+
+const currentLabels = LABELS_12[c.poste] || LABELS_12["Chef de Section Compensation"];
+const max12 = {
+"Adéquation de l'expérience (compensation interbancaire, back-office bancaire)": 3,
+"Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)": 3,
+"Capacité d'encadrement et de management d'équipe opérationnelle": 2,
+"Cohérence et progression du parcours professionnel": 2,
+"Qualité et clarté du CV (missions précises, livrables, résultats)": 1,
+"Lettre de motivation": 1,
+"Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)": 3,
+"Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit": 3,
+"Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)": 2
+};
+
+Object.entries(currentLabels).forEach(([key, label]) => {
+const val = sb.bloc1_eliminatoire ? 0 : (sousScores[key] || 0);
+const max = max12[key] || 0;
+html += `<div class="sb-row"><span class="sb-label">${label}</span><span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}">${val} / ${max}</span></div>`;
+});
+html += `<div class="sb-row"><span class="sb-label">Score total</span><span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}" style="color:${decisionColor}">${scoreFinal} / 12</span></div>`;
+html += '</div>';
+content.innerHTML = html;
+return;
+}
+
+// Gestion pour POSTES_AVEC_SCORING_100
+if (sb.scoring_type === '100_points') {
+const blocCV = sb.bloc_cv || {};
+const blocLM = sb.bloc_lm || {};
+const blocD = sb.bloc_diplomes || {};
+const decisionColor = {
+'Shortlist': '#166534',
+'À considérer': '#3B6D11',
+'Faible': '#92400e',
+'Rejet': '#991b1b'
+}[sb.decision] || '#1a2433';
+html += `<div style="text-align:center;margin-bottom:.8rem">
+<span style="font-size:1.6rem;font-weight:800;color:${decisionColor}">${sb.score_final}/100</span>
+<span style="margin-left:.6rem;font-size:.9rem;font-weight:700;color:${decisionColor};background:${decisionColor}18;padding:.2rem .6rem;border-radius:4px">${sb.decision}</span>
+</div>`;
+html += '<div class="score-breakdown">'
++ `<div class="sb-row"><span class="sb-label">Bloc CV (Expérience, Technique, Secteur…)</span><span class="sb-val ok">${blocCV.total || 0} / 70</span></div>`
++ `<div class="sb-row"><span class="sb-label">Lettre de motivation</span><span class="sb-val ok">${blocLM.total || 0} / 20</span></div>`
++ `<div class="sb-row"><span class="sb-label">Diplômes &amp; certifications</span><span class="sb-val ok">${blocD.total || 0} / 10</span></div>`
++ `<div class="sb-row"><span class="sb-label">Score total</span><span class="sb-val ok" style="color:${decisionColor}">${sb.score_final} / 100</span></div>`
++ '</div>';
+if (blocCV.details) {
+const labels = {
+CV_Exp: 'Expérience pertinente',
+CV_Niveau: 'Niveau / Séniorité',
+CV_Secteur: 'Secteur bancaire',
+CV_Tech: 'Compétences techniques',
+CV_Progression: 'Évolution de carrière',
+CV_Management: 'Management',
+CV_Stabilite: 'Stabilité du parcours'
+};
+html += '<div style="margin:.8rem 0 .3rem;font-size:.78rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px">Détail Bloc CV</div>';
+html += '<div class="score-breakdown">';
+Object.entries(blocCV.details).forEach(([k, v]) => {
+html += `<div class="sb-row"><span class="sb-label">${labels[k] || k}</span><span class="sb-val">${v}</span></div>`;
+});
+html += '</div>';
+}
+const signaux = c.signaux_detectes_parsed || [];
+if (signaux.length) {
+html += '<div class="bloc-alert signal"><strong>Signaux forts détectés</strong><div style="margin-top:.4rem">'
++ signaux.map(s => '• ' + escHtml(s)).join('<br>') + '</div></div>';
+}
+if (details.alertes_attention && details.alertes_attention.length) {
+html += '<div class="bloc-alert attn"><strong>Points d\'attention</strong><div style="margin-top:.4rem">'
++ details.alertes_attention.map(a => '• ' + escHtml(a.replace('⚠️ Attention: ', ''))).join('<br>')
++ '</div></div>';
+}
+content.innerHTML = html;
+return;
+}
+
+// Gestion pour les autres postes (scoring /10)
+if (sb.bloc1_eliminatoire) {
+html += '<div class="bloc-alert elim"><strong>Éliminatoire</strong>';
+const flags = c.flags_eliminatoires_parsed || [];
+if (flags.length) {
+html += '<div style="margin-top:.4rem">';
+flags.forEach(f => html += '• ' + escHtml(f) + '<br>');
+html += '</div>';
+}
+html += '</div>';
+}
+if (sb.bloc2_criteres_valides > 0) {
+html += '<div class="bloc-alert signal"><strong>Cohérence du parcours</strong> — '
++ sb.bloc2_points + ' point' + (sb.bloc2_points > 1 ? 's' : '');
+if (details.criteres_valides_bloc2 && details.criteres_valides_bloc2.length) {
+html += '<div style="margin-top:.4rem">';
+details.criteres_valides_bloc2.forEach(item => html += '• ' + escHtml(item.replace('🟠 ', '')) + '<br>');
+html += '</div>';
+}
+html += '</div>';
+}
+if (sb.bloc3_signaux_detectes > 0) {
+html += '<div class="bloc-alert signal"><strong>Signaux de qualité</strong> — '
++ sb.bloc3_points + ' points';
+const signaux = c.signaux_detectes_parsed || [];
+if (signaux.length) {
+html += '<div style="margin-top:.4rem">';
+signaux.forEach(s => html += '• ' + escHtml(s) + '<br>');
+html += '</div>';
+}
+html += '</div>';
+}
+if (details.alertes_attention && details.alertes_attention.length) {
+html += '<div class="bloc-alert attn"><strong>Points d\'attention</strong><div style="margin-top:.4rem">'
++ details.alertes_attention.map(a => '• ' + escHtml(a.replace('⚠️ ', ''))).join('<br>')
++ '</div></div>';
+}
+html += '<div class="score-breakdown">'
++ `<div class="sb-row"><span class="sb-label">Points cohérence</span><span class="sb-val">${sb.bloc2_points}</span></div>`
++ `<div class="sb-row"><span class="sb-label">Points signaux</span><span class="sb-val">${sb.bloc3_points}</span></div>`
++ `<div class="sb-row"><span class="sb-label">Total brut</span><span class="sb-val">${sb.total_raw_points}</span></div>`
++ `<div class="sb-row"><span class="sb-label">Score final</span><span class="sb-val ${sb.bloc1_eliminatoire ? 'elim' : 'ok'}">${sb.score_final}/${scoreMax}</span></div>`
++ '</div>';
+content.innerHTML = html || '<p style="color:var(--text-muted);font-style:italic">Aucun détail disponible.</p>';
+}
+
+function info(label, val, raw) {
+return '<div>'
++ '<div style="font-size:.73rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px">' + label + '</div>'
++ '<div>' + (raw ? val : escHtml(String(val))) + '</div>'
++ '</div>';
+}
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s) { return String(s).replace(/"/g,'&quot;').replace(/\n/g,'\n'); }
+
+function closeModal() {
+document.getElementById('modal-candidat').classList.remove('open');
+currentC = null;
+}
+
+function renderStars(n, readonly = true) {
+const row = document.getElementById('stars-row');
+row.innerHTML = '';
+const poste = currentC?.poste || '';
+const scoreMax = getScoreMax(poste);
+const scoreRaw = parseInt(n) || 0;
+const score = Math.max(0, Math.min(scoreMax, scoreRaw));
+const starUnit = scoreMax / 5;
+const starCount = Math.floor(score / starUnit);
+for (let i = 1; i <= 5; i++) {
+const btn = document.createElement('button');
+btn.className = 'star-btn';
+btn.textContent = i <= starCount ? '★' : '☆';
+btn.disabled = true;
+btn.title = `Score: ${score}/${scoreMax} (calculé automatiquement)`;
+row.appendChild(btn);
+}
+const scoreText = document.createElement('span');
+scoreText.style.cssText = 'margin-left:1rem;font-weight:700;color:var(--primary);font-size:1.1rem';
+scoreText.textContent = `${score}/${scoreMax}`;
+row.appendChild(scoreText);
+}
+
+const GRILLE = {
+"Responsable Administration de Crédit": {
+eliminatoire: ["Expérience bancaire", "3 ans ou plus en crédit / risque", "Exposition aux garanties ou conformité"],
+a_verifier: ["A-t-il déjà validé des dossiers ?", "A-t-il déjà géré des garanties ?", "A-t-il déjà participé à des audits ?"],
+signaux_forts: ["Mention de : IFRS 9", "Mention de : COBAC / conformité", "Mention de : suivi portefeuille / impayés"],
+points_attention: ["Parcours trop \"comptable pur\"", "Rôle uniquement administratif sans responsabilité", "CV flou (missions génériques)"]
+},
+"Analyste Crédit CCB": {
+eliminatoire: ["Expérience en analyse crédit", "Capacité à lire des états financiers", "3 ans expérience institution financière"],
+a_verifier: ["Type de clients : PME ?", "Type de clients : particuliers ?", "A-t-il déjà structuré un crédit ?", "A-t-il déjà donné un avis ?"],
+signaux_forts: ["Mention de : cash-flow analysis", "Mention de : montage de crédit", "Mention de : comités de crédit"],
+points_attention: ["CV trop \"relation client\"", "Aucune notion de risque", "Expériences très courtes sans progression"]
+},
+"Archiviste (Administration Crédit)": {
+eliminatoire: ["Expérience en gestion documentaire structurée", "Rigueur démontrée"],
+a_verifier: ["Expérience avec : archivage physique + électronique", "Expérience avec : gestion des dossiers sensibles"],
+signaux_forts: ["Expérience en banque / juridique", "Manipulation de garanties ou contrats"],
+points_attention: ["Profils trop généralistes (assistants administratifs sans spécialisation)", "CV désorganisé"]
+},
+"Senior Finance Officer": {
+eliminatoire: ["Expérience en reporting financier structuré", "Exposition aux états financiers", "Interaction avec auditeurs", "3 ans expérience département finance"],
+a_verifier: ["A-t-il déjà produit : états financiers ?", "A-t-il déjà produit : reporting groupe ?", "Connaît-il : IFRS ?", "Connaît-il : contraintes réglementaires ?"],
+signaux_forts: ["Mention de : IFRS / consolidation", "Mention de : reporting groupe", "Mention de : interaction avec CAC", "Mention de : outils type SPECTRA / CERBER / ERP"],
+points_attention: ["Profil \"comptable junior amélioré\"", "Pas de responsabilité réelle", "CV flou sur les livrables"]
+},
+"Market Risk Officer": {
+eliminatoire: ["Base en risques de marché", "Exposition à FX / taux / liquidité", "3 ans expérience institution financière"],
+a_verifier: ["Maîtrise de : VaR / stress testing", "Maîtrise de : analyse des positions", "Outils : Excel avancé", "Outils : idéalement VBA / Python"],
+signaux_forts: ["Mention de : Bâle II / III", "Mention de : gestion ALM / liquidité", "Mention de : produits FICC (FX, taux, commodities)", "Mention de : reporting risque"],
+points_attention: ["CV trop théorique (académique sans pratique)", "Aucune mention d'outils", "Incapacité implicite à modéliser"]
+},
+"IT Réseau & Infrastructure": {
+eliminatoire: ["Expérience en réseau / infrastructure", "Exposition à environnement critique (banque, telco, datacenter)", "Notion de sécurité IT", "2 ans expérience minimum"],
+a_verifier: ["A-t-il géré : réseaux (LAN/WAN, VPN) ?", "A-t-il géré : serveurs (Windows/Linux) ?", "A-t-il géré : cloud (même basique) ?", "A-t-il déjà géré des incidents ?", "A-t-il déjà assuré la disponibilité ?"],
+signaux_forts: ["Mention de : cybersécurité / firewall", "Mention de : haute disponibilité / PRA/PCA", "Mention de : gestion ATM ou systèmes bancaires", "Mention de : certifications (Cisco, Microsoft, etc.)"],
+points_attention: ["Profil trop \"helpdesk\"", "CV sans détail technique", "Aucune mention de sécurité"]
+},
+"Auditeur interne": {
+eliminatoire: ["Minimum 3 ans d'expérience en audit (interne ou externe)", "Expérience en cabinet d'audit OU département audit bancaire", "Connaissance des normes d'audit et contrôle interne"],
+a_verifier: ["A-t-il déjà mené : missions d'audit complètes ?", "A-t-il déjà rédigé : rapports d'audit formels ?", "Connaît-il : normes d'audit (IFAC, COSO, ISA) ?", "A-t-il déjà évalué : dispositifs de contrôle interne ?"],
+signaux_forts: ["Mention de : certifications (CIA, CPA, ACCA)", "Mention de : audit IT / systèmes", "Mention de : conformité réglementaire", "Mention de : recommandations implémentées"],
+points_attention: ["Profil trop \"comptable\" sans vision processus", "Aucune expérience terrain en audit", "Rapports d'audit non mentionnés"]
+},
+"Chef service contrôle des engagements": {
+eliminatoire: ["Minimum 5 ans d'expérience en crédit/risques", "Expérience avérée en analyse financière et crédit", "Encadrement d'équipe (management structuré)"],
+a_verifier: ["A-t-il déjà validé : engagements hors bilan ?", "A-t-il déjà géré : garanties réelles/personnelles ?", "Connaît-il : procédures de déblocage ?", "A-t-il déjà formé : équipes de crédit ?"],
+signaux_forts: ["Mention de : COBAC / réglementation", "Mention de : comité des engagements", "Mention de : cartographie des risques", "Mention de : outils de suivi des garanties"],
+points_attention: ["Profil trop commercial sans analyse crédit", "Pas d'expérience managériale", "Méconnaissance des risques de contrepartie"]
+},
+"Chef service IT": {
+eliminatoire: ["Diplôme IT obligatoire (Bac+3 minimum en informatique)", "Minimum 5 ans d'expérience en support/maintenance IT", "Background technique solide (réseau, systèmes, bases de données)"],
+a_verifier: ["A-t-il géré : parc informatique (>100 postes) ?", "A-t-il géré : incidents critiques ?", "Connaît-il : ITIL / bonnes pratiques ?", "A-t-il déjà mis en place : SLA / indicateurs ?"],
+signaux_forts: ["Mention de : certifications (ITIL, Microsoft, Cisco)", "Mention de : supervision / monitoring", "Mention de : PRA/PCA", "Mention de : gestion de parc (>100 postes)"],
+points_attention: ["Profil trop technique sans management", "Pas de gestion de priorités", "Aucune mention de sécurité"]
+},
+"Chef service finance": {
+eliminatoire: ["Minimum 7 ans d'expérience en finance bancaire", "Expérience en direction/administration financière", "Reporting financier consolidé et IFRS", "Encadrement d'équipe finance structuré"],
+a_verifier: ["A-t-il déjà produit : états financiers consolidés ?", "A-t-il déjà géré : relations commissaires aux comptes ?", "Connaît-il : IFRS / normes locales ?", "A-t-il déjà piloté : budget / forecasts ?"],
+signaux_forts: ["Mention de : IFRS / consolidation", "Mention de : reporting groupe", "Mention de : optimisation fiscale", "Mention de : transformation digitale finance"],
+points_attention: ["Profil trop comptable sans vision stratégique", "Pas d'expérience en pilotage financier", "Méconnaissance des enjeux bancaires"]
+},
+"Chef service risques de marché": {
+eliminatoire: ["Minimum 5 ans d'expérience en risques de marché", "Expérience avérée en modélisation (VaR, stress tests)", "Exposition aux marchés (FX, taux, liquidité, ALM)", "Encadrement d'équipe risques"],
+a_verifier: ["A-t-il déjà développé : modèles de VaR ?", "A-t-il déjà réalisé : stress tests / backtesting ?", "Connaît-il : Bâle II/III / réglementations ?", "A-t-il déjà présenté : comités des risques ?"],
+signaux_forts: ["Mention de : produits dérivés / couverture", "Mention de : ALM / gestion actif-passif", "Mention de : outils (Python, VBA, MATLAB)", "Mention de : limites de risques"],
+points_attention: ["Profil trop académique sans pratique", "Pas de gestion de portefeuilles réels", "Méconnaissance des produits complexes"]
+},
+"Chef service reporting réglementaire": {
+eliminatoire: ["Minimum 5 ans d'expérience en reporting prudentiel", "Connaissance approfondie COBAC / BCEAO / Bâle", "Expérience avérée en production d'états réglementaires", "Encadrement d'équipe"],
+a_verifier: ["A-t-il déjà produit : états COBAC ?", "A-t-il déjà géré : inspections réglementaires ?", "Connaît-il : ratios prudentiels ?", "A-t-il déjà automatisé : processus de reporting ?"],
+signaux_forts: ["Mention de : COREP / FINREP", "Mention de : LCR / NSFR / ratios liquidité", "Mention de : outils de reporting (SPECTRA, etc.)", "Mention de : veille réglementaire"],
+points_attention: ["Profil trop administratif sans analyse", "Pas de connaissance approfondie COBAC", "Méconnaissance des délais réglementaires"]
+},
+"Chef de Section Compensation": {
+eliminatoire: [
+"Expérience en banque ou établissement financier réglementé",
+"Minimum 3 ans en opérations bancaires ou back-office (hors stage)",
+"Exposition aux opérations de compensation interbancaire (chèques, virements, prélèvements)",
+"Connaissance des règles BEAC / GIMAC ou d'un système de compensation équivalent",
+"Gestion de suspens, rejets ou réclamations interbancaires",
+"Expérience d'encadrement ou de supervision d'équipe (poste de chef de section)",
+"Profil bancaire avec exposition interbancaire (hors microfinance isolée)"
+],
+a_verifier: [
+"Supervision quotidienne des opérations de compensation interbancaire",
+"Dénouement de positions nettes en fin de journée",
+"Gestion de suspens, rejets et réclamations interbancaires",
+"Encadrement et coordination d'une équipe opérationnelle",
+"Utilisation de systèmes bancaires de compensation (SYSTAC, SYGMA, SWIFT)",
+"Production de reportings opérationnels ou réglementaires",
+"Participation à des contrôles internes, audits COBAC ou inspections réglementaires"
+],
+signaux_forts: [
+"BEAC / GIMAC / compensation interbancaire (SYSTAC, SYGMA)",
+"Règlement de positions nettes dans les délais réglementaires",
+"Contrôle de conformité réglementaire et procédurale",
+"Maîtrise du contrôle interne et de la comptabilité bancaire (SYSCOHADA)",
+"Gestion de fin de journée comptable / clôture des opérations interbancaires",
+"Rapports opérationnels ou réglementaires produits",
+"Expérience dans une banque de la zone CEMAC / UEMOA",
+"Audits COBAC ou contrôles internes réussis sans réserve majeure",
+"Gestion d'une équipe avec résultats mesurables"
+],
+points_attention: [
+"Parcours purement comptable sans exposition aux opérations interbancaires",
+"Rôle uniquement administratif ou de support, sans responsabilité opérationnelle",
+"Absence de tout rôle managérial",
+"CV aux missions trop génériques, sans livrables ni résultats quantifiés",
+"Expériences très courtes (< 1 an par poste) sans progression visible",
+"Maîtrise des outils non mentionnée (SWIFT, compensation, ERP bancaire)",
+"Trous inexpliqués dans le parcours professionnel"
+]
+},
+"Chargé(e) d'Administration de Crédit": {
+eliminatoire: [
+"Expérience dans une banque ou un établissement financier réglementé",
+"Niveau de diplôme minimum Bac +3 (école de commerce, gestion, comptabilité ou équivalent)",
+"Minimum 1 an d'expérience dans une fonction bancaire (administration de crédit, back-office, risques ou analyse crédit)",
+"Exposition au cycle de vie du crédit bancaire (mise en place, suivi, garanties, échéances)",
+"Connaissance des normes comptables bancaires ou de la réglementation COBAC",
+"Expérience de production de reportings ou tableaux de bord de portefeuille",
+"Maîtrise des outils bureautiques courants (Excel, traitement de texte, messagerie)"
+],
+a_verifier: [
+"Gestion du cycle complet d'un crédit (conditions d'approbation, documentation, mise en place, déblocage)",
+"Suivi et sécurisation des garanties (enregistrement, valorisation, renouvellement des assurances)",
+"Supervision des échéances et production d'alertes ou rappels aux gestionnaires de portefeuille",
+"Détection et remontée des impayés, dépassements ou incidents dans un portefeuille de crédit",
+"Production de reportings de portefeuille (tableaux de bord, rapports IFRS 9, déclarations COBAC/BEAC)",
+"Participation à des comités de risque, audits internes ou inspections réglementaires",
+"Classement physique et numérique des dossiers de crédit et originaux de garanties",
+"Maîtrise d'un système bancaire de gestion du crédit (Finacle, T24, Amplitude ou équivalent)"
+],
+signaux_forts: [
+"Mention explicite de la gestion administrative du cycle de crédit (mise en place, suivi, clôture)",
+"Exposition à la norme IFRS 9 : staging du portefeuille (Stage 1, 2, 3), ECL, provisions",
+"Suivi et sécurisation des garanties (enregistrement, valorisation, coffre, coordination juridique)",
+"Production de reportings portefeuille (encours, impayés, dépassements, couverture par garanties)",
+"Participation aux comités de risque et traitement des anomalies (COBAC, audit interne)",
+"Maîtrise des Produits de Portefeuille (PP) et de la politique de crédit (GCPPM ou équivalent)",
+"Expérience dans une banque de la zone CEMAC / UEMOA avec exposition réglementaire COBAC",
+"Audits ou contrôles internes réussis sans réserve majeure",
+"Rigueur documentaire : dossiers complets, traçabilité des actes, zéro anomalie détectée en contrôle interne"
+],
+points_attention: [
+"Parcours purement commercial ou front-office sans exposition à l'administration des crédits",
+"Profil uniquement comptable (SYSCOHADA) sans gestion du cycle de crédit bancaire",
+"Profil exclusivement théorique (stage ou formation seule) sans expérience opérationnelle en banque",
+"CV aux missions trop génériques, sans livrables précis ni résultats quantifiés",
+"Expériences très courtes (< 1 an par poste) sans progression visible dans la fonction",
+"Absence totale de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)",
+"Trous inexpliqués dans le parcours professionnel"
+]
+},
+"Chef de Division Local Corporate": {
+eliminatoire: [
+"Aucune expérience dans le secteur bancaire ou financier réglementé",
+"Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)",
+"Moins de 5 ans d'expérience professionnelle, dont une partie significative en banque",
+"Aucune expérience en gestion d'un portefeuille de clients Corporate ou d'entreprises",
+"Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale",
+"Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)"
+],
+a_verifier: [
+"Pilotage d'une activité Corporate ou d'un segment entreprises avec des objectifs chiffrés (revenus, volumes, marges)",
+"Gestion d'un portefeuille de clients Corporate et capacité à le développer",
+"Encadrement et évaluation d'une équipe commerciale ou bancaire",
+"Suivi de la qualité du portefeuille de crédit (NPL, CIR, provisions) et reporting à la direction",
+"Développement de ventes croisées (cross-selling) ou de partenariats interdépartementaux",
+"Production ou supervision de rapports de performance commerciale et financière",
+"Exposition à la réglementation bancaire locale (COBAC, BEAC) ou internationale"
+],
+signaux_forts: [
+"Pilotage d'une division ou d'une ligne Corporate avec atteinte des objectifs de revenus et de portefeuille",
+"Gestion active du ratio NPL et du ratio coût/revenu (CIR) — résultats chiffrés mentionnés",
+"Expérience avérée en cross-selling avec des équipes TSG, Trade Finance ou Cash Management",
+"Développement réel du portefeuille Corporate : acquisition de clients, fidélisation, nombre de produits par client",
+"Leadership démontré : constitution d'équipe, développement des collaborateurs, vivier de talents",
+"Certification Ecobank, Moody's ou ITB (Institut Technique de Banque) ou équivalent",
+"Connaissance du marché corporate tchadien ou de la zone CEMAC / UEMOA",
+"Exposition aux plateformes numériques bancaires (OMNI, Cash Management ou équivalent)",
+"Résultats commerciaux quantifiés et vérifiables dans le CV (chiffres d'affaires, taux de croissance, NPS)"
+],
+points_attention: [
+"Parcours exclusivement back-office ou risques sans expérience commerciale Corporate",
+"Profil techniquement solide (crédit, analyse) mais sans expérience managériale ni pilotage d'une P&L",
+"Expériences très courtes (moins de 2 ans par poste) ou trajectoire sans progression hiérarchique visible",
+"CV sans aucun résultat chiffré : missions décrites en responsabilités sans livrables ni indicateurs atteints",
+"Mobilité géographique ou sectorielle excessive sans ancrage dans le secteur bancaire Corporate",
+"Trous inexpliqués dans le parcours ou incohérences entre les postes déclarés"
+]
+}
+};
+
+function renderGrille(poste, checklistJson, scoreBreakdown) {
+const g = GRILLE[poste];
+const el = document.getElementById('grille-content');
+if (!g) {
+el.innerHTML = '<p style="color:var(--text-muted);font-size:.87rem;text-align:center;padding:1rem">Grille non définie pour ce poste.</p>';
+return;
+}
+let checked = {};
+try { checked = JSON.parse(checklistJson || '{}'); } catch {}
+const hasEliminatoire = scoreBreakdown && (
+scoreBreakdown.bloc1_eliminatoire === true ||
+scoreBreakdown.bloc1_eliminatoire === "true" ||
+scoreBreakdown.bloc1_eliminatoire === 1 ||
+scoreBreakdown.bloc1_eliminatoire === "1"
+);
+const mkSection = (title, color, items, pfx) =>
+'<div class="grille-section">'
++ '<div class="grille-header" style="color:' + color + ';background:' + color + '18;border-left-color:' + color + '">'
++ title + '</div>'
++ items.map((item, i) => {
+const key = pfx + '_' + i;
+const isValidated = checked[key] === true;
+const eliminatoireClass = (pfx === 'elim' && !isValidated) ? 'eliminatoire-triggered' : '';
+return '<label class="grille-item' + (isValidated ? ' checked' : ' not-checked') + ' ' + eliminatoireClass + '">'
++ '<input type="checkbox" ' + (isValidated ? 'checked' : '') + ' disabled>'
++ '<span>' + escHtml(item) + '</span>'
++ '<span class="status-icon">' + (isValidated ? '✓' : '✕') + '</span>'
++ '</label>';
+}).join('')
++ '</div>';
+el.innerHTML =
+mkSection('Critères éliminatoires', '#dc2626', g.eliminatoire, 'elim') +
+mkSection('À vérifier dans le CV', '#d97706', g.a_verifier, 'verif') +
+mkSection('Signaux forts — prioritaire', '#16a34a', g.signaux_forts, 'signal') +
+mkSection("Points d'attention", '#64748b', g.points_attention, 'attn');
+if (hasEliminatoire) { showEliminationAlert(checked); }
+}
+
+function showEliminationAlert(checked) {
+const overlay = document.getElementById('elimination-alert-overlay');
+const alert = document.getElementById('elimination-alert');
+const details = document.getElementById('elimination-alert-details');
+const poste = currentC?.poste;
+const g = GRILLE[poste];
+if (!g) {
+console.error(`❌ ALERTE ÉLIMINATOIRE : Poste non trouvé dans GRILLE frontend`);
+console.error(`   Poste reçu : "${poste}"`);
+const sb = currentC?.score_breakdown_parsed;
+if (sb?.bloc1_eliminatoire) {
+details.innerHTML = `
+<strong>Candidat éliminé automatiquement</strong>
+<p style="margin:.5rem 0;color:#7f1d1d">
+Critères éliminatoires non satisfaits (poste: "${poste || 'inconnu'}")
+</p>
+<p style="font-size:.8rem;color:#991b1b">
+Si ce poste devrait être supporté, vérifiez que son nom correspond exactement
+à une clé de la grille frontend (accents, espaces, majuscules).
+</p>
+`;
+overlay.style.display = 'block';
+alert.style.display = 'block';
+}
+return;
+}
+let failedCount = 0;
+let criteriaHtml = '<strong>Critères requis NON trouvés dans les documents :</strong>'
++ '<ul style="margin:.5rem 0;padding-left:1.5rem">';
+g.eliminatoire.forEach((crit, i) => {
+const key = 'elim_' + i;
+const isValidated = checked && checked[key] === true;
+if (!isValidated) {
+failedCount++;
+criteriaHtml += `<li style="margin:.3rem 0;color:#991b1b">
+<strong>${escHtml(crit)}</strong>
+<span style="color:#7f1d1d;font-size:.85rem"> — non trouvé dans les documents</span>
+</li>`;
+}
+});
+criteriaHtml += '</ul>';
+const scoreMax = getScoreMax(poste);
+criteriaHtml += `<p style="font-size:.85rem;color:#7f1d1d;margin-top:.5rem;padding:.6rem;
+background:rgba(255,255,255,.5);border-radius:4px;font-weight:600">
+→ ${failedCount} critère(s) manquant(s) — candidat éliminé automatiquement (score : 0/${scoreMax})
+</p>`;
+details.innerHTML = criteriaHtml;
+overlay.style.display = 'block';
+alert.style.display = 'block';
+}
+
+function closeEliminationAlert() {
+document.getElementById('elimination-alert-overlay').style.display = 'none';
+document.getElementById('elimination-alert').style.display = 'none';
+}
+
+async function updateStatut(statut) {
+if (!currentC) { showToast('Aucun candidat sélectionné', 'error'); return; }
+const note = document.getElementById('modal-note').value;
+const checklist = currentC?.checklist || '';
+try {
+const res = await fetch(
+API + '/recruteur/candidats/' + currentC.id + '/statut',
+{ method:'PUT', headers: authH(), body: JSON.stringify({ statut, note, score: currentScore, checklist }) }
+);
+if (res.ok) {
+const idx = allCandidats.findIndex(x => x.id === currentC.id);
+if (idx !== -1) Object.assign(allCandidats[idx], { statut, note, score: String(currentScore) });
+showToast('Statut mis à jour : ' + statut, 'success');
+closeModal();
+closeEliminationAlert();
+applyFilters();
+renderRecent(allCandidats);
+fetchStats();
+} else {
+const d = await res.json().catch(() => ({}));
+showToast(d.error || 'Erreur lors de la mise à jour', 'error');
+}
+} catch (e) { showToast('Erreur de connexion', 'error'); console.error(e); }
+}
+
+function openEmailModal() {
+if (!currentC) { showToast('Aucun candidat sélectionné', 'error'); return; }
+const sel = document.getElementById('email-type');
+const poste = currentC.poste;
+const decision = currentC.score_breakdown_parsed?.decision || '';
+const statut = currentC.statut;
+if (POSTES_AVEC_SCORING_12.includes(poste) || POSTES_AVEC_SCORING_14.includes(poste)) {
+if (decision.includes('Entretien prioritaire')) sel.value = '🥇 Entretien prioritaire';
+else if (decision.includes('vivier') || decision.includes('Potentiel')) sel.value = '🥈 Entretien si besoin (vivier de réserve)';
+else sel.value = '❌ Rejet';
+} else {
+const allStatuses = ['Shortlist', 'À considérer', 'Faible', 'Rejet', 'retenu', 'entretien', 'rejete'];
+sel.value = allStatuses.includes(statut) ? statut : 'retenu';
+}
+buildEmail();
+document.getElementById('modal-email').classList.add('open');
+}
+
+function quickEmail(id) {
+const c = allCandidats.find(x => x.id === id);
+if (!c) return;
+currentC = c;
+const sel = document.getElementById('email-type');
+const poste = c.poste;
+const decision = c.score_breakdown_parsed?.decision || '';
+const statut = c.statut;
+if (POSTES_AVEC_SCORING_12.includes(poste) || POSTES_AVEC_SCORING_14.includes(poste)) {
+if (decision.includes('Entretien prioritaire')) sel.value = '🥇 Entretien prioritaire';
+else if (decision.includes('vivier') || decision.includes('Potentiel')) sel.value = '🥈 Entretien si besoin (vivier de réserve)';
+else sel.value = '❌ Rejet';
+} else {
+const allStatuses = ['Shortlist', 'À considérer', 'Faible', 'Rejet', 'retenu', 'entretien', 'rejete'];
+sel.value = allStatuses.includes(statut) ? statut : 'retenu';
+}
+buildEmail();
+document.getElementById('modal-email').classList.add('open');
+}
+
+async function quickReanalyze(id) {
+const c = allCandidats.find(x => x.id === id);
+if (!c) return;
+if (!confirm(`Relancer l'analyse de ${c.prenom} ${c.nom} avec les règles actuelles ?`)) return;
+try {
+const res = await fetch(`${API}/recruteur/candidats/${id}/analyze`, { method: 'POST', headers: authH() });
+if (res.ok) {
+showToast('Analyse relancée. Résultats dans quelques instants.', 'success');
+setTimeout(fetchCandidats, 3000);
+} else {
+const data = await res.json().catch(() => ({}));
+showToast(data.error || 'Erreur serveur', 'error');
+}
+} catch (e) {
+showToast('Erreur: ' + e.message, 'error');
+}
+}
+
+function buildEmail() {
+if (!currentC) return;
+const type = document.getElementById('email-type').value;
+const nom = currentC.prenom + ' ' + currentC.nom;
+const pos = currentC.poste;
+document.getElementById('ep-to').textContent = nom + ' <' + currentC.email + '>';
+document.getElementById('ep-subject').textContent = emailSubject(type, pos);
+document.getElementById('ep-body').value = emailBody(type, nom, pos);
+}
+
+function emailSubject(type, poste) {
+const subjects = {
+retenu: 'Candidature retenue – ' + poste,
+entretien: 'Invitation à un entretien – ' + poste,
+rejete: 'Réponse à votre candidature – ' + poste,
+Shortlist: 'Présélection prioritaire (Shortlist) – ' + poste,
+'À considérer': 'Votre candidature à considérer – ' + poste,
+Faible: 'Réponse à votre candidature – ' + poste,
+Rejet: 'Réponse à votre candidature – ' + poste,
+'🥇 Entretien prioritaire': 'Entretien prioritaire – ' + poste,
+'🥈 Entretien si besoin (vivier de réserve)': 'Votre candidature – Vivier de réserve – ' + poste,
+'❌ Rejet': 'Réponse à votre candidature – ' + poste
+};
+return subjects[type] || '';
+}
+
+function emailBody(type, nom, poste) {
+const sign = '\n\nCordialement,\nL\'équipe Ressources Humaines\nRecrutBank';
+if (POSTES_AVEC_SCORING_12.includes(poste) || POSTES_AVEC_SCORING_14.includes(poste)) {
+if (type === '🥇 Entretien prioritaire' || type === 'retenu')
+return 'Madame, Monsieur ' + nom + ',\n\nFélicitations ! Votre candidature pour le poste de ' + poste + ' a été retenue en priorité à l\'issue de notre processus de présélection.\n\nVotre profil présente une excellente adéquation avec les exigences du poste.\n\nNous vous contacterons dans les plus brefs délais pour convenir d\'un entretien.\n\nCordialement,' + sign;
+if (type === '🥈 Entretien si besoin (vivier de réserve)' || type === 'entretien')
+return 'Madame, Monsieur ' + nom + ',\n\nVotre candidature pour le poste de ' + poste + ' a retenu notre attention.\n\nVotre profil présente des atouts intéressants pour ce poste et nous souhaitons vous rencontrer.\n\nNous prendrons contact avec vous prochainement pour convenir d\'un entretien.\n\nCordialement,' + sign;
+if (type === '❌ Rejet' || type === 'rejete')
+return 'Madame, Monsieur ' + nom + ',\n\nNous vous remercions de l\'intérêt que vous portez à notre institution pour le poste de ' + poste + '.\n\nAprès examen attentif de votre dossier, nous avons le regret de vous informer que votre candidature n\'a pas été retenue pour cette sélection.\n\nNous vous encourageons à postuler à nouveau pour toute opportunité future correspondant à votre profil.\n\nCordialement,' + sign;
+}
+if (type === 'Shortlist')
+return 'Madame, Monsieur ' + nom + ',\n\nNous avons le plaisir de vous informer que votre candidature pour le poste de ' + poste + ' a été retenue en tant que profil PRIORITAIRE (Shortlist) à l\'issue de notre processus de présélection automatisée.\n\nVotre profil correspond particulièrement bien aux exigences du poste et nous souhaitons vous rencontrer rapidement.\n\nNous vous contacterons dans les plus brefs délais pour convenir d\'un entretien.\n\nDans l\'attente, nous restons disponibles pour toute question.' + sign;
+if (type === 'À considérer')
+return 'Madame, Monsieur ' + nom + ',\n\nSuite à l\'examen de votre candidature pour le poste de ' + poste + ', nous avons le plaisir de vous informer que votre profil présente un intérêt certain.\n\nVotre dossier sera étudié attentivement par notre équipe et nous reviendrons vers vous prochainement pour la suite du processus.\n\nNous restons à votre disposition pour toute information complémentaire.' + sign;
+if (type === 'Faible')
+return 'Madame, Monsieur ' + nom + ',\n\nNous vous remercions de l\'intérêt que vous portez à notre institution et du temps consacré à votre candidature pour le poste de ' + poste + '.\n\nAprès examen de votre dossier, votre profil ne correspond pas entièrement aux exigences principales du poste. Toutefois, nous conservons vos coordonnées et pourrions vous recontacter si une opportunité plus adaptée se présente.\n\nNous vous souhaitons plein succès dans votre recherche.' + sign;
+if (type === 'retenu')
+return 'Madame, Monsieur ' + nom + ',\n\nNous avons le plaisir de vous informer que votre candidature pour le poste de ' + poste + ' a été retenue à l\'issue de notre processus de présélection.\n\nNous vous contacterons très prochainement pour vous communiquer les modalités de la prochaine étape du processus de recrutement.\n\nDans l\'attente, nous restons disponibles pour toute question.' + sign;
+if (type === 'entretien')
+return 'Madame, Monsieur ' + nom + ',\n\nSuite à l\'examen de votre candidature pour le poste de ' + poste + ', nous avons le plaisir de vous inviter à un entretien avec notre équipe.\n\nNous prendrons contact avec vous dans les meilleurs délais pour convenir d\'une date et d\'un horaire.' + sign;
+return 'Madame, Monsieur ' + nom + ',\n\nNous vous remercions sincèrement de l\'intérêt que vous portez à notre institution et du temps consacré à votre candidature pour le poste de ' + poste + '.\n\nAprès examen attentif de votre dossier, nous avons le regret de vous informer que votre candidature n\'a pas été retenue pour la suite du processus de sélection.\n\nNous vous encourageons à postuler à nouveau pour toute opportunité future correspondant à votre profil, et vous souhaitons plein succès dans votre recherche.' + sign;
+}
+
+function copyEmail() {
+const to = currentC ? currentC.email : '';
+const sub = document.getElementById('ep-subject').textContent;
+const bdy = document.getElementById('ep-body').value;
+navigator.clipboard.writeText('À: ' + to + '\nObjet: ' + sub + '\n' + bdy)
+.then(() => showToast('Email copié dans le presse-papiers', 'success'))
+.catch(() => { document.getElementById('ep-body').select(); showToast('Sélectionnez le texte et Ctrl+C', 'info'); });
+}
+
+function openMailClient() {
+if (!currentC) return;
+const to = encodeURIComponent(currentC.email);
+const sub = encodeURIComponent(document.getElementById('ep-subject').textContent);
+const bdy = encodeURIComponent(document.getElementById('ep-body').value);
+window.open('mailto:' + to + '?subject=' + sub + '&body=' + bdy);
+}
+
+function badgePill(s) {
+const statuses12 = ['🥇 Entretien prioritaire', '🥈 Entretien si besoin (vivier de réserve)', '🥈 Entretien si besoin (vivier)', '🥈 Potentiel à évaluer en entretien', '❌ Rejet', '❌ Rejet (éliminatoire)'];
+if (statuses12.includes(s)) {
+const clsMap = {
+'🥇 Entretien prioritaire': 'badge-retained',
+'🥈 Entretien si besoin (vivier de réserve)': 'badge-interview',
+'🥈 Entretien si besoin (vivier)': 'badge-interview',
+'🥈 Potentiel à évaluer en entretien': 'badge-interview',
+'❌ Rejet': 'badge-rejected',
+'❌ Rejet (éliminatoire)': 'badge-rejected'
+};
+return '<span class="badge ' + (clsMap[s] || 'badge-pending') + '">' + escHtml(s) + '</span>';
+}
+const newStatuses = ['Shortlist', 'À considérer', 'Faible', 'Rejet'];
+if (newStatuses.includes(s)) {
+const clsMap = { 'Shortlist': 'badge-retained', 'À considérer': 'badge-interview', 'Faible': 'badge-pending', 'Rejet': 'badge-rejected' };
+const lblMap = { 'Shortlist': 'Shortlist', 'À considérer': 'À considérer', 'Faible': 'Faible', 'Rejet': 'Rejet' };
+return '<span class="badge ' + (clsMap[s] || 'badge-pending') + '">' + (lblMap[s] || s) + '</span>';
+}
+const cls = { en_attente:'badge-pending', retenu:'badge-retained', rejete:'badge-rejected', entretien:'badge-interview' };
+const lbl = { en_attente:'En attente', retenu:'Retenu', rejete:'Non retenu', entretien:'Entretien' };
+return '<span class="badge ' + (cls[s]||'badge-pending') + '">' + (lbl[s]||s) + '</span>';
+}
+
+function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString('fr-FR') : '–'; }
+function fmtDateLong(iso) { return iso ? new Date(iso).toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'}) : '–'; }
+
+window.debugEliminationAlert = function(candidatId) {
+const c = allCandidats.find(x => x.id === candidatId);
+if (!c) { console.log(`❌ Candidat ${candidatId} non trouvé`); return; }
+console.log(`🔍 Debug candidat : ${c.prenom} ${c.nom} – ${c.poste}`);
+console.log(`   Score breakdown :`, c.score_breakdown_parsed);
+console.log(`   Bloc1 éliminatoire :`, c.score_breakdown_parsed?.bloc1_eliminatoire);
+currentC = c;
+let checked = {};
+try { checked = JSON.parse(c.checklist || '{}'); } catch {}
+showEliminationAlert(checked);
+console.log(`✅ Alert triggered (si éliminé)`);
+};
+
+fetchPostesStatus();
+fetchStats();
+fetchCandidats();
+checkReanalyzeStatus();
+</script>
+</body>
+</html>
