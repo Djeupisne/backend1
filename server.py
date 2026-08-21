@@ -91,9 +91,6 @@ try:
 except ImportError:
     SPACY_AVAILABLE = False
 
-# 🛡️ OPTIMISATION MÉMOIRE : Désactiver spacy par défaut sur Render (économie ~50-100MB)
-SPACY_ENABLED = os.getenv("SPACY_ENABLED", "false").lower() == "true" and SPACY_AVAILABLE
-
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
@@ -104,14 +101,14 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
 _claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_ACTIVE else None
-_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "1")))  # 🛡️ OPTIMISATION MÉMOIRE : 1 appel IA à la fois sur Render (512MB)
+_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
 
 _Nlp_fr = None
 _Nlp_en = None
 
 def _get_spacy_model(lang='fr'):
     global _Nlp_fr, _Nlp_en
-    if not SPACY_ENABLED:  # 🛡️ OPTIMISATION MÉMOIRE : spacy désactivé par défaut
+    if not SPACY_AVAILABLE:
         return None
     if lang == 'fr':
         if _Nlp_fr is None:
@@ -1275,7 +1272,7 @@ def extract_entities_with_spacy(text, lang='fr'):
         return None
 
 def enrich_analysis_with_nlp(cv_text, lettre_text, detected_lang):
-    if not SPACY_ENABLED:  # 🛡️ OPTIMISATION MÉMOIRE : NLP désactivé par défaut sur Render
+    if not SPACY_AVAILABLE:
         return {}
     lang = 'fr'
     if detected_lang in ('en', 'eng'):
@@ -1284,18 +1281,11 @@ def enrich_analysis_with_nlp(cv_text, lettre_text, detected_lang):
     entities = extract_entities_with_spacy(full_text, lang)
     if not entities:
         return {}
-    enrichment = {'nlp_available': False, 'organisations_detectees': [], 'dates_cles': [], 'lieux': [], 'diplomes_identifies': [], 'competences_techniques': []}
+    enrichment = {'nlp_available': True, 'organisations_detectees': entities.get('organisations', [])[:10], 'dates_cles': entities.get('dates', [])[:10], 'lieux': entities.get('locations', [])[:5], 'diplomes_identifies': entities.get('diplomes', [])[:5], 'competences_techniques': entities.get('competences_techniques', [])[:10]}
     bank_keywords = ['bank', 'banque', 'ecobank', 'orabank', 'uba', 'bgfi', 'afriland']
-    if entities:
-        enrichment['nlp_available'] = True
-        enrichment['organisations_detectees'] = entities.get('organisations', [])[:10]
-        enrichment['dates_cles'] = entities.get('dates', [])[:10]
-        enrichment['lieux'] = entities.get('locations', [])[:5]
-        enrichment['diplomes_identifies'] = entities.get('diplomes', [])[:5]
-        enrichment['competences_techniques'] = entities.get('competences_techniques', [])[:10]
-        detected_banks = [org for org in entities.get('organisations', []) if any(kw in org.lower() for kw in bank_keywords)]
-        if detected_banks:
-            enrichment['banques_detectees'] = detected_banks
+    detected_banks = [org for org in entities.get('organisations', []) if any(kw in org.lower() for kw in bank_keywords)]
+    if detected_banks:
+        enrichment['banques_detectees'] = detected_banks
     return enrichment
 
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
@@ -3026,8 +3016,7 @@ def reanalyze_all_candidates():
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = int(os.getenv("MAX_PARALLEL_WORKERS", "1"))  # 🛡️ OPTIMISATION MÉMOIRE : 1 worker par défaut sur Render (512MB)
-        MAX_WORKERS = min(MAX_WORKERS, len(candidates_to_reanalyze))
+        MAX_WORKERS = min(2, len(candidates_to_reanalyze))  # 🛡️ 2 workers max
         logger.info(f"🚀 Réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
         start_time = time.time()
         reanalyzed_count = 0
@@ -3084,8 +3073,7 @@ def reanalyze_by_poste(poste):
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = int(os.getenv("MAX_PARALLEL_WORKERS", "1"))  # 🛡️ OPTIMISATION MÉMOIRE : 1 worker par défaut sur Render (512MB)
-        MAX_WORKERS = min(MAX_WORKERS, len([k for k in keys if k.get('cv_filename')]))
+        MAX_WORKERS = min(2, len([k for k in keys if k.get('cv_filename')]))  # 🛡️ 2 workers max
         start_time = time.time()
         reanalyzed_count = 0
         errors = []
@@ -3223,9 +3211,7 @@ def reanalyze_fast():
         start = time.time()
         success_count = 0
         errors = []
-        MAX_WORKERS = int(os.getenv("MAX_PARALLEL_WORKERS", "1"))  # 🛡️ OPTIMISATION MÉMOIRE : 1 worker par défaut sur Render (512MB)
-        MAX_WORKERS = min(MAX_WORKERS, len(candidates))
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=min(2, len(candidates))) as executor:  # 🛡️ 2 workers max
             futures = [executor.submit(analyze_fast_only, c) for c in candidates]
             for future in as_completed(futures):
                 try:
@@ -3433,7 +3419,7 @@ def export_dossiers_zip():
             file_bytes = download_file_from_supabase(blob_name)
             return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
         results_by_cand = {}
-        max_workers = int(os.getenv("ZIP_DOWNLOAD_WORKERS", "4"))  # 🛡️ OPTIMISATION MÉMOIRE : 4 workers max pour les téléchargements ZIP
+        max_workers = min(16, max(4, len(download_tasks))) if download_tasks else 4
         if download_tasks:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [executor.submit(_download_one, t) for t in download_tasks]
