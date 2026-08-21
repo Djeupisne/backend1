@@ -1661,7 +1661,59 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     }
     score_total = sum(sous_scores.values())
     decision = "🥇 Entretien prioritaire" if score_total >= 11 else ("🥈 Potentiel à évaluer en entretien" if score_total >= 7 else "❌ Rejet")
-    return {'score': score_total, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': checklist, 'detail': f"Score: {score_total}/14 — {decision}"}
+    
+    # Générer points_forts et points_vigilance basés sur les sous-scores
+    points_forts = []
+    points_vigilance = []
+    if exp_corporate >= 2.5:
+        points_forts.append("Expérience significative en gestion de portefeuille Corporate")
+    elif exp_corporate < 1.5:
+        points_vigilance.append("Expérience Corporate limitée")
+    
+    if management >= 2.5:
+        points_forts.append("Solide capacité managériale démontrée")
+    elif management < 1.5:
+        points_vigilance.append("Expérience managériale à renforcer")
+    
+    if risque >= 1.5:
+        points_forts.append("Maîtrise du risque crédit")
+    elif risque < 1:
+        points_vigilance.append("Vigilance requise sur la gestion du risque")
+    
+    if crossselling >= 1.5:
+        points_forts.append("Orientation commerciale et cross-selling")
+    
+    if progression >= 1.5:
+        points_forts.append("Parcours professionnel cohérent et progressif")
+    elif progression < 1:
+        points_vigilance.append("Parcours professionnel discontinu")
+    
+    if qualite_cv >= 1:
+        points_forts.append("CV clair avec résultats chiffrés")
+    else:
+        points_vigilance.append("CV manque de précisions ou résultats non chiffrés")
+    
+    if certification_score >= 1:
+        points_forts.append("Certifications bancaires ou formations spécialisées")
+    
+    synthese = f"Candidat {'bien positionné' if score_total >= 11 else ('à considérer' if score_total >= 7 else 'en dessous des attentes')} pour le poste de Chef de Division Local Corporate. "
+    if points_forts:
+        synthese += "Points forts : " + ", ".join(points_forts[:3]) + ". "
+    if points_vigilance:
+        synthese += "Vigilance sur : " + ", ".join(points_vigilance[:2]) + "."
+    
+    return {
+        'score': score_total, 
+        'score_max': 14, 
+        'decision': decision, 
+        'flags_eliminatoires': [], 
+        'sous_scores': sous_scores, 
+        'checklist': checklist, 
+        'detail': f"Score: {score_total}/14 — {decision}",
+        'points_forts': points_forts,
+        'points_vigilance': points_vigilance,
+        'synthese_recruteur': synthese
+    }
 
 def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, poste):
     config = SCORING_CONFIG.get(poste)
@@ -1899,7 +1951,14 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
             elif poste == "Chef de Division Local Corporate":
                 fb = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
-                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
+                details_data = {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}
+                if 'points_forts' in fb:
+                    details_data['points_forts'] = fb['points_forts']
+                if 'points_vigilance' in fb:
+                    details_data['points_vigilance'] = fb['points_vigilance']
+                if 'synthese_recruteur' in fb:
+                    details_data['synthese_recruteur'] = fb['synthese_recruteur']
+                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': details_data, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
             elif poste in POSTES_AVEC_SCORING_100:
                 detailed_result = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
                 if detailed_result:
