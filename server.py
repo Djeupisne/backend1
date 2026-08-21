@@ -1285,7 +1285,7 @@ if IA_ANALYSE_ACTIVE:
 else:
     logger.warning("⚠️ Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
 
-SCORING_CODE_LABELS = {"CV_Exp": "Expérience professionnelle pertinente", "CV_Niveau": "Niveau / ancienneté de l'expérience", "CV_Secteur": "Expérience sectorielle (banque/finance)", "CV_Tech": "Compétences techniques", "CV_Progression": "Évolution de carrière", "CV_Management": "Capacité managériale", "CV_Stabilite": "Stabilité du parcours", "LM_Comprehension": "Compréhension du poste (lettre)", "LM_Coherence": "Cohérence du profil (lettre)", "LM_Motivation": "Motivation réelle (lettre)", "LM_Qualite": "Qualité rédactionnelle (lettre)", "D_Niveau": "Niveau académique", "D_Specialisation": "Spécialisation pertinente", "D_Certif": "Certifications"}
+SCORING_CODE_LABELS = {"CV_Exp": "Expérience professionnelle pertinente", "CV_Niveau": "Niveau / ancienneté de l'expérience", "CV_Secteur": "Expérience sectorielle (banque/finance)", "CV_Tech": "Compétences techniques", "CV_Progression": "Évolution de carrière", "CV_Management": "Capacité managériale", "CV_Stabilite": "Stabilité du parcours", "LM_Comprehension": "Compréhension du poste (lettre)", "LM_Coherence": "Cohérence du profil (lettre)", "LM_Motivation": "Motivation réelle (lettre)", "LM_Qualite": "Qualité rédactionnelle (lettre)", "D_Niveau": "Niveau académique", "D_Specialisation": "Spécialisation pertinente", "D_Certif": "Certifications", "CV_Exp_Corporate": "Expérience en gestion de portefeuille Corporate", "CV_Risque": "Gestion du risque crédit et qualité du portefeuille", "CV_CrossSelling": "Développement commercial et cross-selling", "CV_Qualite": "Qualité et clarté du CV", "CV_Certification": "Certifications bancaires ou formations spécialisées"}
 
 SCORING_RUBRIQUES = {
     "Chef de Section Compensation": {
@@ -1448,6 +1448,17 @@ def _build_zero_sous_scores_rac():
         "Lettre de motivation": 0
     }
 
+def _build_zero_sous_scores_chef_division_corporate():
+    return {
+        "Expérience en gestion de portefeuille Corporate (CV_Exp_Corporate)": 0,
+        "Management et encadrement d'équipe (CV_Management)": 0,
+        "Gestion du risque crédit et qualité du portefeuille (CV_Risque)": 0,
+        "Développement commercial et cross-selling (CV_CrossSelling)": 0,
+        "Progression hiérarchique et cohérence du parcours (CV_Progression)": 0,
+        "Qualité et clarté du CV (CV_Qualite)": 0,
+        "Certifications bancaires ou formations spécialisées (CV_Certification)": 0
+    }
+
 def _build_checklist_from_grille(grille, raw_full, normalized, poste):
     checklist = {}
     for i, crit in enumerate(grille.get('eliminatoire', [])):
@@ -1569,6 +1580,88 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     score_total = sum(sous_scores.values())
     decision = "🥇 Entretien prioritaire" if score_total >= 10 else ("🥈 Entretien si besoin (vivier de réserve)" if score_total >= 7 else "❌ Rejet")
     return {'score': score_total, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': checklist, 'detail': f"Score: {score_total}/12 — {decision}"}
+
+def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
+    poste = "Chef de Division Local Corporate"
+    grille = GRILLE[poste]
+    all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
+    raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
+    normalized = normalize_for_matching(raw_full)[0]
+    flags = []
+    for crit in grille['eliminatoire']:
+        ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
+        if not ok:
+            flags.append(crit)
+    checklist = _build_checklist_from_grille(grille, raw_full, normalized, poste)
+    if flags:
+        return {'score': 0, 'score_max': 14, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_chef_division_corporate(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
+    
+    # Scoring basé sur les rubriques définies dans SCORING_RUBRIQUES
+    signaux_exp_corporate = [
+        "Gestion de portefeuille Corporate / Grandes Entreprises",
+        "Analyse crédit et montage de dossiers Corporate",
+        "Relation clientèle Corporate et développement commercial"
+    ]
+    n_exp_corp = sum(1 for c in signaux_exp_corporate if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
+    exp_corporate = min(3, n_exp_corp)
+    
+    signaux_management = [
+        "Encadrement et management d'équipe",
+        "Supervision de collaborateurs",
+        "Animation d'équipe commerciale ou crédit"
+    ]
+    n_mgmt = sum(1 for c in signaux_management if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
+    management = min(3, n_mgmt)
+    
+    signaux_risque = [
+        "Gestion du risque crédit",
+        "Qualité du portefeuille (NPL, impayés, provisions)",
+        "Suivi des garanties et sécurisation des engagements"
+    ]
+    n_risque = sum(1 for c in signaux_risque if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
+    risque = min(2, n_risque)
+    
+    signaux_crossselling = [
+        "Développement commercial",
+        "Cross-selling",
+        "Vente additionnelle de produits bancaires"
+    ]
+    n_cs = sum(1 for c in signaux_crossselling if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
+    crossselling = min(2, n_cs)
+    
+    n_points_attention = sum(1 for c in grille['points_attention'] if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
+    progression = 2 if n_points_attention == 0 else (1 if n_points_attention <= 2 else 0)
+    
+    word_count = len(cv_text.split())
+    has_quantified = bool(re.search(r'\d+\s*(%|pourcent|portefeuille|encours|millions|milliards|collaborateurs|equipe|clients)', cv_text.lower()))
+    qualite_cv = 1 if (word_count >= 150 and has_quantified) else 0
+    
+    lettre_clean = (lettre_text or '').strip()
+    if lettre_clean:
+        poste_keywords = ['corporate', 'grandes entreprises', 'division', 'chef', 'management', 'credit', 'banque']
+        mentions_poste = any(kw in lettre_clean.lower() for kw in poste_keywords)
+        is_generic = len(lettre_clean.split()) < 50 or not mentions_poste
+        certification_score = 0 if is_generic else 1
+    else:
+        certification_score = 0
+    
+    # Vérifier certifications explicites
+    has_certif = check_criterion_match_advanced("Certification bancaire ou formation spécialisée (risk management, credit analysis, etc.)", normalized, raw_full, poste=poste)[0]
+    if has_certif:
+        certification_score = 1
+    
+    sous_scores = {
+        "Expérience en gestion de portefeuille Corporate (CV_Exp_Corporate)": exp_corporate,
+        "Management et encadrement d'équipe (CV_Management)": management,
+        "Gestion du risque crédit et qualité du portefeuille (CV_Risque)": risque,
+        "Développement commercial et cross-selling (CV_CrossSelling)": crossselling,
+        "Progression hiérarchique et cohérence du parcours (CV_Progression)": progression,
+        "Qualité et clarté du CV (CV_Qualite)": qualite_cv,
+        "Certifications bancaires ou formations spécialisées (CV_Certification)": certification_score
+    }
+    score_total = sum(sous_scores.values())
+    decision = "🥇 Entretien prioritaire" if score_total >= 11 else ("🥈 Potentiel à évaluer en entretien" if score_total >= 7 else "❌ Rejet")
+    return {'score': score_total, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': checklist, 'detail': f"Score: {score_total}/14 — {decision}"}
 
 def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, poste):
     config = SCORING_CONFIG.get(poste)
@@ -1803,6 +1896,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
             elif poste == "Chargé(e) d'Administration de Crédit":
                 fb = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
+                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
+            elif poste == "Chef de Division Local Corporate":
+                fb = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
                 result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
             elif poste in POSTES_AVEC_SCORING_100:
                 detailed_result = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
