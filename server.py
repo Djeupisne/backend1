@@ -101,7 +101,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
 _claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_ACTIVE else None
-_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
+_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "1")))  # Réduit à 1 pour éviter OOM
 
 _Nlp_fr = None
 _Nlp_en = None
@@ -566,7 +566,7 @@ def extract_text_from_pdf_via_ocr(file_bytes):
     except Exception:
         return ""
 
-MAX_PDF_PAGES = 15
+MAX_PDF_PAGES = 8  # Réduit de 15 à 8 pour limiter la mémoire
 
 def extract_text_from_pdf_robust(file_bytes, filename):
     text = ""
@@ -3074,7 +3074,7 @@ def reanalyze_all_candidates():
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(2, len(candidates_to_reanalyze))  # 🛡️ 2 workers max
+        MAX_WORKERS = min(1, len(candidates_to_reanalyze))  # 🛡️ 1 worker max pour éviter OOM
         logger.info(f"🚀 Réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
         start_time = time.time()
         reanalyzed_count = 0
@@ -3131,7 +3131,7 @@ def reanalyze_by_poste(poste):
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(2, len([k for k in keys if k.get('cv_filename')]))  # 🛡️ 2 workers max
+        MAX_WORKERS = min(1, len([k for k in keys if k.get('cv_filename')]))  # 🛡️ 1 worker max pour éviter OOM
         start_time = time.time()
         reanalyzed_count = 0
         errors = []
@@ -3269,7 +3269,7 @@ def reanalyze_fast():
         start = time.time()
         success_count = 0
         errors = []
-        with ThreadPoolExecutor(max_workers=min(2, len(candidates))) as executor:  # 🛡️ 2 workers max
+        with ThreadPoolExecutor(max_workers=min(1, len(candidates))) as executor:  # 🛡️ 1 worker max pour éviter OOM
             futures = [executor.submit(analyze_fast_only, c) for c in candidates]
             for future in as_completed(futures):
                 try:
