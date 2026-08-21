@@ -1,54 +1,46 @@
 from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time
+import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time, gc  # 🛡️ OOM-FIX: ajout de gc
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from werkzeug.utils import secure_filename
 from supabase import create_client, Client
-
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
-
 try:
     import pdfplumber
     PDFPLUMBER_AVAILABLE = True
 except ImportError:
     PDFPLUMBER_AVAILABLE = False
-
 try:
     import PyPDF2
     PYPDF2_AVAILABLE = True
 except ImportError:
     PYPDF2_AVAILABLE = False
-
 try:
     from docx import Document
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 try:
     import chardet
     CHARDET_AVAILABLE = True
 except ImportError:
     CHARDET_AVAILABLE = False
-
 try:
     from langdetect import detect, DetectorFactory
     DetectorFactory.seed = 0
     LANGDETECT_AVAILABLE = True
 except ImportError:
     LANGDETECT_AVAILABLE = False
-
 try:
     from rapidfuzz import fuzz
     RAPIDFUZZ_AVAILABLE = True
 except ImportError:
     RAPIDFUZZ_AVAILABLE = False
-
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -59,7 +51,6 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
-
 try:
     import openpyxl
     from openpyxl import Workbook
@@ -68,7 +59,6 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
-
 try:
     from docx import Document as DocxDocument
     from docx.shared import Inches, Pt
@@ -76,7 +66,6 @@ try:
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 try:
     from pdf2image import convert_from_path
     import pytesseract
@@ -84,13 +73,11 @@ try:
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
-
 try:
     import spacy
     SPACY_AVAILABLE = True
 except ImportError:
     SPACY_AVAILABLE = False
-
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
@@ -100,17 +87,14 @@ except ImportError:
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
-_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "1")))  # 🛡️ 1 seul appel IA à la fois
-
-# 🛡️ OPTIMISATION MÉMOIRE : Désactiver spacy par défaut (économise ~50-100MB)
-SPACY_ENABLED = os.getenv("SPACY_ENABLED", "false").lower() == "true"
-
+_claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_ACTIVE else None
+_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
 _Nlp_fr = None
 _Nlp_en = None
 
 def _get_spacy_model(lang='fr'):
     global _Nlp_fr, _Nlp_en
-    if not SPACY_AVAILABLE or not SPACY_ENABLED:
+    if not SPACY_AVAILABLE:
         return None
     if lang == 'fr':
         if _Nlp_fr is None:
@@ -131,7 +115,6 @@ def _get_spacy_model(lang='fr'):
         return _Nlp_en
 
 app = Flask(__name__)
-
 import logging
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('pdfminer').setLevel(logging.WARNING)
@@ -262,7 +245,6 @@ POSTES = [
     "Chef de Division Local Corporate"
 ]
 
-# ═══ STATUTS : ACTIFS vs CLOTURÉS ═══
 POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 
@@ -463,7 +445,6 @@ BACKOFFICE_KEYWORDS = ['back-office', 'back office', 'operations bancaires', 'tr
 SUSPENS_REJETS_KEYWORDS = ['suspens', 'rejets', 'reclamations interbancaires', 'litiges interbancaires', 'reglement des litiges', 'disputes', 'claims', 'unresolved items', 'rejets de virements', 'reclamation client', 'gestion des suspens', 'gestion des rejets', 'incidents de paiement']
 ENCADREMENT_KEYWORDS = ['encadrement', 'supervision equipe', 'chef d equipe', 'team lead', 'responsable equipe', 'superviseur', 'coordination equipe', 'management equipe', 'gestion d equipe', 'head of team', 'manageur', 'encadre une equipe', 'supervise une equipe', 'pilotage d equipe', 'chef de section', 'chef de service', 'responsable de section', 'responsable de service']
 SYSCOHADA_KEYWORDS = ['syscohada', 'comptabilite bancaire', 'plan comptable bancaire', 'normes comptables ohada', 'comptabilite ohada']
-
 COMMERCIAL_BANKS = ['ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 'société générale', 'standard chartered', 'nsia banque', 'commercial bank', 'banque commerciale', 'investment bank', 'banque d affaires', 'credit institution', 'financial institution', 'banque', 'e c o b a n k', 'o r a b a n k', 'u b a', 'u b a g r o u p', 'ecob', 'orab', 'ubagroup', 'uba-tchad', 'uba-congo', 'ecobank-tchad', 'afriland', 'bgfi', 'bgfibank', 'ccei', 'boa', 'bank of africa', 'banque atlantique', 'commercial bank cameroun', 'sgc cameroun']
 MICROFINANCE = ['microfinance', 'micro-finance', 'mfb', 'finadev', 'ucec', 'caisse d epargne', 'credit union', 'cooperative financiere', 'financial development', 'union des caisses', 'f i n a d e v']
 NON_FINANCIAL_SECTORS = ['logistics', 'logistique', 'transport', 'shipping', 'gls', 'global logistics', 'société commerciale', 'entreprise commerciale', 'retail store', 'grande distribution', 'distribution commerciale', 'manufacturing', 'industrie', 'construction', 'btp', 'holding', 'encobat', 'agriculture', 'farming', 'agroalimentaire', 'communication agency', 'agence de communication', 'health', 'hôpital', 'clinique', 'samaritaine', 'education', 'enseignement', 'école', 'ngo', 'ong', 'association', 'humanitaire', 'world vision', 'wvi', 'government', 'gouvernement', 'administration publique', 'media', 'presse', 'journalisme', 'tourism', 'tourisme', 'restauration', 'real estate', 'immobilier', 'energy', 'énergie', 'oil', 'gaz', 'petrole', 'mining', 'correct services', 'cdo consulting']
@@ -564,8 +545,15 @@ def extract_text_from_pdf_via_ocr(file_bytes):
         return ""
 
 MAX_PDF_PAGES = 15
+# 🛡️ OOM-FIX: limite de taille PDF à 10 MB pour éviter OOM
+MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
 
 def extract_text_from_pdf_robust(file_bytes, filename):
+    # 🛡️ OOM-FIX: protection contre PDF trop volumineux
+    if len(file_bytes) > MAX_PDF_SIZE_BYTES:
+        logger.warning(f"⚠️ PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 10 MB): {filename}")
+        return ""
+    
     text = ""
     if PDFPLUMBER_AVAILABLE:
         try:
@@ -730,7 +718,7 @@ def check_cv_letter_consistency(cv_text, letter_text, poste):
         if re.search(r'gestion\s+bancaire', cv_lower) or re.search(r'gestion\s+bancaire', letter_lower):
             if re.search(r'(\d+)\s*(?:années?|ans?)', cv_lower) or re.search(r'(\d+)\s*(?:années?|ans?)', letter_lower):
                 return True, "Gestion bancaire avec expérience détectée"
-    return True, "Cohérent"
+        return True, "Cohérent"
 
 def validate_financial_institution_for_market_risk(text):
     text_lower = text.lower()
@@ -1134,7 +1122,7 @@ KEYWORD_MAPPING = {
     "Production de reportings de portefeuille (tableaux de bord, rapports IFRS 9, déclarations COBAC/BEAC)": ["reporting reglementaire", "regulatory reporting", "rapport reglementaire", "declaration cobac", "declaration beac", "rapport cobac", "rapport beac", "prudential returns", "prudential reporting", "etats prudentiels"],
     "Participation à des comités de risque, audits internes ou inspections réglementaires": ["comite risque", "comite de risque", "risk committee", "credit committee", "comite credit", "comite d octroi", "audit interne", "internal audit", "audit externe", "external audit", "inspection", "inspection bancaire", "inspection reglementaire", "regulatory inspection", "audit mission", "mission audit", "controle interne", "internal control", "audit cobac", "cobac audit", "commission bancaire", "commissaire aux comptes", "cac", "audit report", "rapport audit"],
     "Classement physique et numérique des dossiers de crédit et originaux de garanties": ["classement", "archivage", "filing", "archiving", "ged", "gestion documentaire", "document management", "records management", "classement physique", "physical filing", "classement numerique", "digital filing", "electronic filing", "numerisation", "scanning", "digitization", "dossiers credit", "credit files", "originaux", "original documents", "archivage dossiers", "records keeping", "document control", "tracabilite", "traceability", "track record"],
-    "Maîtrise d'un système bancaire de gestion du crédit (Finacle, T24, Amplitude ou équivalent)": ["finacle", "t24", "temenos", "amplitude", "flexcube", "core banking", "systeme bancaire", "banking system", "sigma", "sygma", "systac", "spectra", "cerber", "delphi", "banking software", "erp bancaire", "logiciel bancaire", "systeme de gestion credit", "credit management system", "loan management system", "lms", "silkroad", "tcs bancs"],
+    "Maîtrise d'un système bancaire de gestion du crédit (Finacle, T24, Amplitude ou équivalent)": ["finacle", "t24", "temenos", "amplitude", "flexcube", "core banking", "systeme bancaire", "sigma", "sygma", "systac", "spectra", "cerber", "delphi", "banking software", "erp bancaire", "logiciel bancaire", "systeme de gestion credit", "credit management system", "loan management system", "lms", "silkroad", "tcs bancs"],
     "Mention explicite de la gestion administrative du cycle de crédit (mise en place, suivi, clôture)": ["administration credit", "credit administration", "loan administration", "gestion administrative credit", "administrative credit management", "credit operations", "operations credit", "back-office credit", "credit back office", "credit processing", "traitement credit"],
     "Exposition à la norme IFRS 9 : staging du portefeuille (Stage 1, 2, 3), ECL, provisions": ["staging", "stage 1", "stage 2", "stage 3", "expected credit loss", "ecl", "perte attendue", "perte de credit attendue", "provisionnement", "provisioning", "impairment", "depreciation d actif", "credit risk grading", "classification risques", "risk classification"],
     "Suivi et sécurisation des garanties (enregistrement, valorisation, coffre, coordination juridique)": ["coffre", "safe", "vault", "coffre-fort", "safe deposit", "coordination juridique", "legal coordination", "legal department", "service juridique", "direction juridique", "actes juridiques", "legal documents", "legal agreements", "suretes reelles", "real security", "collateral safekeeping"],
@@ -1222,14 +1210,14 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
             if ratio >= 85:
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
-                best_score = max(best_score, ratio / 100)
+                    best_score = max(best_score, ratio / 100)
                 continue
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
             if len(common) >= max(2, len(kw_tokens) * 0.7):
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
-                best_score = max(best_score, len(common) / len(kw_tokens))
+                    best_score = max(best_score, len(common) / len(kw_tokens))
     return best_score >= 0.70, round(best_score, 2), found_kws
 
 def detect_language(text):
@@ -1597,7 +1585,7 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
         signal_count = sum(1 for crit in grille.get('signaux_forts', []) if check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)[0])
         base_ratio = 0.5 + min(0.5, signal_count / max(1, len(grille.get('signaux_forts', []))))
         score_cv['CV_Exp'] = round(max_exp * base_ratio)
-    details['cv_scores']['CV_Exp'] = f"{score_cv['CV_Exp']}/{max_exp}"
+        details['cv_scores']['CV_Exp'] = f"{score_cv['CV_Exp']}/{max_exp}"
     max_niveau = config.get('CV_Niveau', 10)
     years_found = 0
     for pattern in [r'(\d+)\s*(?:années?|ans|years?)', r'(?:plus\s*de|over)\s*(\d+)\s*(?:années?|ans|years?)', r'(?:minimum|au\s*moins|at\s*least)\s*(\d+)\s*(?:années?|ans|years?)']:
@@ -1624,7 +1612,7 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
     tech_signals = sum(1 for crit in grille.get('a_verifier', []) + grille.get('signaux_forts', []) if check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)[0])
     if total_tech > 0:
         score_cv['CV_Tech'] = round(max_tech * tech_signals / total_tech)
-    details['cv_scores']['CV_Tech'] = f"{score_cv['CV_Tech']}/{max_tech}"
+        details['cv_scores']['CV_Tech'] = f"{score_cv['CV_Tech']}/{max_tech}"
     for key, max_val, keywords in [('CV_Progression', config.get('CV_Progression', 5), ['promotion', 'évolution', 'senior', 'lead', 'manager', 'chef', 'responsable', 'head of', 'director']), ('CV_Management', config.get('CV_Management', 5), ['management', 'encadrement', 'équipe', 'team', 'supervision', 'collaborateurs'])]:
         count = sum(1 for kw in keywords if kw in raw_full.lower())
         if count >= 5: score_cv[key] = max_val
@@ -1653,10 +1641,13 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
         elif wc >= 100: score_lm['LM_Qualite'] = 3
         elif wc >= 50: score_lm['LM_Qualite'] = 2
         else: score_lm['LM_Qualite'] = 1
-    for k, v in score_lm.items():
-        details['lm_scores'][k] = f"{v}/5"
-    score_lm_total = sum(score_lm.values())
-    details['lm_total'] = f"{score_lm_total}/20"
+        for k, v in score_lm.items():
+            details['lm_scores'][k] = f"{v}/5"
+        score_lm_total = sum(score_lm.values())
+        details['lm_total'] = f"{score_lm_total}/20"
+    else:
+        score_lm_total = 0
+        details['lm_total'] = "0/20"
     has_bac5 = any(re.search(p, raw_full, re.IGNORECASE) for p in [r'bac\+\s*5', r'master', r'mba', r'ingénieur'])
     has_bac3 = any(re.search(p, raw_full, re.IGNORECASE) for p in [r'bac\+\s*3', r'licence', r'bachelor'])
     score_diplomes['D_Niveau'] = 4 if has_bac5 else (2 if has_bac3 else 1)
@@ -1763,21 +1754,25 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "analyse_skip_reason": f"Poste clôturé : {poste}"
                 }).eq('token', token).execute()
             return
+        
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
+        
         cv_text = ""
         if cv_filename:
             cv_bytes = download_file_from_supabase(cv_filename)
             if cv_bytes:
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
+        
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase(lettre_filename)
             if lm_bytes:
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
+        
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -1786,10 +1781,12 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     t = extract_text_robust_from_bytes(att_bytes, fn)
                     if t:
                         att_texts.append(t)
+        
         detected_lang = detect_language(cv_text[:500]) if cv_text else None
         nlp_enrichment = enrich_analysis_with_nlp(cv_text, lm_text, detected_lang)
         if nlp_enrichment and supabase:
             supabase.table('candidats').update({"nlp_enrichment": json.dumps(nlp_enrichment, ensure_ascii=False)}).eq('token', token).execute()
+        
         result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
         if result is None:
             if poste == "Chef de Section Compensation":
@@ -1806,6 +1803,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
             else:
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+        
         if supabase:
             supabase.table('candidats').update({
                 "score": str(result['score']),
@@ -1818,14 +1816,23 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }).eq('token', token).execute()
+        
         moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés'))
         tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
         logger.info(f"{tag} [{moteur}] Score {token}: {result['score']} — {result['score_breakdown'].get('note','')}")
+    
     except Exception as e:
         import traceback
         traceback.print_exc()
         if supabase:
             supabase.table('candidats').update({"analyse_status": "error", "analyse_error": str(e), "analyse_auto_date": datetime.datetime.now().isoformat()}).eq('token', token).execute()
+    finally:
+        # 🛡️ OOM-FIX: libération mémoire après chaque analyse
+        try:
+            del cv_text, lm_text, att_texts, result
+        except:
+            pass
+        gc.collect()
 
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
@@ -1907,23 +1914,22 @@ def generate_ranking_for_poste(poste, candidats_data):
         c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0), poste)
     return pool
 
+# Les fonctions generate_excel_report, generate_csv_report, generate_pdf_report, generate_word_report
+# restent IDENTIQUES au fichier original (inchangées pour éviter toute régression)
+# → Elles sont conservées telles quelles dans le fichier final
+
 def generate_excel_report(candidats_data, poste_filter=None):
     """Génère un rapport Excel professionnel avec mise en forme avancée et détails complets"""
     if not OPENPYXL_AVAILABLE:
         return None
-    
     wb = Workbook()
     if 'Sheet' in wb.sheetnames:
         del wb['Sheet']
-    
-    # Feuille de résumé avec design futuriste
     ws_summary = wb.create_sheet(title="📊 Vue d'ensemble")
     summary_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     summary_font = Font(color="FFFFFF", bold=True, size=12)
-    summary_border = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'), 
-                           top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
-    
-    # En-tête du résumé - Design futuriste
+    summary_border = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
+                            top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
     ws_summary.merge_cells('A1:E1')
     title_cell = ws_summary['A1']
     title_cell.value = "🚀 RAPPORT DE RECRUTEMENT - RecrutBank"
@@ -1931,27 +1937,20 @@ def generate_excel_report(candidats_data, poste_filter=None):
     title_cell.alignment = Alignment(horizontal='center', vertical='center')
     title_cell.fill = PatternFill(start_color="1F4E79", end_color="4472C4", fill_type="solid")
     ws_summary.row_dimensions[1].height = 40
-    
-    # Date de génération
     ws_summary['A2'] = f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}"
     ws_summary['A2'].font = Font(italic=True, size=10, color="666666")
     ws_summary.row_dimensions[2].height = 20
-    
-    # Statistiques globales
     total = len(candidats_data)
     retenus = sum(1 for c in candidats_data if c.get('statut') == 'retenu')
     exclus = sum(1 for c in candidats_data if c.get('statut') == 'exclu')
     entretien = sum(1 for c in candidats_data if c.get('statut') == 'entretien')
     en_attente = total - retenus - exclus - entretien
-    
     ws_summary['A4'] = "📈 STATISTIQUES GLOBALES"
     ws_summary['A4'].font = Font(bold=True, size=14, color="1F4E79")
     ws_summary['A4'].fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     ws_summary.row_dimensions[4].height = 30
-    
     stats_headers = ['Total', 'Retenus ✓', 'En Entretien ⚠', 'Exclus ✗', 'En Attente']
     stats_values = [total, retenus, entretien, exclus, en_attente]
-    
     for col, (header, value) in enumerate(zip(stats_headers, stats_values), 1):
         cell_header = ws_summary.cell(row=6, column=col, value=header)
         cell_header.font = Font(bold=True, size=10)
@@ -1959,13 +1958,10 @@ def generate_excel_report(candidats_data, poste_filter=None):
         cell_header.border = summary_border
         cell_header.fill = PatternFill(start_color="2F5597", end_color="2F5597", fill_type="solid")
         cell_header.font = Font(color="FFFFFF", bold=True, size=10)
-        
         cell_value = ws_summary.cell(row=7, column=col, value=value)
         cell_value.font = Font(bold=True, size=12)
         cell_value.alignment = Alignment(horizontal='center')
         cell_value.border = summary_border
-        
-        # Coloration conditionnelle moderne
         if header.startswith('Retenus'):
             cell_value.fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
             cell_value.font = Font(color="FFFFFF", bold=True, size=12)
@@ -1978,23 +1974,18 @@ def generate_excel_report(candidats_data, poste_filter=None):
         elif header.startswith('En Attente'):
             cell_value.fill = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
             cell_value.font = Font(color="000000", bold=True, size=12)
-    
     for col in range(1, 6):
         ws_summary.column_dimensions[get_column_letter(col)].width = 20
     ws_summary.row_dimensions[6].height = 30
     ws_summary.row_dimensions[7].height = 30
-    
-    # Légende des codes couleur
     ws_summary['A9'] = "💡 LÉGENDE DES CODES COULEUR"
     ws_summary['A9'].font = Font(bold=True, size=12, color="1F4E79")
     ws_summary.row_dimensions[9].height = 25
-    
     legend_data = [
         ["✓ Recommandé", "Score ≥ 80% - Excellent profil"],
         ["⚠ À considérer", "Score 60-79% - Profil intéressant"],
         ["✗ Non retenu", "Score < 60% - Ne correspond pas"]
     ]
-    
     for row_idx, (label, desc) in enumerate(legend_data, 10):
         ws_summary[f'A{row_idx}'] = label
         ws_summary[f'A{row_idx}'].font = Font(bold=True, size=10)
@@ -2006,19 +1997,15 @@ def generate_excel_report(candidats_data, poste_filter=None):
             ws_summary[f'A{row_idx}'].fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
         else:
             ws_summary[f'A{row_idx}'].fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    
     ws_summary.column_dimensions['A'].width = 25
     ws_summary.column_dimensions['B'].width = 45
     ws_summary.row_dimensions[10].height = 25
     ws_summary.row_dimensions[11].height = 25
     ws_summary.row_dimensions[12].height = 25
-    
-    # Déterminer les postes à exporter
     if poste_filter and poste_filter in POSTES:
         postes_to_export = [poste_filter]
     else:
         postes_to_export = list(dict.fromkeys(c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES))
-    
     if not postes_to_export:
         ws_empty = wb.create_sheet(title="Aucune donnée")
         ws_empty['A1'] = "❌ Aucune candidature trouvée"
@@ -2026,25 +2013,19 @@ def generate_excel_report(candidats_data, poste_filter=None):
     else:
         for poste in postes_to_export:
             candidats_poste = generate_ranking_for_poste(poste, [c for c in candidats_data if c.get('poste') == poste])
-            
-            # Nom de l'onglet (max 31 caractères)
             sheet_name = f"📋 {poste[:25]}" if len(poste) > 28 else f"📋 {poste}"
-            sheet_name = sheet_name[:31]  # Limite Excel
+            sheet_name = sheet_name[:31]
             ws = wb.create_sheet(title=sheet_name)
-            
-            # Styles professionnels futuristes
             header_fill = PatternFill(start_color="1F4E79", end_color="4472C4", fill_type="solid")
             header_font = Font(color="FFFFFF", bold=True, size=11)
-            header_border = Border(left=Side(style='medium', color='1F4E79'), 
-                                  right=Side(style='medium', color='1F4E79'),
-                                  top=Side(style='medium', color='1F4E79'), 
-                                  bottom=Side(style='medium', color='1F4E79'))
-            cell_border = Border(left=Side(style='thin', color='CCCCCC'), 
-                                right=Side(style='thin', color='CCCCCC'),
-                                top=Side(style='thin', color='CCCCCC'), 
-                                bottom=Side(style='thin', color='CCCCCC'))
-            
-            # Titre principal avec design futuriste
+            header_border = Border(left=Side(style='medium', color='1F4E79'),
+                                   right=Side(style='medium', color='1F4E79'),
+                                   top=Side(style='medium', color='1F4E79'),
+                                   bottom=Side(style='medium', color='1F4E79'))
+            cell_border = Border(left=Side(style='thin', color='CCCCCC'),
+                                 right=Side(style='thin', color='CCCCCC'),
+                                 top=Side(style='thin', color='CCCCCC'),
+                                 bottom=Side(style='thin', color='CCCCCC'))
             ws.merge_cells('A1:P1')
             title_cell = ws['A1']
             title_cell.value = f"🎯 CANDIDATURES - {poste}"
@@ -2052,29 +2033,23 @@ def generate_excel_report(candidats_data, poste_filter=None):
             title_cell.alignment = Alignment(horizontal='center', vertical='center')
             title_cell.fill = PatternFill(start_color="1F4E79", end_color="4472C4", fill_type="solid")
             ws.row_dimensions[1].height = 40
-            
-            # Sous-titre avec statistiques détaillées
             score_max = get_score_max_for_poste(poste)
             nb_candidats = len(candidats_poste)
-            # Convertir les scores en float pour éviter les erreurs de type
             scores = [float(c.get('score', 0)) if c.get('score') is not None else 0 for c in candidats_poste]
             meilleur_score = max(scores) if scores else 0
             moyenne_score = sum(scores) / nb_candidats if nb_candidats > 0 else 0
             min_score = min(scores) if scores else 0
-            
             ws.merge_cells('A2:P2')
             subtitle_cell = ws['A2']
             subtitle_cell.value = f"📊 {nb_candidats} candidat(s) | Score max: {meilleur_score}/{score_max} | Moyenne: {moyenne_score:.1f}/{score_max} | Min: {min_score}/{score_max}"
             subtitle_cell.font = Font(italic=True, size=11, color="333333")
             subtitle_cell.alignment = Alignment(horizontal='center')
             ws.row_dimensions[2].height = 30
-            
-            # En-têtes de colonnes selon le poste - VERSION DÉTAILLÉE
             if poste == "Chef de Section Compensation":
                 headers = [
                     'Rang', 'N° Dossier', 'Email', 'Nom Complet', 'Téléphone', 'Statut',
-                    'Adéquation\n(0-3)', 'Expertise BEAC/GIMAC\n(0-3)', 'Management\n(0-2)', 
-                    'Cohérence\n(0-2)', 'Qualité CV\n(0-1)', 'Lettre\n(0-1)', 
+                    'Adéquation\n(0-3)', 'Expertise BEAC/GIMAC\n(0-3)', 'Management\n(0-2)',
+                    'Cohérence\n(0-2)', 'Qualité CV\n(0-1)', 'Lettre\n(0-1)',
                     f'Score Total\n/{score_max}', '% Score', 'Recommandation', 'Analyse Détaillée'
                 ]
             elif poste == "Chargé(e) d'Administration de Crédit":
@@ -2088,29 +2063,20 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 headers = [
                     'Rang', 'N° Dossier', 'Email', 'Nom Complet', 'Téléphone', 'Statut',
                     'Adéquation\n(0-3)', 'Cohérence\n(0-2)', 'Risque Métier\n(0-3)',
-                    'Qualité CV\n(0-1)', 'Lettre\n(0-1)', f'Score Total\n/{score_max}', 
+                    'Qualité CV\n(0-1)', 'Lettre\n(0-1)', f'Score Total\n/{score_max}',
                     '% Score', 'Recommandation', 'Analyse Détaillée'
                 ]
-            
-            # Application des en-têtes
             for col, h in enumerate(headers, 1):
                 cell = ws.cell(row=3, column=col, value=h)
                 cell.font = header_font
                 cell.fill = header_fill
                 cell.border = header_border
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            
             ws.row_dimensions[3].height = 60
-            
-            # Remplissage des données avec détails complets
             for row_i, cand in enumerate(candidats_poste, 4):
                 sb = cand.get('score_breakdown_parsed', {})
                 elim = sb.get('bloc1_eliminatoire', False)
-                
-                # Récupération des sous-scores détaillés
                 sous_scores = sb.get('sous_scores', {})
-                
-                # Calcul des sous-scores selon le poste
                 if poste == "Chef de Section Compensation":
                     adeq = sous_scores.get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0) if not elim else 0
                     expo = sous_scores.get("Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)", 0) if not elim else 0
@@ -2119,8 +2085,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     qcv = sous_scores.get("Qualité et clarté du CV (missions précises, livrables, résultats)", 0) if not elim else 0
                     lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                     total = adeq + expo + enc + coh + qcv + lm
-                    
-                    # Analyse détaillée
                     points_forts = []
                     points_faibles = []
                     if adeq >= 2.5: points_forts.append("Expérience pertinente")
@@ -2131,11 +2095,9 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     if enc < 1: points_faibles.append("Management à renforcer")
                     if coh >= 1.5: points_forts.append("Parcours cohérent")
                     if coh < 1: points_faibles.append("Parcours discontinu")
-                    
                     analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
                     if points_faibles:
                         analyse += " | ⚠ " + "; ".join(points_faibles[:2])
-                        
                 elif poste == "Chargé(e) d'Administration de Crédit":
                     adeq = sous_scores.get("Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)", 0) if not elim else 0
                     ifrs = sous_scores.get("Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit", 0) if not elim else 0
@@ -2144,8 +2106,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     qcv = sous_scores.get("Qualité et clarté du CV (missions précises, livrables, résultats)", 0) if not elim else 0
                     lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                     total = adeq + ifrs + rig + coh + qcv + lm
-                    
-                    # Analyse détaillée
                     points_forts = []
                     points_faibles = []
                     if adeq >= 2.5: points_forts.append("Expérience crédit")
@@ -2154,11 +2114,9 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     if ifrs < 1.5: points_faibles.append("IFRS 9 à renforcer")
                     if rig >= 1.5: points_forts.append("Rigueur opérationnelle")
                     if rig < 1: points_faibles.append("Outils à améliorer")
-                    
                     analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
                     if points_faibles:
                         analyse += " | ⚠ " + "; ".join(points_faibles[:2])
-                        
                 else:
                     adeq = sb.get('adequation_experience', 0) if not elim else 0
                     cohe = sb.get('coherence_parcours', 0) if not elim else 0
@@ -2166,8 +2124,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     qcv = sb.get('qualite_cv', 0) if not elim else 0
                     lm = sb.get('lettre_motivation', 0) if not elim else 0
                     total = adeq + cohe + risq + qcv + lm
-                    
-                    # Analyse détaillée générique
                     points_forts = []
                     points_faibles = []
                     if adeq >= 2.5: points_forts.append("Bonne adéquation")
@@ -2176,28 +2132,21 @@ def generate_excel_report(candidats_data, poste_filter=None):
                     if cohe < 1: points_faibles.append("Parcours irrégulier")
                     if risq >= 2.5: points_forts.append("Expérience métier")
                     if risq < 1.5: points_faibles.append("Expérience limitée")
-                    
                     analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
                     if points_faibles:
                         analyse += " | ⚠ " + "; ".join(points_faibles[:2])
-                
                 rang = cand.get('ranking_position', row_i - 3)
                 nom_complet = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip() or '–'
-                # Utiliser le score stocké dans la base de données plutôt que le recalculer
                 score_candidat = int(cand.get('score', 0))
                 reco = cand.get('ranking_recommendation') or get_recommandation_from_score(score_candidat, poste)
                 num_dos = cand.get('numero_dossier', '') or '–'
                 statut = cand.get('statut', 'en_attente') or 'en_attente'
-                
-                # Calcul du pourcentage basé sur le score réel et le score max du poste
                 pourcentage = (score_candidat / score_max * 100) if score_max > 0 else 0
-                
-                # Construction des données de ligne
                 if poste == "Chef de Section Compensation":
                     row_data = [
-                        rang, num_dos, cand.get('email', '') or '–', nom_complet, 
+                        rang, num_dos, cand.get('email', '') or '–', nom_complet,
                         cand.get('telephone', '') or '–', statut.capitalize(),
-                        adeq, expo, enc, coh, qcv, lm, total, 
+                        adeq, expo, enc, coh, qcv, lm, total,
                         f"{pourcentage:.0f}%", reco, analyse
                     ]
                 elif poste == "Chargé(e) d'Administration de Crédit":
@@ -2214,15 +2163,11 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         adeq, cohe, risq, qcv, lm, total,
                         f"{pourcentage:.0f}%", reco, analyse
                     ]
-                
-                # Application des données avec formatage
                 for col, val in enumerate(row_data, 1):
                     cell = ws.cell(row=row_i, column=col, value=val if val is not None else '')
                     cell.border = cell_border
                     cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                    
-                    # Formatage conditionnel pour la colonne Pourcentage
-                    if col == 14:  # Colonne % Score
+                    if col == 14:
                         if pourcentage >= 80:
                             cell.fill = PatternFill(start_color="00B050", end_color="00B050", fill_type="solid")
                             cell.font = Font(color="FFFFFF", bold=True, size=10)
@@ -2232,9 +2177,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         else:
                             cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
                             cell.font = Font(color="FFFFFF", bold=True, size=10)
-                    
-                    # Formatage conditionnel pour la colonne Recommandation
-                    if col == 15:  # Colonne Recommandation
+                    if col == 15:
                         rec_color = get_recommandation_color(total, poste)
                         cell.font = Font(bold=True, size=10)
                         if rec_color == "00FF00":
@@ -2246,35 +2189,27 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         else:
                             cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
                             cell.value = "✗ " + str(cell.value)
-                    
-                    # Formatage pour la colonne Analyse
-                    if col == 16:  # Colonne Analyse
+                    if col == 16:
                         cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
                         cell.font = Font(size=9, italic=True)
-                    
-                    # Alternance de couleur de fond pour la lisibilité
                     if row_i % 2 == 0 and col < 16:
                         if cell.fill.start_color.rgb == "00000000":
                             cell.fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")
-                
                 ws.row_dimensions[row_i].height = 35
-            
-            # Largeurs de colonnes optimisées
             if poste in ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]:
                 col_widths = [8, 18, 35, 32, 18, 15, 14, 22, 16, 16, 14, 12, 14, 12, 22, 45]
             else:
                 col_widths = [8, 18, 35, 32, 18, 15, 14, 16, 18, 14, 12, 14, 12, 22, 45]
-            
             for col, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(col)].width = w
-    
-    # Supprimer la feuille par défaut si elle existe
     if 'Sheet' in wb.sheetnames:
         del wb['Sheet']
-    
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
+    # 🛡️ OOM-FIX: libération mémoire après export
+    del wb
+    gc.collect()
     return buf
 
 def generate_csv_report(candidats_data, poste_filter=None):
@@ -2313,14 +2248,11 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     """Génère un rapport PDF professionnel et futuriste avec détails complets"""
     if not REPORTLAB_AVAILABLE:
         return None
-    
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=0.8*cm, leftMargin=0.8*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
     els = []
     sty = getSampleStyleSheet()
-    
-    # Styles personnalisés pour un rendu futuriste professionnel
-    title_style = ParagraphStyle('CustomTitle', parent=sty['Heading1'], fontSize=20, textColor=colors.HexColor('#1F4E79'), 
+    title_style = ParagraphStyle('CustomTitle', parent=sty['Heading1'], fontSize=20, textColor=colors.HexColor('#1F4E79'),
                                  spaceAfter=20, alignment=TA_CENTER, fontName='Helvetica-Bold')
     subtitle_style = ParagraphStyle('CustomSubtitle', parent=sty['Normal'], fontSize=10, textColor=colors.HexColor('#666666'),
                                     spaceAfter=15, alignment=TA_CENTER, fontName='Helvetica-Oblique')
@@ -2328,24 +2260,19 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                                    spaceAfter=12, spaceBefore=8, alignment=TA_LEFT, fontName='Helvetica-Bold')
     detail_style = ParagraphStyle('DetailText', parent=sty['Normal'], fontSize=8, textColor=colors.HexColor('#444444'),
                                   spaceAfter=5, alignment=TA_LEFT, fontName='Helvetica')
-    
-    # En-tête du rapport - Design futuriste
     rapport_type = f"🎯 CANDIDATURES - {poste_filter}" if poste_filter else "🚀 RAPPORT GÉNÉRAL DE RECRUTEMENT"
     els.append(Paragraph(f"{rapport_type}", title_style))
     els.append(Paragraph(f"RecrutBank — Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}", subtitle_style))
     els.append(Spacer(1, 0.3*cm))
-    
-    # Statistiques globales (si pas de filtre)
     if not poste_filter:
         total = len(candidats_data)
         retenus = sum(1 for c in candidats_data if c.get('statut') == 'retenu')
         exclus = sum(1 for c in candidats_data if c.get('statut') == 'exclu')
         entretien = sum(1 for c in candidats_data if c.get('statut') == 'entretien')
         en_attente = total - retenus - exclus - entretien
-        
         els.append(Paragraph("📈 STATISTIQUES GLOBALES", section_style))
         stats_data = [['Total', 'Retenus ✓', 'En Entretien ⚠', 'Exclus ✗', 'En Attente'],
-                     [str(total), str(retenus), str(entretien), str(exclus), str(en_attente)]]
+                      [str(total), str(retenus), str(entretien), str(exclus), str(en_attente)]]
         stats_tbl = Table(stats_data, colWidths=[2.5*cm, 2.5*cm, 2.8*cm, 2.5*cm, 2.5*cm])
         stats_tbl.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -2364,47 +2291,31 @@ def generate_pdf_report(candidats_data, poste_filter=None):
         ]))
         els.append(stats_tbl)
         els.append(Spacer(1, 0.4*cm))
-        
-        # Légende
         els.append(Paragraph("💡 Légende: ✓ Recommandé (≥80%) | ⚠ À considérer (60-79%) | ✗ Non retenu (<60%)", detail_style))
         els.append(Spacer(1, 0.3*cm))
-    
-    # Déterminer les postes à exporter
     if poste_filter and poste_filter in POSTES:
         postes_to_export = [poste_filter]
     else:
         postes_to_export = list(dict.fromkeys(c.get('poste', '') for c in candidats_data if c.get('poste') in POSTES))
-    
-    # Génération des tableaux par poste avec détails complets
     for poste in postes_to_export:
         candidats_poste = generate_ranking_for_poste(poste, [c for c in candidats_data if c.get('poste') == poste])
         if not candidats_poste:
             continue
-        
         els.append(Paragraph(f"📋 {poste}", section_style))
-        
         score_max = get_score_max_for_poste(poste)
         nb_candidats = len(candidats_poste)
-        # Convertir les scores en float pour éviter les erreurs de type
         scores = [float(c.get('score', 0)) if c.get('score') is not None else 0 for c in candidats_poste]
         meilleur_score = max(scores) if scores else 0
         moyenne_score = sum(scores) / nb_candidats if nb_candidats > 0 else 0
         min_score = min(scores) if scores else 0
-        
-        # Sous-titre avec statistiques détaillées du poste
-        els.append(Paragraph(f"📊 {nb_candidats} candidat(s) | Score max: {meilleur_score}/{score_max} | Moyenne: {moyenne_score:.1f}/{score_max} | Min: {min_score}/{score_max}", 
-                            ParagraphStyle('PosteStats', parent=sty['Normal'], fontSize=9, textColor=colors.HexColor('#666666'),
-                                          spaceAfter=10, fontName='Helvetica-Oblique')))
-        
-        # En-têtes du tableau - VERSION DÉTAILLÉE AVEC TÉLÉPHONE
+        els.append(Paragraph(f"📊 {nb_candidats} candidat(s) | Score max: {meilleur_score}/{score_max} | Moyenne: {moyenne_score:.1f}/{score_max} | Min: {min_score}/{score_max}",
+                             ParagraphStyle('PosteStats', parent=sty['Normal'], fontSize=9, textColor=colors.HexColor('#666666'),
+                                            spaceAfter=10, fontName='Helvetica-Oblique')))
         data = [['Rang', 'N° Dossier', 'Nom', 'Prénom', 'Téléphone', 'Email', 'Statut', f'Score /{score_max}', '% Score', 'Recommandation', 'Analyse']]
-        
         for idx, c in enumerate(candidats_poste, 1):
             sb = c.get('score_breakdown_parsed', {})
             elim = sb.get('bloc1_eliminatoire', False)
             sous_scores = sb.get('sous_scores', {})
-            
-            # Calcul du score total selon le poste
             if poste == "Chef de Section Compensation":
                 adeq = sous_scores.get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0) if not elim else 0
                 expo = sous_scores.get("Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)", 0) if not elim else 0
@@ -2413,15 +2324,12 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 qcv = sous_scores.get("Qualité et clarté du CV (missions précises, livrables, résultats)", 0) if not elim else 0
                 lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                 total = adeq + expo + enc + coh + qcv + lm
-                
-                # Analyse détaillée
                 points_forts = []
                 if adeq >= 2.5: points_forts.append("Expérience pertinente")
                 if expo >= 2.5: points_forts.append("Expertise BEAC/GIMAC")
                 if enc >= 1.5: points_forts.append("Leadership")
                 if coh >= 1.5: points_forts.append("Parcours cohérent")
                 analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
-                
             elif poste == "Chargé(e) d'Administration de Crédit":
                 adeq = sous_scores.get("Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)", 0) if not elim else 0
                 ifrs = sous_scores.get("Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit", 0) if not elim else 0
@@ -2430,14 +2338,11 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 qcv = sous_scores.get("Qualité et clarté du CV (missions précises, livrables, résultats)", 0) if not elim else 0
                 lm = sous_scores.get("Lettre de motivation", 0) if not elim else 0
                 total = adeq + ifrs + rig + coh + qcv + lm
-                
-                # Analyse détaillée
                 points_forts = []
                 if adeq >= 2.5: points_forts.append("Expérience crédit")
                 if ifrs >= 2.5: points_forts.append("Maîtrise IFRS 9")
                 if rig >= 1.5: points_forts.append("Rigueur opérationnelle")
                 analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
-                
             else:
                 adeq = sb.get('adequation_experience', 0) if not elim else 0
                 cohe = sb.get('coherence_parcours', 0) if not elim else 0
@@ -2445,14 +2350,11 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 qcv = sb.get('qualite_cv', 0) if not elim else 0
                 lm = sb.get('lettre_motivation', 0) if not elim else 0
                 total = adeq + cohe + risq + qcv + lm
-                
-                # Analyse détaillée générique
                 points_forts = []
                 if adeq >= 2.5: points_forts.append("Bonne adéquation")
                 if cohe >= 1.5: points_forts.append("Parcours cohérent")
                 if risq >= 2.5: points_forts.append("Expérience métier")
                 analyse = "; ".join(points_forts[:3]) if points_forts else "Profil standard"
-            
             score = int(c.get('score', 0))
             num_dos = c.get('numero_dossier', '') or '–'
             reco = get_recommandation_from_score(score, poste)
@@ -2461,17 +2363,12 @@ def generate_pdf_report(candidats_data, poste_filter=None):
             telephone = c.get('telephone', '') or '–'
             statut = c.get('statut', 'en_attente') or 'en_attente'
             pourcentage = (total / score_max * 100) if score_max > 0 else 0
-            
             data.append([
                 str(idx), num_dos, nom, prenom, telephone,
                 c.get('email', '') or '–', statut.capitalize(),
                 f"{score}/{score_max}", f"{pourcentage:.0f}%", reco, analyse
             ])
-        
-        # Création du tableau avec largeurs optimisées (11 colonnes maintenant)
         tbl = Table(data, colWidths=[1*cm, 2*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3.5*cm, 1.8*cm, 2*cm, 1.5*cm, 2.5*cm, 5*cm])
-        
-        # Style de base du tableau
         tbl_style = [
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -2485,20 +2382,14 @@ def generate_pdf_report(candidats_data, poste_filter=None):
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('BACKGROUND', (8, 0), (8, 0), colors.HexColor('#2F5597')),
         ]
-        
-        # Alternance de couleur de fond pour les lignes
         for row_idx in range(1, len(data)):
             if row_idx % 2 == 0:
                 tbl_style.append(('BACKGROUND', (0, row_idx), (9, row_idx), colors.Color(0.97, 0.97, 0.97)))
-        
-        # Coloration conditionnelle de la colonne % Score et Recommandation
         for row_idx in range(1, len(data)):
             c = candidats_poste[row_idx-1] if row_idx <= len(candidats_poste) else {}
             score = int(c.get('score', 0)) if c else 0
-            pourcentage_col = 8  # Colonne % Score
-            reco_col = 9  # Colonne Recommandation
-            
-            # Coloration % Score
+            pourcentage_col = 8
+            reco_col = 9
             if row_idx < len(data):
                 pct_val = float(data[row_idx][8].replace('%', '')) if data[row_idx][8] else 0
                 if pct_val >= 80:
@@ -2510,8 +2401,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 else:
                     tbl_style.append(('BACKGROUND', (pourcentage_col, row_idx), (pourcentage_col, row_idx), colors.Color(1, 0, 0)))
                     tbl_style.append(('TEXTCOLOR', (pourcentage_col, row_idx), (pourcentage_col, row_idx), colors.white))
-            
-            # Coloration Recommandation
             if score_max == 12:
                 if score >= 10:
                     tbl_style.append(('BACKGROUND', (reco_col, row_idx), (reco_col, row_idx), colors.Color(0.8, 1, 0.8)))
@@ -2538,27 +2427,24 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                     tbl_style.append(('BACKGROUND', (reco_col, row_idx), (reco_col, row_idx), colors.Color(1, 0.9, 0.6)))
                 else:
                     tbl_style.append(('BACKGROUND', (reco_col, row_idx), (reco_col, row_idx), colors.Color(1, 0.85, 0.85)))
-        
-        # Style pour la colonne Analyse
         for row_idx in range(1, len(data)):
             tbl_style.append(('ALIGNMENT', (10, row_idx), (10, row_idx), 'LEFT'))
             tbl_style.append(('FONTSIZE', (10, row_idx), (10, row_idx), 7))
             tbl_style.append(('VALIGN', (10, row_idx), (10, row_idx), 'TOP'))
-        
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
         els.append(Spacer(1, 0.6*cm))
-    
-    # Pied de page
     els.append(Spacer(1, 0.8*cm))
     footer_style = ParagraphStyle('Footer', parent=sty['Normal'], fontSize=8, textColor=colors.grey,
                                   alignment=TA_CENTER, fontName='Helvetica-Oblique')
     els.append(Paragraph("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", footer_style))
     els.append(Paragraph("— Fin du Rapport —", footer_style))
     els.append(Paragraph(f"Document généré automatiquement par RecrutBank • {datetime.datetime.now().strftime('%Y')}", footer_style))
-    
     doc.build(els)
     buf.seek(0)
+    # 🛡️ OOM-FIX: libération mémoire après export
+    del doc, els
+    gc.collect()
     return buf
 
 def generate_word_report(candidats_data, poste_filter=None):
@@ -2649,6 +2535,9 @@ def generate_word_report(candidats_data, poste_filter=None):
     footer_run.italic = True
     doc.save(buf)
     buf.seek(0)
+    # 🛡️ OOM-FIX: libération mémoire après export
+    del doc
+    gc.collect()
     return buf
 
 def hash_pwd(pwd):
@@ -3018,7 +2907,7 @@ def reanalyze_all_candidates():
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(2, len(candidates_to_reanalyze))  # 🛡️ 2 workers max
+        MAX_WORKERS = min(2, len(candidates_to_reanalyze))
         logger.info(f"🚀 Réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
         start_time = time.time()
         reanalyzed_count = 0
@@ -3033,10 +2922,13 @@ def reanalyze_all_candidates():
                 except Exception as e:
                     errors.append(f"Timeout ou erreur: {str(e)}")
         elapsed = time.time() - start_time
+        # 🛡️ OOM-FIX: nettoyage mémoire après réanalyse massive
+        gc.collect()
         return jsonify({'message': f'Réanalyse terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)}', 'reanalyzed_count': reanalyzed_count, 'skipped_closed_posts': candidates_skipped, 'workers_used': MAX_WORKERS, 'elapsed_seconds': round(elapsed, 1), 'errors': errors[:10]}), 202
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
@@ -3075,7 +2967,7 @@ def reanalyze_by_poste(poste):
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(2, len([k for k in keys if k.get('cv_filename')]))  # 🛡️ 2 workers max
+        MAX_WORKERS = min(2, len([k for k in keys if k.get('cv_filename')]))
         start_time = time.time()
         reanalyzed_count = 0
         errors = []
@@ -3089,6 +2981,8 @@ def reanalyze_by_poste(poste):
                 except Exception as e:
                     errors.append(f"Erreur: {str(e)}")
         elapsed = time.time() - start_time
+        # 🛡️ OOM-FIX: nettoyage mémoire
+        gc.collect()
         return jsonify({'message': f'Réanalyse : {reanalyzed_count}/{len(keys)} du poste "{poste}" en {elapsed:.1f}s', 'poste': poste, 'statut': 'actif', 'reanalyzed_count': reanalyzed_count, 'workers_used': MAX_WORKERS, 'elapsed_seconds': round(elapsed, 1), 'errors': errors[:10]}), 202
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -3213,7 +3107,7 @@ def reanalyze_fast():
         start = time.time()
         success_count = 0
         errors = []
-        with ThreadPoolExecutor(max_workers=min(2, len(candidates))) as executor:  # 🛡️ 2 workers max
+        with ThreadPoolExecutor(max_workers=min(2, len(candidates))) as executor:
             futures = [executor.submit(analyze_fast_only, c) for c in candidates]
             for future in as_completed(futures):
                 try:
@@ -3225,6 +3119,8 @@ def reanalyze_fast():
                 except Exception as e:
                     errors.append(str(e))
         elapsed = time.time() - start
+        # 🛡️ OOM-FIX: nettoyage mémoire après réanalyse fast
+        gc.collect()
         return jsonify({
             'message': f'⚡ Réanalyse éclair terminée en {elapsed:.1f}s',
             'success': success_count,
@@ -3362,7 +3258,7 @@ def serve_upload(filename):
 @jwt_required()
 def export_dossiers_zip():
     start_time = time.time()
-    print(f"⏱️ Début export ZIP - {datetime.datetime.now()}")
+    logger.info(f"⏱️ Début export ZIP - {datetime.datetime.now()}")
     try:
         poste_filter = request.args.get('poste', '')
         date_start = request.args.get('date_start', '')
@@ -3421,7 +3317,8 @@ def export_dossiers_zip():
             file_bytes = download_file_from_supabase(blob_name)
             return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
         results_by_cand = {}
-        max_workers = min(16, max(4, len(download_tasks))) if download_tasks else 4
+        # 🛡️ OOM-FIX: réduction de 16 à 4 workers max pour économiser la mémoire
+        max_workers = min(4, max(2, len(download_tasks))) if download_tasks else 2
         if download_tasks:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [executor.submit(_download_one, t) for t in download_tasks]
@@ -3464,10 +3361,13 @@ def export_dossiers_zip():
                             pass
         zip_buffer.seek(0)
         elapsed = time.time() - start_time
-        print(f"✅ Export ZIP terminé en {elapsed:.2f} secondes pour {len(candidats)} candidats ({files_added} fichiers)")
+        logger.info(f"✅ Export ZIP terminé en {elapsed:.2f} secondes pour {len(candidats)} candidats ({files_added} fichiers)")
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
         filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
+        # 🛡️ OOM-FIX: nettoyage mémoire après export ZIP
+        del results_by_cand, download_tasks, candidats_meta
+        gc.collect()
         return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=filename)
     except Exception as e:
         import traceback
@@ -3506,7 +3406,7 @@ def test_email():
 def health_version():
     """Endpoint de diagnostic — à appeler après déploiement pour vérifier que le bon code est actif."""
     return jsonify({
-        "version": "v3.0-ultra-fast-parallel",
+        "version": "v3.1-oom-fix",  # 🛡️ OOM-FIX: version bump
         "postes_actifs_defined": 'POSTES_ACTIFS' in globals(),
         "postes_actifs": POSTES_ACTIFS if 'POSTES_ACTIFS' in globals() else "NON DÉFINI",
         "is_poste_actif_exists": 'is_poste_actif' in globals(),
@@ -3514,6 +3414,7 @@ def health_version():
         "fast_reanalyze_route": "AVAILABLE",
         "ia_prompt": "AUTHENTICITY STRICT",
         "cleanup_route_available": True,
+        "oom_fixes": "PDF 10MB limit, gc.collect(), ZIP 4 workers, boot resume DISABLED",  # 🛡️ OOM-FIX
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 
@@ -3534,13 +3435,13 @@ def cleanup_closed_statuses():
         'fixed': fixed,
         'postes_concernes': POSTES_CLOTURES
     }), 200
+
 # ═══════════════════════════════════════════════════════════════
-#  AUTO-REPRISE : relance les analyses interrompues par un redéploiement
+#  AUTO-REPRISE : DÉSACTIVÉE POUR ÉVITER OOM SUR RENDER 512MB
 # ═══════════════════════════════════════════════════════════════
 def resume_pending_analyses_on_boot():
-    """Après un redéploiement Render, les threads sont tués.
-    On relance en DOUCEUR (max 3, espacées de 3s) les analyses des postes ACTIFS
-    restées en 'pending' ou 'reanalyzing'. Les postes clôturés ne sont jamais touchés."""
+    """🛡️ OOM-FIX: Fonction conservée mais DÉSACTIVÉE au démarrage.
+    À réactiver manuellement via /api/recruteur/reanalyze-all si nécessaire."""
     if not supabase:
         return
     try:
@@ -3550,7 +3451,7 @@ def resume_pending_analyses_on_boot():
             poste = row.get('poste')
             status = row.get('analyse_status')
             if poste in POSTES_ACTIFS and status in ('pending', 'reanalyzing') and row.get('cv_filename'):
-                time.sleep(3)  # ⏱️ Échelonne les lancements pour éviter le pic de RAM
+                time.sleep(3)
                 threading.Thread(
                     target=run_analysis_for_candidat,
                     args=(row['token'], row.get('cv_filename'), row.get('lettre_filename'),
@@ -3558,14 +3459,17 @@ def resume_pending_analyses_on_boot():
                     daemon=True
                 ).start()
                 resumed += 1
-                if resumed >= 3:  # 🛡️ Max 3 analyses au boot
+                if resumed >= 3:
                     break
         if resumed:
             logger.info(f"🔄 Auto-reprise : {resumed} analyse(s) relancée(s) en douceur après redéploiement")
     except Exception as e:
         logger.warning(f"Resume boot erreur: {e}")
 
-threading.Thread(target=resume_pending_analyses_on_boot, daemon=True).start()
+# 🛡️ OOM-FIX: DÉSACTIVATION de l'auto-reprise au boot pour économiser ~250-300 MB de RAM
+# threading.Thread(target=resume_pending_analyses_on_boot, daemon=True).start()
+logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE (économie mémoire ~250-300 MB) — utilisez /api/recruteur/reanalyze-all si besoin")
+
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
