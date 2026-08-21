@@ -1303,6 +1303,15 @@ SCORING_RUBRIQUES = {
         "Cohérence et progression du parcours professionnel": 2,
         "Qualité et clarté du CV (missions précises, livrables, résultats)": 1,
         "Lettre de motivation": 1
+    },
+    "Chef de Division Local Corporate": {
+        "Expérience en gestion de portefeuille Corporate (CV_Exp_Corporate)": 3,
+        "Management et encadrement d'équipe (CV_Management)": 3,
+        "Gestion du risque crédit et qualité du portefeuille (CV_Risque)": 2,
+        "Développement commercial et cross-selling (CV_CrossSelling)": 2,
+        "Progression hiérarchique et cohérence du parcours (CV_Progression)": 2,
+        "Qualité et clarté du CV (CV_Qualite)": 1,
+        "Certifications bancaires ou formations spécialisées (CV_Certification)": 1
     }
 }
 
@@ -1891,7 +1900,7 @@ def calculate_ranking_score(c, poste):
     if sb.get('bloc1_eliminatoire'):
         return -999
     score = int(c.get('score', 0))
-    if poste and (poste in POSTES_AVEC_SCORING_100 or poste in POSTES_AVEC_SCORING_12):
+    if poste and (poste in POSTES_AVEC_SCORING_100 or poste in POSTES_AVEC_SCORING_12 or poste in POSTES_AVEC_SCORING_14):
         return float(score)
     signaux_count = len(c.get('signaux_detectes_parsed', []))
     criteres_ok = sb.get('bloc2_criteres_valides', 0)
