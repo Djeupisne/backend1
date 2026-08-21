@@ -2061,7 +2061,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
         
         if result and supabase:
-            supabase.table('candidats').update({
+            update_data = {
                 "score": str(result['score']),
                 "checklist": json.dumps(result.get('checklist', {}), ensure_ascii=False),
                 "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False),
@@ -2071,7 +2071,15 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "decision": result['score_breakdown'].get('decision', ''),
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
-            }).eq('token', token).execute()
+            }
+            
+            # ✅ CORRECTION : Mise à jour automatique du statut pour Chef de Division Local Corporate
+            # Si le candidat est éliminé (bloc1_eliminatoire = True), on passe le statut à 'exclu'
+            if result['score_breakdown'].get('bloc1_eliminatoire'):
+                update_data['statut'] = 'exclu'
+                logger.info(f"🚫 Candidat {token} automatiquement exclu pour {poste} - motif: critères éliminatoires")
+            
+            supabase.table('candidats').update(update_data).eq('token', token).execute()
             logger.info(f"✅ Analyse sauvegardée pour {token} - score: {result['score']}")
         
         moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés')) if result else 'inconnu'
