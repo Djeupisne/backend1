@@ -1280,10 +1280,11 @@ def enrich_analysis_with_nlp(cv_text, lettre_text, detected_lang):
 
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
-if IA_ANALYSE_ACTIVE:
-    logger.info(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
-else:
-    logger.warning("⚠️ Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
+# IA status logging moved to startup handler to avoid execution at import time
+# if IA_ANALYSE_ACTIVE:
+#     logger.info(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
+# else:
+#     logger.warning("⚠️ Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
 
 SCORING_CODE_LABELS = {"CV_Exp": "Expérience professionnelle pertinente", "CV_Niveau": "Niveau / ancienneté de l'expérience", "CV_Secteur": "Expérience sectorielle (banque/finance)", "CV_Tech": "Compétences techniques", "CV_Progression": "Évolution de carrière", "CV_Management": "Capacité managériale", "CV_Stabilite": "Stabilité du parcours", "LM_Comprehension": "Compréhension du poste (lettre)", "LM_Coherence": "Cohérence du profil (lettre)", "LM_Motivation": "Motivation réelle (lettre)", "LM_Qualite": "Qualité rédactionnelle (lettre)", "D_Niveau": "Niveau académique", "D_Specialisation": "Spécialisation pertinente", "D_Certif": "Certifications", "CV_Exp_Corporate": "Expérience en gestion de portefeuille Corporate", "CV_Risque": "Gestion du risque crédit et qualité du portefeuille", "CV_CrossSelling": "Développement commercial et cross-selling", "CV_Qualite": "Qualité et clarté du CV", "CV_Certification": "Certifications bancaires ou formations spécialisées"}
 
@@ -3632,8 +3633,14 @@ def resume_pending_analyses_on_boot():
 
 # 🛡️ OOM-FIX: DÉSACTIVATION de l'auto-reprise au boot pour économiser ~250-300 MB de RAM
 # threading.Thread(target=resume_pending_analyses_on_boot, daemon=True).start()
-logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE (économie mémoire ~250-300 MB) — utilisez /api/recruteur/reanalyze-all si besoin")
+# Note: Logging moved to startup handler to avoid execution at import time
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
+    # Log IA status and auto-resume status at startup (inside main block to avoid import-time execution)
+    if IA_ANALYSE_ACTIVE:
+        logger.info(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
+    else:
+        logger.warning("⚠️ Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
+    logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE (économie mémoire ~250-300 MB) — utilisez /api/recruteur/reanalyze-all si besoin")
     app.run(host="0.0.0.0", port=port, debug=False)
