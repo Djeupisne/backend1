@@ -2689,23 +2689,32 @@ def get_grille(poste):
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
 
-@app.route('/api/auth/login', methods=['POST'])
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def login():
-    if request.method == 'OPTIONS':
-        return '', 204
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({'error': 'JSON manquant'}), 400
-    email = data.get('email', '').strip().lower()
-    pwd = hash_pwd(data.get('password', ''))
-    if supabase:
-        response = supabase.table('recruteurs').select('*').eq('email', email).execute()
+    try:
+        if request.method == 'OPTIONS':
+            return '', 204
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'error': 'JSON manquant'}), 400
+        email = data.get('email', '').strip().lower()
+        pwd = hash_pwd(data.get('password', ''))
+        if not supabase:
+            return jsonify({'error': 'Configuration Supabase manquante'}), 503
+        try:
+            response = supabase.table('recruteurs').select('*').eq('email', email).execute()
+        except Exception as db_err:
+            logger.error(f"Erreur base de données lors du login: {db_err}")
+            return jsonify({'error': 'Service temporairement indisponible'}), 503
         if response.data and len(response.data) > 0:
             r = response.data[0]
             if r.get("password") == pwd:
                 token = create_access_token(identity=str(r["id"]))
                 return jsonify({'token': token, 'nom': r["nom"], 'email': r["email"]}), 200
-    return jsonify({'error': 'Identifiants incorrects'}), 401
+        return jsonify({'error': 'Identifiants incorrects'}), 401
+    except Exception as e:
+        logger.error(f"Erreur inattendue lors du login: {e}")
+        return jsonify({'error': 'Erreur interne du serveur'}), 500
 
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
@@ -2816,137 +2825,181 @@ def get_statut(token):
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
-    if not supabase:
-        return jsonify({'error': 'Supabase non configuré'}), 500
-    response = supabase.table('candidats').select('*').execute()
-    keys = response.data if response.data else []
-    stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0, "by_poste": []}
-    counts = {}
-    for c in keys:
-        s = c.get('statut', 'en_attente')
-        if s in stats:
-            stats[s] += 1
-        p = c.get('poste', 'Inconnu')
-        counts[p] = counts.get(p, 0) + 1
-    stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
-    return jsonify(stats), 200
+    try:
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        try:
+            response = supabase.table('candidats').select('*').execute()
+        except Exception as db_err:
+            logger.error(f"Erreur base de données lors des stats: {db_err}")
+            return jsonify({'error': 'Service temporairement indisponible'}), 503
+        keys = response.data if response.data else []
+        stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0, "by_poste": []}
+        counts = {}
+        for c in keys:
+            s = c.get('statut', 'en_attente')
+            if s in stats:
+                stats[s] += 1
+            p = c.get('poste', 'Inconnu')
+            counts[p] = counts.get(p, 0) + 1
+        stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
+        return jsonify(stats), 200
+    except Exception as e:
+        logger.error(f"Erreur inattendue lors des stats: {e}")
+        return jsonify({'error': 'Erreur interne du serveur'}), 500
 
 @app.route('/api/recruteur/postes/stats', methods=['GET'])
 @jwt_required()
 def get_postes_stats():
-    if not supabase:
-        return jsonify({'error': 'Supabase non configuré'}), 500
-    response = supabase.table('candidats').select('*').execute()
-    keys = response.data if response.data else []
-    actifs_count = 0
-    clotures_count = 0
-    par_poste_actif = {}
-    par_poste_cloture = {}
-    for c in keys:
-        poste = c.get('poste', '')
-        if poste in POSTES_ACTIFS:
-            actifs_count += 1
-            par_poste_actif[poste] = par_poste_actif.get(poste, 0) + 1
-        else:
-            clotures_count += 1
-            par_poste_cloture[poste] = par_poste_cloture.get(poste, 0) + 1
-    return jsonify({
-        'total': len(keys),
-        'postes_actifs': {
-            'count': actifs_count,
-            'liste': POSTES_ACTIFS,
-            'par_poste': par_poste_actif,
-            'eligible_reanalyse': True
-        },
-        'postes_clotures': {
-            'count': clotures_count,
-            'liste': POSTES_CLOTURES,
-            'par_poste': par_poste_cloture,
-            'eligible_reanalyse': False
-        }
-    }), 200
+    try:
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        try:
+            response = supabase.table('candidats').select('*').execute()
+        except Exception as db_err:
+            logger.error(f"Erreur base de données lors des stats par poste: {db_err}")
+            return jsonify({'error': 'Service temporairement indisponible'}), 503
+        keys = response.data if response.data else []
+        actifs_count = 0
+        clotures_count = 0
+        par_poste_actif = {}
+        par_poste_cloture = {}
+        for c in keys:
+            poste = c.get('poste', '')
+            if poste in POSTES_ACTIFS:
+                actifs_count += 1
+                par_poste_actif[poste] = par_poste_actif.get(poste, 0) + 1
+            else:
+                clotures_count += 1
+                par_poste_cloture[poste] = par_poste_cloture.get(poste, 0) + 1
+        return jsonify({
+            'total': len(keys),
+            'postes_actifs': {
+                'count': actifs_count,
+                'liste': POSTES_ACTIFS,
+                'par_poste': par_poste_actif,
+                'eligible_reanalyse': True
+            },
+            'postes_clotures': {
+                'count': clotures_count,
+                'liste': POSTES_CLOTURES,
+                'par_poste': par_poste_cloture,
+                'eligible_reanalyse': False
+            }
+        }), 200
+    except Exception as e:
+        logger.error(f"Erreur inattendue lors des stats par poste: {e}")
+        return jsonify({'error': 'Erreur interne du serveur'}), 500
 
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
-    poste_filter = request.args.get('poste', '')
-    statut_filter = request.args.get('statut', '')
-    search = request.args.get('search', '').lower()
-    min_score = request.args.get('min_score', type=int)
-    if not supabase:
-        return jsonify({'error': 'Supabase non configuré'}), 500
-    response = supabase.table('candidats').select('*').execute()
-    all_candidats = response.data if response.data else []
-    result = []
-    for c in all_candidats:
-        c['id'] = c.get('token', '')
-        if poste_filter and c.get('poste') != poste_filter:
-            continue
-        if statut_filter and c.get('statut') != statut_filter:
-            continue
-        if min_score is not None and int(c.get('score', 0)) < min_score:
-            continue
-        if search:
-            hay = (f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')} {c.get('poste','')} {c.get('numero_dossier','')}").lower()
-            if search not in hay:
+    try:
+        poste_filter = request.args.get('poste', '')
+        statut_filter = request.args.get('statut', '')
+        search = request.args.get('search', '').lower()
+        min_score = request.args.get('min_score', type=int)
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        try:
+            response = supabase.table('candidats').select('*').execute()
+        except Exception as db_err:
+            logger.error(f"Erreur base de données lors de la liste des candidats: {db_err}")
+            return jsonify({'error': 'Service temporairement indisponible'}), 503
+        all_candidats = response.data if response.data else []
+        result = []
+        for c in all_candidats:
+            c['id'] = c.get('token', '')
+            if poste_filter and c.get('poste') != poste_filter:
                 continue
-        if c.get('score_breakdown'):
-            try:
-                c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
-            except Exception:
-                pass
-        result.append(c)
-    result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
-    return jsonify(result), 200
+            if statut_filter and c.get('statut') != statut_filter:
+                continue
+            if min_score is not None and int(c.get('score', 0)) < min_score:
+                continue
+            if search:
+                hay = (f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')} {c.get('poste','')} {c.get('numero_dossier','')}").lower()
+                if search not in hay:
+                    continue
+            if c.get('score_breakdown'):
+                try:
+                    c['score_breakdown_parsed'] = json.loads(c['score_breakdown'])
+                except Exception:
+                    pass
+            result.append(c)
+        result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Erreur inattendue lors de la liste des candidats: {e}")
+        return jsonify({'error': 'Erreur interne du serveur'}), 500
 
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
-    if not supabase:
-        return jsonify({'error': 'Supabase non configuré'}), 500
-    response = supabase.table('candidats').select('*').eq('token', token).execute()
-    if not response.data or len(response.data) == 0:
-        return jsonify({'error': 'Candidat introuvable'}), 404
-    data = response.data[0]
-    data['id'] = token
-    if data.get('attestation_filenames'):
+    try:
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
         try:
-            data['attestation_filenames_parsed'] = json.loads(data['attestation_filenames'])
-        except Exception:
-            data['attestation_filenames_parsed'] = []
-    for field in ['checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown']:
-        if data.get(field):
+            response = supabase.table('candidats').select('*').eq('token', token).execute()
+        except Exception as db_err:
+            logger.error(f"Erreur base de données lors de la récupération du candidat {token}: {db_err}")
+            return jsonify({'error': 'Service temporairement indisponible'}), 503
+        if not response.data or len(response.data) == 0:
+            return jsonify({'error': 'Candidat introuvable'}), 404
+        data = response.data[0]
+        data['id'] = token
+        if data.get('attestation_filenames'):
             try:
-                data[f'{field}_parsed'] = json.loads(data[field])
+                data['attestation_filenames_parsed'] = json.loads(data['attestation_filenames'])
             except Exception:
-                pass
-    return jsonify(data), 200
+                data['attestation_filenames_parsed'] = []
+        for field in ['checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown']:
+            if data.get(field):
+                try:
+                    data[f'{field}_parsed'] = json.loads(data[field])
+                except Exception:
+                    pass
+        return jsonify(data), 200
+    except Exception as e:
+        logger.error(f"Erreur inattendue lors de la récupération du candidat {token}: {e}")
+        return jsonify({'error': 'Erreur interne du serveur'}), 500
 
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
-    if not supabase:
-        return jsonify({'error': 'Supabase non configuré'}), 500
-    response = supabase.table('candidats').select('*').eq('token', token).execute()
-    if not response.data or len(response.data) == 0:
-        return jsonify({'error': 'Candidat introuvable'}), 404
-    data = request.get_json(silent=True) or {}
-    statut = data.get('statut', 'en_attente')
-    note = data.get('note', '')
-    candidat = response.data[0]
-    poste = candidat.get('poste', '')
-    score_max = get_score_max_for_poste(poste)
-    score = str(min(score_max, max(0, int(data.get('score', 0)))))
-    if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
-        return jsonify({'error': 'Statut invalide'}), 400
-    supabase.table('candidats').update({
-        "statut": statut,
-        "note": note,
-        "score": score,
-        "decision_date": datetime.datetime.now().isoformat(),
-        "decided_by": get_jwt_identity()
-    }).eq('token', token).execute()
-    return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
+    try:
+        if not supabase:
+            return jsonify({'error': 'Supabase non configuré'}), 500
+        try:
+            response = supabase.table('candidats').select('*').eq('token', token).execute()
+        except Exception as db_err:
+            logger.error(f"Erreur base de données lors de la mise à jour du statut de {token}: {db_err}")
+            return jsonify({'error': 'Service temporairement indisponible'}), 503
+        if not response.data or len(response.data) == 0:
+            return jsonify({'error': 'Candidat introuvable'}), 404
+        data = request.get_json(silent=True) or {}
+        statut = data.get('statut', 'en_attente')
+        note = data.get('note', '')
+        candidat = response.data[0]
+        poste = candidat.get('poste', '')
+        score_max = get_score_max_for_poste(poste)
+        score = str(min(score_max, max(0, int(data.get('score', 0)))))
+        if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
+            return jsonify({'error': 'Statut invalide'}), 400
+        try:
+            supabase.table('candidats').update({
+                "statut": statut,
+                "note": note,
+                "score": score,
+                "decision_date": datetime.datetime.now().isoformat(),
+                "decided_by": get_jwt_identity()
+            }).eq('token', token).execute()
+        except Exception as upd_err:
+            logger.error(f"Erreur base de données lors de l'update du statut de {token}: {upd_err}")
+            return jsonify({'error': 'Erreur lors de la mise à jour'}), 500
+        return jsonify({'message': 'Mis à jour avec succès', 'statut': statut}), 200
+    except Exception as e:
+        logger.error(f"Erreur inattendue lors de la mise à jour du statut de {token}: {e}")
+        return jsonify({'error': 'Erreur interne du serveur'}), 500
 
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
