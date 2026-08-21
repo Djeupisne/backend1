@@ -100,15 +100,17 @@ except ImportError:
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
-_claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_ACTIVE else None
-_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
+_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "1")))  # 🛡️ 1 seul appel IA à la fois
+
+# 🛡️ OPTIMISATION MÉMOIRE : Désactiver spacy par défaut (économise ~50-100MB)
+SPACY_ENABLED = os.getenv("SPACY_ENABLED", "false").lower() == "true"
 
 _Nlp_fr = None
 _Nlp_en = None
 
 def _get_spacy_model(lang='fr'):
     global _Nlp_fr, _Nlp_en
-    if not SPACY_AVAILABLE:
+    if not SPACY_AVAILABLE or not SPACY_ENABLED:
         return None
     if lang == 'fr':
         if _Nlp_fr is None:
