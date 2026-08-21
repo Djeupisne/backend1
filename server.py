@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time, gc  # 🛡️ OOM-FIX: ajout de gc
+import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time, gc
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from werkzeug.utils import secure_filename
 from supabase import create_client, Client
@@ -545,11 +545,9 @@ def extract_text_from_pdf_via_ocr(file_bytes):
         return ""
 
 MAX_PDF_PAGES = 15
-# 🛡️ OOM-FIX: limite de taille PDF à 10 MB pour éviter OOM
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
 
 def extract_text_from_pdf_robust(file_bytes, filename):
-    # 🛡️ OOM-FIX: protection contre PDF trop volumineux
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
         logger.warning(f"⚠️ PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 10 MB): {filename}")
         return ""
@@ -1280,12 +1278,6 @@ def enrich_analysis_with_nlp(cv_text, lettre_text, detected_lang):
 
 DEBUG_EXTRACTION = os.getenv("DEBUG_EXTRACTION", "false").lower() == "true"
 
-# IA status logging moved to startup handler to avoid execution at import time
-# if IA_ANALYSE_ACTIVE:
-#     logger.info(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
-# else:
-#     logger.warning("⚠️ Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
-
 SCORING_CODE_LABELS = {"CV_Exp": "Expérience professionnelle pertinente", "CV_Niveau": "Niveau / ancienneté de l'expérience", "CV_Secteur": "Expérience sectorielle (banque/finance)", "CV_Tech": "Compétences techniques", "CV_Progression": "Évolution de carrière", "CV_Management": "Capacité managériale", "CV_Stabilite": "Stabilité du parcours", "LM_Comprehension": "Compréhension du poste (lettre)", "LM_Coherence": "Cohérence du profil (lettre)", "LM_Motivation": "Motivation réelle (lettre)", "LM_Qualite": "Qualité rédactionnelle (lettre)", "D_Niveau": "Niveau académique", "D_Specialisation": "Spécialisation pertinente", "D_Certif": "Certifications", "CV_Exp_Corporate": "Expérience en gestion de portefeuille Corporate", "CV_Risque": "Gestion du risque crédit et qualité du portefeuille", "CV_CrossSelling": "Développement commercial et cross-selling", "CV_Qualite": "Qualité et clarté du CV", "CV_Certification": "Certifications bancaires ou formations spécialisées"}
 
 SCORING_RUBRIQUES = {
@@ -1419,7 +1411,15 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     for attempt in range(2):
         try:
             with _ia_semaphore:
-                response = _claude_client.messages.create(model=ANTHROPIC_MODEL, max_tokens=4096, temperature=0, system=SYSTEM_PROMPT_RECRUTEUR, tools=[tool], tool_choice={"type": "tool", "name": "soumettre_analyse_candidature"}, messages=[{"role": "user", "content": user_msg}])
+                # ✅ CORRECTION : Supprimer temperature pour compatibilité
+                response = _claude_client.messages.create(
+                    model=ANTHROPIC_MODEL, 
+                    max_tokens=4096, 
+                    system=SYSTEM_PROMPT_RECRUTEUR, 
+                    tools=[tool], 
+                    tool_choice={"type": "tool", "name": "soumettre_analyse_candidature"}, 
+                    messages=[{"role": "user", "content": user_msg}]
+                )
             tool_use = next((b for b in response.content if b.type == "tool_use"), None)
             if not tool_use:
                 return None
@@ -1597,7 +1597,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     if flags:
         return {'score': 0, 'score_max': 14, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_chef_division_corporate(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
     
-    # Scoring basé sur les rubriques définies dans SCORING_RUBRIQUES
     signaux_exp_corporate = [
         "Gestion de portefeuille Corporate / Grandes Entreprises",
         "Analyse crédit et montage de dossiers Corporate",
@@ -1646,7 +1645,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     else:
         certification_score = 0
     
-    # Vérifier certifications explicites
     has_certif = check_criterion_match_advanced("Certification bancaire ou formation spécialisée (risk management, credit analysis, etc.)", normalized, raw_full, poste=poste)[0]
     if has_certif:
         certification_score = 1
@@ -1663,7 +1661,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     score_total = sum(sous_scores.values())
     decision = "🥇 Entretien prioritaire" if score_total >= 11 else ("🥈 Potentiel à évaluer en entretien" if score_total >= 7 else "❌ Rejet")
     
-    # Générer points_forts et points_vigilance basés sur les sous-scores
     points_forts = []
     points_vigilance = []
     if exp_corporate >= 2.5:
@@ -1896,10 +1893,24 @@ def normalize_text_for_matching(text):
     return normalize_for_matching(text)[0]
 
 # ═══════════════════════════════════════════════════════════════
-#  PIPELINE D'ANALYSE
+#  PIPELINE D'ANALYSE - CORRIGÉ POUR CHEF DE DIVISION
 # ═══════════════════════════════════════════════════════════════
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
+        # ✅ CORRECTION : Forcer l'analyse pour Chef de Division Local Corporate
+        if poste == "Chef de Division Local Corporate":
+            force = True
+            logger.info(f"🔒 Analyse forcée pour {poste} - token: {token}")
+        
+        # ✅ CORRECTION : Normaliser attestation_filenames avant toute vérification
+        if isinstance(attestation_filenames, str):
+            try:
+                attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
+            except Exception:
+                attestation_filenames = [attestation_filenames] if attestation_filenames else []
+        elif not isinstance(attestation_filenames, list):
+            attestation_filenames = []
+        
         if not force and not is_poste_actif(poste):
             logger.info(f"⏸️ Analyse ignorée pour {token} — poste clôturé : {poste}")
             if supabase:
@@ -1910,32 +1921,52 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 }).eq('token', token).execute()
             return
         
-        if isinstance(attestation_filenames, str):
-            try:
-                attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
-            except Exception:
-                attestation_filenames = [attestation_filenames] if attestation_filenames else []
+        logger.info(f"🔍 Début analyse pour {poste} - token: {token}, force: {force}")
         
         cv_text = ""
         if cv_filename:
-            cv_bytes = download_file_from_supabase(cv_filename)
-            if cv_bytes:
-                cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
+            try:
+                cv_bytes = download_file_from_supabase(cv_filename)
+                if cv_bytes:
+                    cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
+                    logger.info(f"📄 CV extrait: {len(cv_text)} caractères pour {token}")
+                else:
+                    logger.warning(f"⚠️ CV introuvable: {cv_filename} pour {token}")
+            except Exception as e:
+                logger.error(f"❌ Erreur extraction CV {cv_filename}: {e}")
         
         lm_text = ""
         if lettre_filename:
-            lm_bytes = download_file_from_supabase(lettre_filename)
-            if lm_bytes:
-                lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
+            try:
+                lm_bytes = download_file_from_supabase(lettre_filename)
+                if lm_bytes:
+                    lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
+                    logger.info(f"📄 Lettre extraite: {len(lm_text)} caractères pour {token}")
+            except Exception as e:
+                logger.error(f"❌ Erreur extraction lettre {lettre_filename}: {e}")
         
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
-                att_bytes = download_file_from_supabase(fn)
-                if att_bytes:
-                    t = extract_text_robust_from_bytes(att_bytes, fn)
-                    if t:
-                        att_texts.append(t)
+                try:
+                    att_bytes = download_file_from_supabase(fn)
+                    if att_bytes:
+                        t = extract_text_robust_from_bytes(att_bytes, fn)
+                        if t:
+                            att_texts.append(t)
+                            logger.info(f"📄 Attestation extraite: {len(t)} caractères pour {token}")
+                except Exception as e:
+                    logger.error(f"❌ Erreur extraction attestation {fn}: {e}")
+        
+        if not cv_text:
+            logger.error(f"❌ CV vide pour {token} - analyse impossible")
+            if supabase:
+                supabase.table('candidats').update({
+                    "analyse_status": "error",
+                    "analyse_error": "CV vide ou non extractible",
+                    "analyse_auto_date": datetime.datetime.now().isoformat()
+                }).eq('token', token).execute()
+            return
         
         detected_lang = detect_language(cv_text[:500]) if cv_text else None
         nlp_enrichment = enrich_analysis_with_nlp(cv_text, lm_text, detected_lang)
@@ -1943,13 +1974,42 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             supabase.table('candidats').update({"nlp_enrichment": json.dumps(nlp_enrichment, ensure_ascii=False)}).eq('token', token).execute()
         
         result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
+        
         if result is None:
             if poste == "Chef de Section Compensation":
                 fb = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
-                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
+                result = {
+                    'score': fb['score'], 
+                    'checklist': fb.get('checklist', {}), 
+                    'flags_eliminatoires': fb['flags_eliminatoires'], 
+                    'signaux_detectes': [], 
+                    'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 
+                    'score_breakdown': {
+                        'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 
+                        'sous_scores': fb['sous_scores'], 
+                        'score_final': fb['score'], 
+                        'score_max': fb['score_max'], 
+                        'decision': fb['decision'], 
+                        'note': fb['detail']
+                    }
+                }
             elif poste == "Chargé(e) d'Administration de Crédit":
                 fb = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
-                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
+                result = {
+                    'score': fb['score'], 
+                    'checklist': fb.get('checklist', {}), 
+                    'flags_eliminatoires': fb['flags_eliminatoires'], 
+                    'signaux_detectes': [], 
+                    'details': {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}, 
+                    'score_breakdown': {
+                        'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 
+                        'sous_scores': fb['sous_scores'], 
+                        'score_final': fb['score'], 
+                        'score_max': fb['score_max'], 
+                        'decision': fb['decision'], 
+                        'note': fb['detail']
+                    }
+                }
             elif poste == "Chef de Division Local Corporate":
                 fb = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
                 details_data = {'moteur': 'mots-clés (repli)', 'sous_scores': fb['sous_scores']}
@@ -1959,17 +2019,48 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     details_data['points_vigilance'] = fb['points_vigilance']
                 if 'synthese_recruteur' in fb:
                     details_data['synthese_recruteur'] = fb['synthese_recruteur']
-                result = {'score': fb['score'], 'checklist': fb.get('checklist', {}), 'flags_eliminatoires': fb['flags_eliminatoires'], 'signaux_detectes': [], 'details': details_data, 'score_breakdown': {'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 'sous_scores': fb['sous_scores'], 'score_final': fb['score'], 'score_max': fb['score_max'], 'decision': fb['decision'], 'note': fb['detail']}}
+                result = {
+                    'score': fb['score'], 
+                    'checklist': fb.get('checklist', {}), 
+                    'flags_eliminatoires': fb['flags_eliminatoires'], 
+                    'signaux_detectes': [], 
+                    'details': details_data, 
+                    'score_breakdown': {
+                        'bloc1_eliminatoire': bool(fb['flags_eliminatoires']), 
+                        'sous_scores': fb['sous_scores'], 
+                        'score_final': fb['score'], 
+                        'score_max': fb['score_max'], 
+                        'decision': fb['decision'], 
+                        'note': fb['detail']
+                    }
+                }
+                logger.info(f"✅ Chef de Division analysé - score: {fb['score']}/14, points_forts: {len(fb.get('points_forts', []))}")
             elif poste in POSTES_AVEC_SCORING_100:
                 detailed_result = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
                 if detailed_result:
-                    result = {'score': detailed_result['score'], 'checklist': {}, 'flags_eliminatoires': [], 'signaux_detectes': [], 'details': detailed_result['details'], 'score_breakdown': {'bloc1_eliminatoire': False, 'scoring_type': '100_points', 'bloc_cv': detailed_result['bloc_cv'], 'bloc_lm': detailed_result['bloc_lm'], 'bloc_diplomes': detailed_result['bloc_diplomes'], 'score_final': detailed_result['score'], 'decision': detailed_result['decision'], 'note': detailed_result['note']}}
+                    result = {
+                        'score': detailed_result['score'], 
+                        'checklist': {}, 
+                        'flags_eliminatoires': [], 
+                        'signaux_detectes': [], 
+                        'details': detailed_result['details'], 
+                        'score_breakdown': {
+                            'bloc1_eliminatoire': False, 
+                            'scoring_type': '100_points', 
+                            'bloc_cv': detailed_result['bloc_cv'], 
+                            'bloc_lm': detailed_result['bloc_lm'], 
+                            'bloc_diplomes': detailed_result['bloc_diplomes'], 
+                            'score_final': detailed_result['score'], 
+                            'decision': detailed_result['decision'], 
+                            'note': detailed_result['note']
+                        }
+                    }
                 else:
                     result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
             else:
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
         
-        if supabase:
+        if result and supabase:
             supabase.table('candidats').update({
                 "score": str(result['score']),
                 "checklist": json.dumps(result.get('checklist', {}), ensure_ascii=False),
@@ -1981,20 +2072,28 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }).eq('token', token).execute()
+            logger.info(f"✅ Analyse sauvegardée pour {token} - score: {result['score']}")
         
-        moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés'))
-        tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
-        logger.info(f"{tag} [{moteur}] Score {token}: {result['score']} — {result['score_breakdown'].get('note','')}")
+        moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés')) if result else 'inconnu'
+        tag = "⚠️ ÉLIMINÉ" if result and result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
+        if result:
+            logger.info(f"{tag} [{moteur}] Score {token}: {result['score']} — {result['score_breakdown'].get('note','')}")
+        else:
+            logger.error(f"❌ Aucun résultat pour {token}")
     
     except Exception as e:
         import traceback
         traceback.print_exc()
+        logger.error(f"❌ Erreur analyse pour {token} ({poste}): {str(e)}")
         if supabase:
-            supabase.table('candidats').update({"analyse_status": "error", "analyse_error": str(e), "analyse_auto_date": datetime.datetime.now().isoformat()}).eq('token', token).execute()
+            supabase.table('candidats').update({
+                "analyse_status": "error", 
+                "analyse_error": str(e), 
+                "analyse_auto_date": datetime.datetime.now().isoformat()
+            }).eq('token', token).execute()
     finally:
-        # 🛡️ OOM-FIX: libération mémoire après chaque analyse
         try:
-            del cv_text, lm_text, att_texts, result
+            del cv_text, lm_text, att_texts
         except:
             pass
         gc.collect()
@@ -2079,12 +2178,10 @@ def generate_ranking_for_poste(poste, candidats_data):
         c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0), poste)
     return pool
 
-# Les fonctions generate_excel_report, generate_csv_report, generate_pdf_report, generate_word_report
-# restent IDENTIQUES au fichier original (inchangées pour éviter toute régression)
-# → Elles sont conservées telles quelles dans le fichier final
-
+# ═══════════════════════════════════════════════════════════════
+#  FONCTIONS D'EXPORT - CONSERVÉES TELLES QUELLES
+# ═══════════════════════════════════════════════════════════════
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel professionnel avec mise en forme avancée et détails complets"""
     if not OPENPYXL_AVAILABLE:
         return None
     wb = Workbook()
@@ -2372,7 +2469,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    # 🛡️ OOM-FIX: libération mémoire après export
     del wb
     gc.collect()
     return buf
@@ -2410,7 +2506,6 @@ def generate_csv_report(candidats_data, poste_filter=None):
     return out.getvalue()
 
 def generate_pdf_report(candidats_data, poste_filter=None):
-    """Génère un rapport PDF professionnel et futuriste avec détails complets"""
     if not REPORTLAB_AVAILABLE:
         return None
     buf = io.BytesIO()
@@ -2607,7 +2702,6 @@ def generate_pdf_report(candidats_data, poste_filter=None):
     els.append(Paragraph(f"Document généré automatiquement par RecrutBank • {datetime.datetime.now().strftime('%Y')}", footer_style))
     doc.build(els)
     buf.seek(0)
-    # 🛡️ OOM-FIX: libération mémoire après export
     del doc, els
     gc.collect()
     return buf
@@ -2700,7 +2794,6 @@ def generate_word_report(candidats_data, poste_filter=None):
     footer_run.italic = True
     doc.save(buf)
     buf.seek(0)
-    # 🛡️ OOM-FIX: libération mémoire après export
     del doc
     gc.collect()
     return buf
@@ -3031,12 +3124,11 @@ def trigger_analyze(token):
     return jsonify({'message': 'Analyse re-déclenchée', 'token': token}), 202
 
 # ═══════════════════════════════════════════════════════════════
-#  ★★★ RÉANALYSE ULTRA-RAPIDE PARALLÉLISÉE ★★★
+#  ROUTES DE RÉANALYSE PARALLÈLE
 # ═══════════════════════════════════════════════════════════════
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
-    """Réanalyse PARALLÈLE (2 workers) des postes actifs uniquement."""
     try:
         if not supabase:
             return jsonify({'error': 'Supabase non configuré'}), 500
@@ -3072,7 +3164,7 @@ def reanalyze_all_candidates():
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(2, len(candidates_to_reanalyze))
+        MAX_WORKERS = min(1, len(candidates_to_reanalyze))
         logger.info(f"🚀 Réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
         start_time = time.time()
         reanalyzed_count = 0
@@ -3081,13 +3173,12 @@ def reanalyze_all_candidates():
             futures = {executor.submit(analyze_one, c): c for c in candidates_to_reanalyze if c.get('cv_filename')}
             for future in as_completed(futures):
                 try:
-                    token, success, msg = future.result(timeout=180)
+                    token, success, msg = future.result(timeout=120)
                     if success: reanalyzed_count += 1
                     else: errors.append(f"Token {token}: {msg}")
                 except Exception as e:
                     errors.append(f"Timeout ou erreur: {str(e)}")
         elapsed = time.time() - start_time
-        # 🛡️ OOM-FIX: nettoyage mémoire après réanalyse massive
         gc.collect()
         return jsonify({'message': f'Réanalyse terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)}', 'reanalyzed_count': reanalyzed_count, 'skipped_closed_posts': candidates_skipped, 'workers_used': MAX_WORKERS, 'elapsed_seconds': round(elapsed, 1), 'errors': errors[:10]}), 202
     except Exception as e:
@@ -3097,7 +3188,6 @@ def reanalyze_all_candidates():
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
-    """Réanalyse PARALLÈLE (2 workers) d'un poste actif spécifique."""
     if poste not in POSTES:
         return jsonify({'error': f'Poste inconnu: {poste}'}), 400
     if not is_poste_actif(poste):
@@ -3132,7 +3222,7 @@ def reanalyze_by_poste(poste):
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(2, len([k for k in keys if k.get('cv_filename')]))
+        MAX_WORKERS = min(1, len([k for k in keys if k.get('cv_filename')]))
         start_time = time.time()
         reanalyzed_count = 0
         errors = []
@@ -3140,13 +3230,12 @@ def reanalyze_by_poste(poste):
             futures = [executor.submit(analyze_one, c) for c in keys if c.get('cv_filename')]
             for future in as_completed(futures):
                 try:
-                    token, success, msg = future.result(timeout=180)
+                    token, success, msg = future.result(timeout=120)
                     if success: reanalyzed_count += 1
                     else: errors.append(f"Token {token}: {msg}")
                 except Exception as e:
                     errors.append(f"Erreur: {str(e)}")
         elapsed = time.time() - start_time
-        # 🛡️ OOM-FIX: nettoyage mémoire
         gc.collect()
         return jsonify({'message': f'Réanalyse : {reanalyzed_count}/{len(keys)} du poste "{poste}" en {elapsed:.1f}s', 'poste': poste, 'statut': 'actif', 'reanalyzed_count': reanalyzed_count, 'workers_used': MAX_WORKERS, 'elapsed_seconds': round(elapsed, 1), 'errors': errors[:10]}), 202
     except Exception as e:
@@ -3156,7 +3245,6 @@ def reanalyze_by_poste(poste):
 @app.route('/api/recruteur/reanalyze-fast', methods=['POST'])
 @jwt_required()
 def reanalyze_fast():
-    """Réanalyse ÉCLAIR : moteur mots-clés UNIQUEMENT, 10x plus rapide que l'IA."""
     try:
         if not supabase:
             return jsonify({'error': 'Supabase non configuré'}), 500
@@ -3231,6 +3319,30 @@ def reanalyze_fast():
                             'note': result_fb['detail']
                         }
                     }
+                elif poste == "Chef de Division Local Corporate":
+                    result_fb = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
+                    details_data = {'moteur': 'mots-clés (FAST)', 'sous_scores': result_fb['sous_scores']}
+                    if 'points_forts' in result_fb:
+                        details_data['points_forts'] = result_fb['points_forts']
+                    if 'points_vigilance' in result_fb:
+                        details_data['points_vigilance'] = result_fb['points_vigilance']
+                    if 'synthese_recruteur' in result_fb:
+                        details_data['synthese_recruteur'] = result_fb['synthese_recruteur']
+                    result = {
+                        'score': result_fb['score'],
+                        'checklist': result_fb.get('checklist', {}),
+                        'flags_eliminatoires': result_fb['flags_eliminatoires'],
+                        'signaux_detectes': [],
+                        'details': details_data,
+                        'score_breakdown': {
+                            'bloc1_eliminatoire': bool(result_fb['flags_eliminatoires']),
+                            'sous_scores': result_fb['sous_scores'],
+                            'score_final': result_fb['score'],
+                            'score_max': result_fb['score_max'],
+                            'decision': result_fb['decision'],
+                            'note': result_fb['detail']
+                        }
+                    }
                 elif poste in POSTES_AVEC_SCORING_100:
                     detailed = calculate_detailed_score_100(cv_text, lm_text, att_texts, poste)
                     if detailed:
@@ -3272,7 +3384,7 @@ def reanalyze_fast():
         start = time.time()
         success_count = 0
         errors = []
-        with ThreadPoolExecutor(max_workers=min(2, len(candidates))) as executor:
+        with ThreadPoolExecutor(max_workers=min(1, len(candidates))) as executor:
             futures = [executor.submit(analyze_fast_only, c) for c in candidates]
             for future in as_completed(futures):
                 try:
@@ -3284,7 +3396,6 @@ def reanalyze_fast():
                 except Exception as e:
                     errors.append(str(e))
         elapsed = time.time() - start
-        # 🛡️ OOM-FIX: nettoyage mémoire après réanalyse fast
         gc.collect()
         return jsonify({
             'message': f'⚡ Réanalyse éclair terminée en {elapsed:.1f}s',
@@ -3482,8 +3593,7 @@ def export_dossiers_zip():
             file_bytes = download_file_from_supabase(blob_name)
             return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
         results_by_cand = {}
-        # 🛡️ OOM-FIX: réduction de 16 à 4 workers max pour économiser la mémoire
-        max_workers = min(4, max(2, len(download_tasks))) if download_tasks else 2
+        max_workers = min(2, max(1, len(download_tasks))) if download_tasks else 1
         if download_tasks:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [executor.submit(_download_one, t) for t in download_tasks]
@@ -3530,7 +3640,6 @@ def export_dossiers_zip():
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
         filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
-        # 🛡️ OOM-FIX: nettoyage mémoire après export ZIP
         del results_by_cand, download_tasks, candidats_meta
         gc.collect()
         return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=filename)
@@ -3569,9 +3678,8 @@ def test_email():
 # ═══════════════════════════════════════════════════════════════
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
-    """Endpoint de diagnostic — à appeler après déploiement pour vérifier que le bon code est actif."""
     return jsonify({
-        "version": "v3.1-oom-fix",  # 🛡️ OOM-FIX: version bump
+        "version": "v3.2-chef-division-fix",
         "postes_actifs_defined": 'POSTES_ACTIFS' in globals(),
         "postes_actifs": POSTES_ACTIFS if 'POSTES_ACTIFS' in globals() else "NON DÉFINI",
         "is_poste_actif_exists": 'is_poste_actif' in globals(),
@@ -3579,14 +3687,13 @@ def health_version():
         "fast_reanalyze_route": "AVAILABLE",
         "ia_prompt": "AUTHENTICITY STRICT",
         "cleanup_route_available": True,
-        "oom_fixes": "PDF 10MB limit, gc.collect(), ZIP 4 workers, boot resume DISABLED",  # 🛡️ OOM-FIX
+        "chef_division_force_analysis": "ENABLED",
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 
 @app.route('/api/recruteur/cleanup-closed', methods=['POST'])
 @jwt_required()
 def cleanup_closed_statuses():
-    """Remet au statut 'completed' les dossiers de postes clôturés restés bloqués en 'reanalyzing'/'pending'."""
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
     response = supabase.table('candidats').select('token, poste, analyse_status').execute()
@@ -3602,57 +3709,16 @@ def cleanup_closed_statuses():
     }), 200
 
 # ═══════════════════════════════════════════════════════════════
-#  AUTO-REPRISE : DÉSACTIVÉE POUR ÉVITER OOM SUR RENDER 512MB
+#  ROUTES DE DIAGNOSTIC POUR LES ERREURS D'ANALYSE
 # ═══════════════════════════════════════════════════════════════
-def resume_pending_analyses_on_boot():
-    """🛡️ OOM-FIX: Fonction conservée mais DÉSACTIVÉE au démarrage.
-    À réactiver manuellement via /api/recruteur/reanalyze-all si nécessaire."""
-    if not supabase:
-        return
-    try:
-        response = supabase.table('candidats').select('*').execute()
-        resumed = 0
-        for row in (response.data or []):
-            poste = row.get('poste')
-            status = row.get('analyse_status')
-            if poste in POSTES_ACTIFS and status in ('pending', 'reanalyzing') and row.get('cv_filename'):
-                time.sleep(3)
-                threading.Thread(
-                    target=run_analysis_for_candidat,
-                    args=(row['token'], row.get('cv_filename'), row.get('lettre_filename'),
-                          row.get('attestation_filenames'), poste, False),
-                    daemon=True
-                ).start()
-                resumed += 1
-                if resumed >= 3:
-                    break
-        if resumed:
-            logger.info(f"🔄 Auto-reprise : {resumed} analyse(s) relancée(s) en douceur après redéploiement")
-    except Exception as e:
-        logger.warning(f"Resume boot erreur: {e}")
-
-# 🛡️ OOM-FIX: DÉSACTIVATION de l'auto-reprise au boot pour économiser ~250-300 MB de RAM
-# threading.Thread(target=resume_pending_analyses_on_boot, daemon=True).start()
-# Note: Logging moved to startup handler to avoid execution at import time
-# ═══════════════════════════════════════════════════════════════
-#  ROUTES DE DIAGNOSTIC ET CORRECTION DES ERREURS D'ANALYSE
-# ═══════════════════════════════════════════════════════════════
-
 @app.route('/api/recruteur/reanalyze-errors', methods=['GET'])
 @jwt_required()
 def get_reanalyze_errors():
-    """
-    Récupère la liste des candidatures en erreur avec les détails.
-    """
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
-    
     try:
-        # Récupérer toutes les candidatures en erreur
         response = supabase.table('candidats').select('*').eq('analyse_status', 'error').execute()
         errors = response.data if response.data else []
-        
-        # Formater les erreurs pour l'affichage
         formatted_errors = []
         for row in errors:
             formatted_errors.append({
@@ -3662,54 +3728,34 @@ def get_reanalyze_errors():
                 'poste': row.get('poste', 'N/A'),
                 'email': row.get('email', 'N/A'),
                 'numero_dossier': row.get('numero_dossier', 'N/A'),
-                'cv_filename': row.get('cv_filename', 'N/A'),
-                'lettre_filename': row.get('lettre_filename', 'N/A'),
                 'erreur': row.get('analyse_error', 'Erreur inconnue'),
                 'date_candidature': row.get('date_candidature', 'N/A'),
                 'statut': row.get('statut', 'en_attente')
             })
-        
-        # Statistiques des erreurs par type
         error_types = {}
         for row in formatted_errors:
             err_msg = row.get('erreur', 'Erreur inconnue')[:100]
             error_types[err_msg] = error_types.get(err_msg, 0) + 1
-        
         return jsonify({
             'total_errors': len(formatted_errors),
             'error_types': error_types,
             'errors': formatted_errors
         }), 200
-        
     except Exception as e:
         logger.error(f"Erreur diagnostic: {e}")
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/recruteur/reanalyze-errors', methods=['POST'])
 @jwt_required()
 def reanalyze_errors():
-    """
-    Relance l'analyse UNIQUEMENT pour les candidatures en erreur.
-    """
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
-    
     try:
-        # Récupérer toutes les candidatures en erreur
         response = supabase.table('candidats').select('*').eq('analyse_status', 'error').execute()
         failed = response.data if response.data else []
-        
         if not failed:
-            return jsonify({
-                'message': '✅ Aucune analyse en erreur à relancer',
-                'total': 0,
-                'success': 0
-            }), 200
-        
+            return jsonify({'message': '✅ Aucune analyse en erreur à relancer', 'total': 0, 'success': 0}), 200
         logger.info(f"🔄 Relance des analyses en erreur: {len(failed)} candidats")
-        
-        # Mettre à jour le statut avant de relancer
         for row in failed:
             try:
                 supabase.table('candidats').update({
@@ -3719,7 +3765,6 @@ def reanalyze_errors():
                 }).eq('token', row.get('token')).execute()
             except Exception as e:
                 logger.warning(f"Erreur mise à jour statut pour {row.get('token')}: {e}")
-        
         def analyze_one(data):
             try:
                 token = data.get('token')
@@ -3727,18 +3772,14 @@ def reanalyze_errors():
                 lm_fn = data.get('lettre_filename')
                 att_raw = data.get('attestation_filenames', '[]')
                 poste = data.get('poste')
-                
                 if not cv_fn:
                     supabase.table('candidats').update({
                         "analyse_status": "error",
                         "analyse_error": "CV manquant - impossible de relancer l'analyse"
                     }).eq('token', token).execute()
                     return (token, False, "CV manquant")
-                
-                # Appeler la fonction d'analyse
                 run_analysis_for_candidat(token, cv_fn, lm_fn, att_raw, poste, True)
                 return (token, True, "OK")
-                
             except Exception as e:
                 error_msg = str(e)
                 try:
@@ -3749,8 +3790,6 @@ def reanalyze_errors():
                 except:
                     pass
                 return (data.get('token'), False, error_msg)
-        
-        # 🛡️ OOM-FIX: un seul worker pour éviter les problèmes mémoire
         results = []
         with ThreadPoolExecutor(max_workers=1) as executor:
             futures = [executor.submit(analyze_one, c) for c in failed if c.get('cv_filename')]
@@ -3759,92 +3798,67 @@ def reanalyze_errors():
                     results.append(future.result(timeout=180))
                 except Exception as e:
                     results.append((None, False, f"Timeout: {str(e)}"))
-        
         success = sum(1 for r in results if r[1] and r[0] is not None)
         errors = [r for r in results if not r[1]]
-        
         return jsonify({
             'message': f'✅ {success}/{len(failed)} analyses relancées avec succès',
             'success': success,
             'total': len(failed),
-            'errors': errors[:20]  # Limité à 20 pour la réponse
+            'errors': errors[:20]
         }), 202
-        
     except Exception as e:
         logger.error(f"Erreur relance analyses: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/recruteur/candidats/<token>/fix-error', methods=['POST'])
 @jwt_required()
 def fix_candidat_error(token):
-    """
-    Corrige une analyse en erreur pour un candidat spécifique.
-    """
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
-    
     try:
-        # Récupérer le candidat
         response = supabase.table('candidats').select('*').eq('token', token).execute()
         if not response.data or len(response.data) == 0:
             return jsonify({'error': 'Candidat introuvable'}), 404
-        
         data = response.data[0]
-        
-        # Vérifier si le candidat est vraiment en erreur
         if data.get('analyse_status') != 'error':
             return jsonify({
                 'message': f'Le candidat est en statut "{data.get("analyse_status")}", pas en erreur',
                 'statut_actuel': data.get('analyse_status')
             }), 400
-        
         cv_fn = data.get('cv_filename')
         lm_fn = data.get('lettre_filename')
         att_raw = data.get('attestation_filenames', '[]')
         poste = data.get('poste')
-        
         if not cv_fn:
             supabase.table('candidats').update({
                 "analyse_status": "error",
                 "analyse_error": "CV manquant - impossible de corriger"
             }).eq('token', token).execute()
             return jsonify({'error': 'CV manquant, impossible de corriger'}), 400
-        
-        # Lancer l'analyse en arrière-plan
         threading.Thread(
             target=run_analysis_for_candidat,
             args=(token, cv_fn, lm_fn, att_raw, poste, True),
             daemon=True
         ).start()
-        
         return jsonify({
             'message': f'✅ Correction lancée pour {data.get("prenom")} {data.get("nom")}',
             'token': token,
             'statut': 'en_cours_de_correction'
         }), 202
-        
     except Exception as e:
         logger.error(f"Erreur correction candidat {token}: {e}")
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/recruteur/analyses-stats', methods=['GET'])
 @jwt_required()
 def get_analyses_stats():
-    """
-    Statistiques détaillées sur l'état des analyses.
-    """
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
-    
     try:
         response = supabase.table('candidats').select('*').execute()
         data = response.data if response.data else []
-        
-        # Statistiques globales
         stats = {
             'total': len(data),
             'by_status': {},
@@ -3852,14 +3866,11 @@ def get_analyses_stats():
             'error_details': [],
             'reanalyze_in_progress': False
         }
-        
         for row in data:
             status = row.get('analyse_status', 'unknown')
             stats['by_status'][status] = stats['by_status'].get(status, 0) + 1
-            
             poste = row.get('poste', 'unknown')
             stats['by_poste'][poste] = stats['by_poste'].get(poste, 0) + 1
-            
             if status == 'error':
                 stats['error_details'].append({
                     'token': row.get('token'),
@@ -3868,73 +3879,54 @@ def get_analyses_stats():
                     'poste': poste,
                     'erreur': row.get('analyse_error', 'Erreur inconnue')[:100]
                 })
-            
             if status == 'reanalyzing':
                 stats['reanalyze_in_progress'] = True
-        
-        # Postes actifs vs clôturés
         actifs_count = sum(1 for row in data if row.get('poste') in POSTES_ACTIFS)
         clotures_count = len(data) - actifs_count
-        
         stats['postes_actifs_count'] = actifs_count
         stats['postes_clotures_count'] = clotures_count
-        
-        # Limiter les détails d'erreur à 20
         stats['error_details'] = stats['error_details'][:20]
-        
         return jsonify(stats), 200
-        
     except Exception as e:
         logger.error(f"Erreur stats analyses: {e}")
         return jsonify({'error': str(e)}), 500
 
-
 @app.route('/api/recruteur/force-complete/<token>', methods=['POST'])
 @jwt_required()
 def force_complete_analysis(token):
-    """
-    Force le passage au statut 'completed' pour une analyse bloquée.
-    UTILISER AVEC PRÉCAUTION - uniquement si l'analyse est vraiment terminée.
-    """
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
-    
     try:
         response = supabase.table('candidats').select('*').eq('token', token).execute()
         if not response.data or len(response.data) == 0:
             return jsonify({'error': 'Candidat introuvable'}), 404
-        
         data = response.data[0]
         status = data.get('analyse_status')
-        
         if status not in ('reanalyzing', 'pending', 'error'):
             return jsonify({
                 'message': f'Le candidat est en statut "{status}", pas besoin de forcer',
                 'statut_actuel': status
             }), 400
-        
-        # Forcer le statut à completed
         supabase.table('candidats').update({
             "analyse_status": "completed",
             "analyse_auto_date": datetime.datetime.now().isoformat(),
             "reanalyze_reason": "Forcé manuellement par l'administrateur"
         }).eq('token', token).execute()
-        
         return jsonify({
             'message': f'✅ Analyse forcée au statut "completed" pour {data.get("prenom")} {data.get("nom")}',
             'token': token,
             'ancien_statut': status
         }), 200
-        
     except Exception as e:
         logger.error(f"Erreur force complete {token}: {e}")
         return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    # Log IA status and auto-resume status at startup (inside main block to avoid import-time execution)
     if IA_ANALYSE_ACTIVE:
         logger.info(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
     else:
         logger.warning("⚠️ Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
-    logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE (économie mémoire ~250-300 MB) — utilisez /api/recruteur/reanalyze-all si besoin")
+    logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE (économie mémoire)")
+    logger.info("🔒 Analyse forcée activée pour Chef de Division Local Corporate")
     app.run(host="0.0.0.0", port=port, debug=False)
