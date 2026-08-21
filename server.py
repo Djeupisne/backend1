@@ -3634,7 +3634,301 @@ def resume_pending_analyses_on_boot():
 # 🛡️ OOM-FIX: DÉSACTIVATION de l'auto-reprise au boot pour économiser ~250-300 MB de RAM
 # threading.Thread(target=resume_pending_analyses_on_boot, daemon=True).start()
 # Note: Logging moved to startup handler to avoid execution at import time
+# ═══════════════════════════════════════════════════════════════
+#  ROUTES DE DIAGNOSTIC ET CORRECTION DES ERREURS D'ANALYSE
+# ═══════════════════════════════════════════════════════════════
 
+@app.route('/api/recruteur/reanalyze-errors', methods=['GET'])
+@jwt_required()
+def get_reanalyze_errors():
+    """
+    Récupère la liste des candidatures en erreur avec les détails.
+    """
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    
+    try:
+        # Récupérer toutes les candidatures en erreur
+        response = supabase.table('candidats').select('*').eq('analyse_status', 'error').execute()
+        errors = response.data if response.data else []
+        
+        # Formater les erreurs pour l'affichage
+        formatted_errors = []
+        for row in errors:
+            formatted_errors.append({
+                'token': row.get('token'),
+                'nom': row.get('nom', 'N/A'),
+                'prenom': row.get('prenom', 'N/A'),
+                'poste': row.get('poste', 'N/A'),
+                'email': row.get('email', 'N/A'),
+                'numero_dossier': row.get('numero_dossier', 'N/A'),
+                'cv_filename': row.get('cv_filename', 'N/A'),
+                'lettre_filename': row.get('lettre_filename', 'N/A'),
+                'erreur': row.get('analyse_error', 'Erreur inconnue'),
+                'date_candidature': row.get('date_candidature', 'N/A'),
+                'statut': row.get('statut', 'en_attente')
+            })
+        
+        # Statistiques des erreurs par type
+        error_types = {}
+        for row in formatted_errors:
+            err_msg = row.get('erreur', 'Erreur inconnue')[:100]
+            error_types[err_msg] = error_types.get(err_msg, 0) + 1
+        
+        return jsonify({
+            'total_errors': len(formatted_errors),
+            'error_types': error_types,
+            'errors': formatted_errors
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Erreur diagnostic: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recruteur/reanalyze-errors', methods=['POST'])
+@jwt_required()
+def reanalyze_errors():
+    """
+    Relance l'analyse UNIQUEMENT pour les candidatures en erreur.
+    """
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    
+    try:
+        # Récupérer toutes les candidatures en erreur
+        response = supabase.table('candidats').select('*').eq('analyse_status', 'error').execute()
+        failed = response.data if response.data else []
+        
+        if not failed:
+            return jsonify({
+                'message': '✅ Aucune analyse en erreur à relancer',
+                'total': 0,
+                'success': 0
+            }), 200
+        
+        logger.info(f"🔄 Relance des analyses en erreur: {len(failed)} candidats")
+        
+        # Mettre à jour le statut avant de relancer
+        for row in failed:
+            try:
+                supabase.table('candidats').update({
+                    "analyse_status": "reanalyzing",
+                    "reanalyze_trigger": datetime.datetime.now().isoformat(),
+                    "reanalyze_reason": "Relance automatique des erreurs"
+                }).eq('token', row.get('token')).execute()
+            except Exception as e:
+                logger.warning(f"Erreur mise à jour statut pour {row.get('token')}: {e}")
+        
+        def analyze_one(data):
+            try:
+                token = data.get('token')
+                cv_fn = data.get('cv_filename')
+                lm_fn = data.get('lettre_filename')
+                att_raw = data.get('attestation_filenames', '[]')
+                poste = data.get('poste')
+                
+                if not cv_fn:
+                    supabase.table('candidats').update({
+                        "analyse_status": "error",
+                        "analyse_error": "CV manquant - impossible de relancer l'analyse"
+                    }).eq('token', token).execute()
+                    return (token, False, "CV manquant")
+                
+                # Appeler la fonction d'analyse
+                run_analysis_for_candidat(token, cv_fn, lm_fn, att_raw, poste, True)
+                return (token, True, "OK")
+                
+            except Exception as e:
+                error_msg = str(e)
+                try:
+                    supabase.table('candidats').update({
+                        "analyse_status": "error",
+                        "analyse_error": f"Erreur lors de la relance: {error_msg[:200]}"
+                    }).eq('token', data.get('token')).execute()
+                except:
+                    pass
+                return (data.get('token'), False, error_msg)
+        
+        # 🛡️ OOM-FIX: un seul worker pour éviter les problèmes mémoire
+        results = []
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            futures = [executor.submit(analyze_one, c) for c in failed if c.get('cv_filename')]
+            for future in as_completed(futures):
+                try:
+                    results.append(future.result(timeout=180))
+                except Exception as e:
+                    results.append((None, False, f"Timeout: {str(e)}"))
+        
+        success = sum(1 for r in results if r[1] and r[0] is not None)
+        errors = [r for r in results if not r[1]]
+        
+        return jsonify({
+            'message': f'✅ {success}/{len(failed)} analyses relancées avec succès',
+            'success': success,
+            'total': len(failed),
+            'errors': errors[:20]  # Limité à 20 pour la réponse
+        }), 202
+        
+    except Exception as e:
+        logger.error(f"Erreur relance analyses: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recruteur/candidats/<token>/fix-error', methods=['POST'])
+@jwt_required()
+def fix_candidat_error(token):
+    """
+    Corrige une analyse en erreur pour un candidat spécifique.
+    """
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    
+    try:
+        # Récupérer le candidat
+        response = supabase.table('candidats').select('*').eq('token', token).execute()
+        if not response.data or len(response.data) == 0:
+            return jsonify({'error': 'Candidat introuvable'}), 404
+        
+        data = response.data[0]
+        
+        # Vérifier si le candidat est vraiment en erreur
+        if data.get('analyse_status') != 'error':
+            return jsonify({
+                'message': f'Le candidat est en statut "{data.get("analyse_status")}", pas en erreur',
+                'statut_actuel': data.get('analyse_status')
+            }), 400
+        
+        cv_fn = data.get('cv_filename')
+        lm_fn = data.get('lettre_filename')
+        att_raw = data.get('attestation_filenames', '[]')
+        poste = data.get('poste')
+        
+        if not cv_fn:
+            supabase.table('candidats').update({
+                "analyse_status": "error",
+                "analyse_error": "CV manquant - impossible de corriger"
+            }).eq('token', token).execute()
+            return jsonify({'error': 'CV manquant, impossible de corriger'}), 400
+        
+        # Lancer l'analyse en arrière-plan
+        threading.Thread(
+            target=run_analysis_for_candidat,
+            args=(token, cv_fn, lm_fn, att_raw, poste, True),
+            daemon=True
+        ).start()
+        
+        return jsonify({
+            'message': f'✅ Correction lancée pour {data.get("prenom")} {data.get("nom")}',
+            'token': token,
+            'statut': 'en_cours_de_correction'
+        }), 202
+        
+    except Exception as e:
+        logger.error(f"Erreur correction candidat {token}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recruteur/analyses-stats', methods=['GET'])
+@jwt_required()
+def get_analyses_stats():
+    """
+    Statistiques détaillées sur l'état des analyses.
+    """
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    
+    try:
+        response = supabase.table('candidats').select('*').execute()
+        data = response.data if response.data else []
+        
+        # Statistiques globales
+        stats = {
+            'total': len(data),
+            'by_status': {},
+            'by_poste': {},
+            'error_details': [],
+            'reanalyze_in_progress': False
+        }
+        
+        for row in data:
+            status = row.get('analyse_status', 'unknown')
+            stats['by_status'][status] = stats['by_status'].get(status, 0) + 1
+            
+            poste = row.get('poste', 'unknown')
+            stats['by_poste'][poste] = stats['by_poste'].get(poste, 0) + 1
+            
+            if status == 'error':
+                stats['error_details'].append({
+                    'token': row.get('token'),
+                    'nom': row.get('nom'),
+                    'prenom': row.get('prenom'),
+                    'poste': poste,
+                    'erreur': row.get('analyse_error', 'Erreur inconnue')[:100]
+                })
+            
+            if status == 'reanalyzing':
+                stats['reanalyze_in_progress'] = True
+        
+        # Postes actifs vs clôturés
+        actifs_count = sum(1 for row in data if row.get('poste') in POSTES_ACTIFS)
+        clotures_count = len(data) - actifs_count
+        
+        stats['postes_actifs_count'] = actifs_count
+        stats['postes_clotures_count'] = clotures_count
+        
+        # Limiter les détails d'erreur à 20
+        stats['error_details'] = stats['error_details'][:20]
+        
+        return jsonify(stats), 200
+        
+    except Exception as e:
+        logger.error(f"Erreur stats analyses: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/recruteur/force-complete/<token>', methods=['POST'])
+@jwt_required()
+def force_complete_analysis(token):
+    """
+    Force le passage au statut 'completed' pour une analyse bloquée.
+    UTILISER AVEC PRÉCAUTION - uniquement si l'analyse est vraiment terminée.
+    """
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    
+    try:
+        response = supabase.table('candidats').select('*').eq('token', token).execute()
+        if not response.data or len(response.data) == 0:
+            return jsonify({'error': 'Candidat introuvable'}), 404
+        
+        data = response.data[0]
+        status = data.get('analyse_status')
+        
+        if status not in ('reanalyzing', 'pending', 'error'):
+            return jsonify({
+                'message': f'Le candidat est en statut "{status}", pas besoin de forcer',
+                'statut_actuel': status
+            }), 400
+        
+        # Forcer le statut à completed
+        supabase.table('candidats').update({
+            "analyse_status": "completed",
+            "analyse_auto_date": datetime.datetime.now().isoformat(),
+            "reanalyze_reason": "Forcé manuellement par l'administrateur"
+        }).eq('token', token).execute()
+        
+        return jsonify({
+            'message': f'✅ Analyse forcée au statut "completed" pour {data.get("prenom")} {data.get("nom")}',
+            'token': token,
+            'ancien_statut': status
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Erreur force complete {token}: {e}")
+        return jsonify({'error': str(e)}), 500
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     # Log IA status and auto-resume status at startup (inside main block to avoid import-time execution)
