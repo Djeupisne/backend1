@@ -136,13 +136,18 @@ logging.getLogger('pdfminer').setLevel(logging.WARNING)
 logging.getLogger('pdfplumber').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app, resources={r"/api/*": {"origins": ["https://recrutment.onrender.com", "http://localhost:3000", "http://127.0.0.1:3000"]}}, supports_credentials=True)
 
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
+    origin = request.headers.get('Origin', '*')
+    if origin in ["https://recrutment.onrender.com", "http://localhost:3000", "http://127.0.0.1:3000"]:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+    else:
+        response.headers.add('Access-Control-Allow-Origin', 'https://recrutment.onrender.com')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
     response.headers.add('Access-Control-Max-Age', '600')
     if request.method == 'OPTIONS':
         response.status_code = 204
