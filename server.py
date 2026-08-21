@@ -1652,13 +1652,13 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         certification_score = 1
     
     sous_scores = {
-        "Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints": exp_corporate,
-        "Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L": management,
-        "Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions": risque,
-        "Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance": crossselling,
-        "Cohérence et progression du parcours professionnel avec séniorité et responsabilités croissantes": progression,
-        "Qualité du CV avec résultats chiffrés et précision des missions, ainsi que qualité de la lettre de motivation": qualite_cv,
-        "Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": certification_score
+        "Expérience en gestion de portefeuille Corporate (CV_Exp_Corporate)": exp_corporate,
+        "Management et encadrement d'équipe (CV_Management)": management,
+        "Gestion du risque crédit et qualité du portefeuille (CV_Risque)": risque,
+        "Développement commercial et cross-selling (CV_CrossSelling)": crossselling,
+        "Progression hiérarchique et cohérence du parcours (CV_Progression)": progression,
+        "Qualité et clarté du CV (CV_Qualite)": qualite_cv,
+        "Certifications bancaires ou formations spécialisées (CV_Certification)": certification_score
     }
     score_total = sum(sous_scores.values())
     decision = "🥇 Entretien prioritaire" if score_total >= 11 else ("🥈 Potentiel à évaluer en entretien" if score_total >= 7 else "❌ Rejet")
