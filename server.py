@@ -1918,6 +1918,42 @@ def health_version():
         "exports": {"excel": OPENPYXL_AVAILABLE, "pdf": REPORTLAB_AVAILABLE, "word": DOCX_AVAILABLE}
     }), 200
 
+# === ROUTE POUR ACCÉDER AUX DOCUMENTS (CV, LETTRE, ATTESTATIONS) ===
+@app.route('/api/recruteur/uploads/<filename>', methods=['GET'])
+@jwt_required()
+def get_uploaded_file(filename):
+    """Route pour télécharger les fichiers stockés sur Supabase"""
+    if not supabase:
+        return jsonify({'error': 'Supabase non configuré'}), 500
+    
+    try:
+        # Télécharger le fichier depuis Supabase
+        file_bytes = download_file_from_supabase(filename)
+        if not file_bytes:
+            return jsonify({'error': 'Fichier non trouvé'}), 404
+        
+        # Déterminer le type de contenu
+        content_type = 'application/octet-stream'
+        if filename.endswith('.pdf'):
+            content_type = 'application/pdf'
+        elif filename.endswith('.docx'):
+            content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        elif filename.endswith('.doc'):
+            content_type = 'application/msword'
+        elif filename.endswith('.txt'):
+            content_type = 'text/plain'
+        
+        return send_file(
+            io.BytesIO(file_bytes),
+            mimetype=content_type,
+            as_attachment=False,
+            download_name=filename
+        )
+    except Exception as e:
+        logger.error(f"Erreur téléchargement fichier {filename}: {e}")
+        return jsonify({'error': f'Erreur lors du téléchargement: {str(e)}'}), 500
+
+
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     if IA_ACTIVE:

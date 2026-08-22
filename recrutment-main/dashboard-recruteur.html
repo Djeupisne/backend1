@@ -1606,7 +1606,13 @@ function renderTable(data) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-muted)">Aucun candidat trouvé</td></tr>';
         return;
     }
-    tbody.innerHTML = data.map(c => {
+    // === TRI PAR SCORE (DÉCROISSANT) POUR CLASSEMENT ===
+    const sortedData = [...data].sort((a, b) => {
+        const scoreA = parseInt(a.score) || 0;
+        const scoreB = parseInt(b.score) || 0;
+        return scoreB - scoreA; // Décroissant
+    });
+    tbody.innerHTML = sortedData.map(c => {
         const scoreMax = getScoreMax(c.poste);
         const scoreRaw = parseInt(c.score) || 0;
         const score = Math.max(0, Math.min(scoreMax, scoreRaw));
