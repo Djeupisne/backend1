@@ -1276,10 +1276,18 @@ reanalyze_status = {"in_progress": False, "total": 0, "processed": 0, "success":
 
 def run_analysis_for_candidat_semantic(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
+        # Vérifier si le poste est actif - la réanalyse automatique ne concerne que les postes actifs
         if not force and not is_poste_actif(poste):
             if supabase:
                 supabase.table('candidats').update({"analyse_status": "skipped_closed_post"}).eq('token', token).execute()
             return
+        
+        # Si force=True mais poste non actif, on skip aussi (sécurité renforcée)
+        if force and not is_poste_actif(poste):
+            if supabase:
+                supabase.table('candidats').update({"analyse_status": "skipped_closed_post"}).eq('token', token).execute()
+            return
+        
         cv_text = ""
         if cv_filename:
             cv_bytes = download_file_from_supabase(cv_filename)
@@ -1332,8 +1340,12 @@ def run_analysis_for_candidat_semantic(token, cv_filename, lettre_filename, atte
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }
+            # Mise à jour automatique du statut si éliminatoire
             if result['score_breakdown'].get('bloc1_eliminatoire'):
                 update_data['statut'] = 'exclu'
+            elif result['score_breakdown'].get('decision', '').startswith('❌ Rejet'):
+                update_data['statut'] = 'rejete'
+            
             supabase.table('candidats').update(update_data).eq('token', token).execute()
     except Exception as e:
         logger.error(f"Analyse error: {e}")
@@ -1564,6 +1576,43 @@ def get_candidat_detail(token):
         return jsonify({'error': 'Candidat introuvable'}), 404
     data = response.data[0]
     data['id'] = token
+    
+    # === AJOUTER LES DÉTAILS D'ÉLIMINATION/REJET AUTOMATIQUEMENT ===
+    statut = data.get('statut', '')
+    if statut in ('exclu', 'rejete'):
+        # Récupérer les raisons détaillées
+        flags_eliminatoires_raw = data.get('flags_eliminatoires', '[]')
+        raisons_rejet = data.get('raisons_rejet_eliminaton', '')
+        score_breakdown_raw = data.get('score_breakdown', '{}')
+        
+        try:
+            flags_eliminatoires = json.loads(flags_eliminatoires_raw) if flags_eliminatoires_raw else []
+            score_breakdown = json.loads(score_breakdown_raw) if score_breakdown_raw else {}
+            
+            # Construire les détails complets d'élimination
+            details_elimination = {
+                'type': 'eliminatoire' if score_breakdown.get('bloc1_eliminatoire') else 'rejet',
+                'raisons': [],
+                'decision': score_breakdown.get('decision', ''),
+                'score': data.get('score', '0'),
+                'score_final': score_breakdown.get('score_final', 0),
+                'points_forts': score_breakdown.get('points_forts', []),
+                'points_vigilance': score_breakdown.get('points_vigilance', [])
+            }
+            
+            # Ajouter les flags éliminatoires
+            if flags_eliminatoires:
+                details_elimination['raisons'].extend(flags_eliminatoires)
+            
+            # Si pas de flags, utiliser raisons_rejet_eliminaton
+            if not details_elimination['raisons'] and raisons_rejet:
+                details_elimination['raisons'] = raisons_rejet.split(' | ')
+            
+            data['details_elimination'] = details_elimination
+        except Exception as e:
+            logger.error(f"Erreur récupération détails élimination: {e}")
+            data['details_elimination'] = {'error': str(e), 'raisons': [raisons_rejet] if raisons_rejet else []}
+    
     return jsonify(data), 200
 
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
