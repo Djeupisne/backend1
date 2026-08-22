@@ -1488,13 +1488,13 @@ def build_analysis_user_message(cv_text, lettre_text, attestation_texts_list, po
         rubrique_txt = "\n".join(f"  - {nom} : 0 à {pts} pts" for nom, pts in rubrique.items())
     att_txt = "\n".join(attestation_texts_list) if attestation_texts_list else "(aucune)"
     if poste in POSTES_AVEC_SCORING_12:
-        seuils_txt = "10-12 : Entretien prioritaire | 7-9 : Vivier | <7 : Rejet"
+        seuils_txt = "10-12 : Entretien prioritaire | 7-9 : Potentiel à évaluer | <7 : Rejet"
     elif poste in POSTES_AVEC_SCORING_14:
         seuils_txt = "11-14 : Entretien prioritaire | 7-10 : Potentiel à évaluer | <7 : Rejet"
     elif poste in POSTES_AVEC_SCORING_100:
         seuils_txt = "≥80 : Shortlist | 70-79 : À considérer | 60-69 : Faible | <60 : Rejet"
     else:
-        seuils_txt = "≥8 : Entretien prioritaire | 6-7 : Entretien si besoin | <6 : Rejet"
+        seuils_txt = "≥8 : Entretien prioritaire | 6-7 : Potentiel à évaluer | <6 : Rejet"
     return f"""POSTE : {poste}
 ═══ GRILLE ═══
 🔴 Éliminatoires :
@@ -1523,7 +1523,7 @@ def _build_result_from_ia_analysis(analyse, poste):
     if lm.get('eliminatoire'):
         flags_elim.append(f"Lettre: {lm.get('commentaire', 'éliminatoire')}")
     score_total = 0 if flags_elim else int(analyse.get('score_total', 0))
-    decision = "❌ Rejet (éliminatoire)" if flags_elim else get_recommandation_from_score(score_total, poste)
+    decision = get_recommandation_from_score(score_total, poste)
     details = {'moteur': 'IA (Claude)', 'eliminatoire_detail': analyse.get('eliminatoire', []), 'a_verifier_detail': analyse.get('a_verifier', []), 'signaux_forts_detail': analyse.get('signaux_forts', []), 'points_attention_detail': analyse.get('points_attention', []), 'lettre_motivation': lm, 'diplomes': analyse.get('diplomes', {}), 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}
     checklist = {}
     for i, e in enumerate(analyse.get('eliminatoire', [])):
@@ -1608,7 +1608,7 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
             flags.append(crit)
     checklist = _build_checklist_from_grille(grille, raw_full, normalized, poste)
     if flags:
-        return {'score': 0, 'score_max': 12, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_compensation(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
+        return {'score': 0, 'score_max': 12, 'decision': '🔴 Rejet', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_compensation(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
     signaux_exp = ["Supervision quotidienne des opérations de compensation interbancaire", "Dénouement de positions nettes en fin de journée", "Gestion de suspens, rejets et réclamations interbancaires", "Utilisation de systèmes bancaires de compensation (SYSTAC, SYGMA, SWIFT)"]
     n_exp = sum(1 for c in signaux_exp if check_criterion_match_advanced(c, normalized, raw_full, poste=poste)[0])
     adequation = min(3, n_exp)
@@ -1639,7 +1639,7 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         "Lettre de motivation": lettre_score
     }
     score_total = sum(sous_scores.values())
-    decision = "🥇 Entretien prioritaire" if score_total >= 10 else ("🥈 Entretien si besoin (vivier de réserve)" if score_total >= 7 else "❌ Rejet")
+    decision = get_recommandation_from_score(score_total, poste)
     return {'score': score_total, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': checklist, 'detail': f"Score: {score_total}/12 — {decision}"}
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Chargé(e) d'Administration de Crédit"
@@ -1654,7 +1654,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             flags.append(crit)
     checklist = _build_checklist_from_grille(grille, raw_full, normalized, poste)
     if flags:
-        return {'score': 0, 'score_max': 12, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_rac(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
+        return {'score': 0, 'score_max': 12, 'decision': '🔴 Rejet', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_rac(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
     signaux_exp = [
         "Gestion du cycle complet d'un crédit (conditions d'approbation, documentation, mise en place, déblocage)",
         "Supervision des échéances et production d'alertes ou rappels aux gestionnaires de portefeuille",
@@ -1697,7 +1697,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         "Lettre de motivation": lettre_score
     }
     score_total = sum(sous_scores.values())
-    decision = "🥇 Entretien prioritaire" if score_total >= 10 else ("🥈 Entretien si besoin (vivier de réserve)" if score_total >= 7 else "❌ Rejet")
+    decision = get_recommandation_from_score(score_total, poste)
     return {'score': score_total, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': checklist, 'detail': f"Score: {score_total}/12 — {decision}"}
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
@@ -1712,7 +1712,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             flags.append(crit)
     checklist = _build_checklist_from_grille(grille, raw_full, normalized, poste)
     if flags:
-        return {'score': 0, 'score_max': 14, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_chef_division_corporate(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
+        return {'score': 0, 'score_max': 14, 'decision': '🔴 Rejet', 'flags_eliminatoires': flags, 'sous_scores': _build_zero_sous_scores_chef_division_corporate(), 'checklist': checklist, 'detail': f"ÉLIMINÉ : {len(flags)} critère(s)"}
     signaux_exp_corporate = [
         "Gestion de portefeuille Corporate / Grandes Entreprises",
         "Analyse crédit et montage de dossiers Corporate",
@@ -1767,7 +1767,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         "Certification professionnelle (ITB, Moody's, Ecobank) ou connaissance du marché CEMAC / UEMOA": certification_score
     }
     score_total = sum(sous_scores.values())
-    decision = "🥇 Entretien prioritaire" if score_total >= 11 else ("🥈 Potentiel à évaluer en entretien" if score_total >= 7 else "❌ Rejet")
+    decision = get_recommandation_from_score(score_total, poste)
     points_forts = []
     points_vigilance = []
     if exp_corporate >= 2.5:
@@ -1906,7 +1906,7 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
     for k, v in score_diplomes.items():
         details['diplomes_scores'][k] = f"{v}/{[4,3,3][['D_Niveau','D_Specialisation','D_Certif'].index(k)]}"
     score_total = min(100, score_cv_total + score_lm_total + sum(score_diplomes.values()))
-    decision = "Shortlist" if score_total >= 80 else ("À considérer" if score_total >= 70 else ("Faible" if score_total >= 60 else "Rejet"))
+    decision = get_recommandation_from_score(score_total, poste)
     return {'score': score_total, 'decision': decision, 'bloc_cv': {'total': score_cv_total, 'max': 70, 'details': score_cv}, 'bloc_lm': {'total': score_lm_total, 'max': 20, 'details': score_lm}, 'bloc_diplomes': {'total': sum(score_diplomes.values()), 'max': 10, 'details': score_diplomes}, 'details': details, 'note': f"Score: {score_total}/100 — {decision}"}
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
@@ -1987,6 +1987,44 @@ try:
 except ImportError:
     SEMANTIC_ANALYZER_AVAILABLE = False
     logger.warning("⚠️ analyzer_v2 non trouvé, utilisation de l'ancien système")
+def get_recommandation_from_score(score, poste=None):
+    s = int(score)
+    if poste and poste in POSTES_AVEC_SCORING_12:
+        if s >= 10:
+            return "🟢 Entretien prioritaire"
+        elif s >= 7:
+            return "🟡 Potentiel à évaluer en entretien"
+        else:
+            return "🔴 Rejet"
+    if poste and poste in POSTES_AVEC_SCORING_14:
+        if s >= 11:
+            return "🟢 Entretien prioritaire"
+        elif s >= 7:
+            return "🟡 Potentiel à évaluer en entretien"
+        else:
+            return "🔴 Rejet"
+    if poste and poste in POSTES_AVEC_SCORING_100:
+        if s >= 80:
+            return "🟢 Shortlist"
+        elif s >= 70:
+            return "🟡 À considérer"
+        elif s >= 60:
+            return "🟡 Faible"
+        else:
+            return "🔴 Rejet"
+    if s >= 8:
+        return "🟢 Entretien prioritaire"
+    elif s >= 5:
+        return "🟡 Potentiel à évaluer en entretien"
+    else:
+        return "🔴 Rejet"
+def get_statut_from_decision(decision):
+    if "🟢" in decision:
+        return "retenu"
+    elif "🟡" in decision:
+        return "entretien"
+    else:
+        return "rejete"
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
         if not force and not is_poste_actif(poste):
@@ -2061,6 +2099,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             for criterion in result['criteria']:
                 key = criterion['criterion'][:50].replace(' ', '_')
                 checklist[key] = criterion['passed']
+            decision = result['decision']
+            statut = get_statut_from_decision(decision)
             if supabase:
                 supabase.table('candidats').update({
                     "score": str(result['score']),
@@ -2069,11 +2109,12 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "checklist": json.dumps(checklist, ensure_ascii=False),
                     "flags_eliminatoires": json.dumps([], ensure_ascii=False),
                     "signaux_detectes": json.dumps(result['strengths'], ensure_ascii=False),
-                    "decision": result['decision'],
+                    "decision": decision,
+                    "statut": statut,
                     "analyse_status": "completed",
                     "analyse_auto_date": datetime.datetime.now().isoformat()
                 }).eq('token', token).execute()
-            logger.info(f"✅ [{result['decision']}] Score {token}: {result['score']}/{result['max_score']} (sémantique v2)")
+            logger.info(f"✅ [{decision}] Score {token}: {result['score']}/{result['max_score']} (sémantique v2) → statut: {statut}")
             return
         result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
         if result is None:
@@ -2101,6 +2142,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
             else:
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+        decision = result['score_breakdown'].get('decision', '🔴 Rejet')
+        statut = get_statut_from_decision(decision)
         if supabase:
             supabase.table('candidats').update({
                 "score": str(result['score']),
@@ -2109,13 +2152,14 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False),
                 "analyse_details": json.dumps(result['details'], ensure_ascii=False),
                 "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),
-                "decision": result['score_breakdown'].get('decision', ''),
+                "decision": decision,
+                "statut": statut,
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }).eq('token', token).execute()
         moteur = result['score_breakdown'].get('moteur_analyse', result['details'].get('moteur', 'mots-clés'))
         tag = "⚠️ ÉLIMINÉ" if result['score_breakdown'].get('bloc1_eliminatoire') else "✅"
-        logger.info(f"{tag} [{moteur}] Score {token}: {result['score']} — {result['score_breakdown'].get('note','')}")
+        logger.info(f"{tag} [{moteur}] Score {token}: {result['score']} — {decision} → statut: {statut}")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2127,24 +2171,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         except:
             pass
         gc.collect()
-def get_recommandation_from_score(score, poste=None):
-    s = int(score)
-    if poste and poste in POSTES_AVEC_SCORING_12:
-        if s >= 10: return "🥇 Entretien prioritaire"
-        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"
-        else: return "❌ Rejet"
-    if poste and poste in POSTES_AVEC_SCORING_14:
-        if s >= 11: return "🥇 Entretien prioritaire"
-        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"
-        else: return "❌ Rejet"
-    if poste and poste in POSTES_AVEC_SCORING_100:
-        if s >= 80: return "Shortlist"
-        elif s >= 70: return "À considérer"
-        elif s >= 60: return "Faible"
-        else: return "Rejet"
-    if s >= 8: return "🥇 Entretien prioritaire"
-    elif s >= 5: return "🥈 Potentiel à évaluer en entretien"
-    else: return "❌ Rejet"
 def get_decision_from_score(score, poste=None):
     if not poste or (poste not in POSTES_AVEC_SCORING_100 and poste not in POSTES_AVEC_SCORING_12 and poste not in POSTES_AVEC_SCORING_14):
         return None
@@ -2322,46 +2348,46 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 if poste in POSTES_AVEC_SCORING_12:
                     if raw_score >= 10:
                         c['_decision_corrigee'] = '🟢 Retenu'
-                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE\n"
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE\n  ✓ Profil correspond aux exigences du poste\n"
                     elif raw_score >= 7:
                         c['_decision_corrigee'] = '🟡 Entretien'
-                        c['_motif_corrige'] = "🟡 À CONVOQUER EN ENTRETIEN - Vivier de réserve\n"
+                        c['_motif_corrige'] = "🟡 À CONVOQUER EN ENTRETIEN - Vivier de réserve\n  ✓ Profil correspond aux exigences du poste\n"
                     else:
                         c['_decision_corrigee'] = '🔴 Rejeté'
-                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n  • Profil ne correspond pas aux exigences du poste\n"
                 elif poste in POSTES_AVEC_SCORING_14:
                     if raw_score >= 11:
                         c['_decision_corrigee'] = '🟢 Retenu'
-                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE\n"
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE\n  ✓ Profil correspond aux exigences du poste\n"
                     elif raw_score >= 7:
                         c['_decision_corrigee'] = '🟡 Entretien'
-                        c['_motif_corrige'] = "🟡 POTENTIEL À ÉVALUER EN ENTRETIEN\n"
+                        c['_motif_corrige'] = "🟡 POTENTIEL À ÉVALUER EN ENTRETIEN\n  ✓ Profil correspond aux exigences du poste\n"
                     else:
                         c['_decision_corrigee'] = '🔴 Rejeté'
-                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n  • Profil ne correspond pas aux exigences du poste\n"
                 elif poste in POSTES_AVEC_SCORING_100:
                     if raw_score >= 80:
                         c['_decision_corrigee'] = '🟢 Retenu'
-                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ - Shortlist\n"
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ - Shortlist\n  ✓ Profil correspond aux exigences du poste\n"
                     elif raw_score >= 70:
                         c['_decision_corrigee'] = '🟡 Entretien'
-                        c['_motif_corrige'] = "🟡 À CONSIDÉRER\n"
+                        c['_motif_corrige'] = "🟡 À CONSIDÉRER\n  ✓ Profil correspond aux exigences du poste\n"
                     elif raw_score >= 60:
                         c['_decision_corrigee'] = '🟡 Entretien'
-                        c['_motif_corrige'] = "🟡 FAIBLE - À évaluer avec prudence\n"
+                        c['_motif_corrige'] = "🟡 FAIBLE - À évaluer avec prudence\n  • Profil à approfondir en entretien\n"
                     else:
                         c['_decision_corrigee'] = '🔴 Rejeté'
-                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n  • Profil ne correspond pas aux exigences du poste\n"
                 else:
                     if raw_score >= 8:
                         c['_decision_corrigee'] = '🟢 Retenu'
-                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ\n"
-                    elif raw_score >= 6:
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ\n  ✓ Profil correspond aux exigences du poste\n"
+                    elif raw_score >= 5:
                         c['_decision_corrigee'] = '🟡 Entretien'
-                        c['_motif_corrige'] = "🟡 À CONVOQUER EN ENTRETIEN\n"
+                        c['_motif_corrige'] = "🟡 À CONVOQUER EN ENTRETIEN\n  ✓ Profil correspond aux exigences du poste\n"
                     else:
                         c['_decision_corrigee'] = '🔴 Rejeté'
-                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n  • Profil ne correspond pas aux exigences du poste\n"
                 details = c.get('analyse_details_parsed', {})
                 points_forts = details.get('points_forts', [])
                 points_vigilance = details.get('points_vigilance', [])
@@ -2658,7 +2684,7 @@ def generate_pdf_report(candidats_data, poste_filter=None):
                 if score >= 8:
                     tbl_style.append(('BACKGROUND', (reco_col, row_idx), (reco_col, row_idx), colors.Color(0.8, 1, 0.8)))
                     tbl_style.append(('FONTNAME', (reco_col, row_idx), (reco_col, row_idx), 'Helvetica-Bold'))
-                elif score >= 6:
+                elif score >= 5:
                     tbl_style.append(('BACKGROUND', (reco_col, row_idx), (reco_col, row_idx), colors.Color(1, 0.9, 0.6)))
                 else:
                     tbl_style.append(('BACKGROUND', (reco_col, row_idx), (reco_col, row_idx), colors.Color(1, 0.85, 0.85)))
@@ -3683,7 +3709,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v4.0-semantic-analyzer",
+        "version": "v4.1-corrected-scoring",
         "postes_actifs_defined": 'POSTES_ACTIFS' in globals(),
         "postes_actifs": POSTES_ACTIFS if 'POSTES_ACTIFS' in globals() else "NON DÉFINI",
         "is_poste_actif_exists": 'is_poste_actif' in globals(),
@@ -3693,7 +3719,8 @@ def health_version():
         "cleanup_route_available": True,
         "semantic_analyzer": "ENABLED" if SEMANTIC_ANALYZER_AVAILABLE else "DISABLED (fallback mots-clés)",
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
-        "no_auto_reject": "TRUE (8/14 = Potentiel à évaluer)",
+        "no_auto_reject": "TRUE (8/14 = Potentiel à évaluer en entretien)",
+        "statut_sync": "Statut automatiquement mis à jour à partir de la décision",
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3706,6 +3733,7 @@ if __name__ == '__main__':
         logger.info("🧠 Analyseur sémantique v2 disponible — compréhension du sens des phrases")
     else:
         logger.warning("⚠️ Analyseur sémantique v2 non disponible — fallback sur l'ancien système")
-    logger.info("📊 Nouveaux seuils: 8/14 = POTENTIEL À ÉVALUER (pas de rejet automatique)")
+    logger.info("📊 Nouveaux seuils: 8/14 = POTENTIEL À ÉVALUER EN ENTRETIEN (pas de rejet automatique)")
+    logger.info("🔄 Statut automatiquement synchronisé avec la décision calculée")
     logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE — utilisez /api/recruteur/reanalyze-all si besoin")
     app.run(host="0.0.0.0", port=port, debug=False)
