@@ -76,11 +76,36 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-# === CONFIGURATION GEMINI ===
+# === CONFIGURATION IA (Anthropic) ===
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+IA_ACTIVE = False
+if ANTHROPIC_API_KEY:
+    try:
+        import anthropic
+        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        test_response = claude_client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Test"}]
+        )
+        if test_response:
+            IA_ACTIVE = True
+            print(f"✅ Anthropic Claude activé avec succès: {ANTHROPIC_MODEL}")
+    except Exception as e:
+        IA_ACTIVE = False
+        print(f"⚠️ Anthropic erreur: {e}")
+else:
+    IA_ACTIVE = False
+    print("⚠️ Anthropic désactivé (pas de clé API)")
+
+# === GEMINI (fallback) ===
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
 
-if GEMINI_AVAILABLE and GEMINI_API_KEY:
+GEMINI_ACTIVE = False
+if not IA_ACTIVE and GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         models_to_try = [
@@ -90,7 +115,6 @@ if GEMINI_AVAILABLE and GEMINI_API_KEY:
             "models/gemini-1.5-pro",
             "models/gemini-1.0-pro"
         ]
-        GEMINI_ACTIVE = False
         for model_name in models_to_try:
             try:
                 gemini_model = genai.GenerativeModel(model_name)
@@ -108,9 +132,9 @@ if GEMINI_AVAILABLE and GEMINI_API_KEY:
     except Exception as e:
         GEMINI_ACTIVE = False
         print(f"⚠️ Gemini erreur: {e}")
-else:
-    GEMINI_ACTIVE = False
-    print("⚠️ Gemini désactivé")
+
+if not IA_ACTIVE and not GEMINI_ACTIVE:
+    print("⚠️ IA désactivée (ni Anthropic ni Gemini)")
 
 # === APP ===
 app = Flask(__name__)
@@ -702,6 +726,40 @@ def extract_text_robust_from_bytes(file_bytes, filename):
         return ""
 
 # === GEMINI SEMANTIC ANALYSIS ===
+def check_criterion_with_ia(criterion, cv_text, lettre_text, poste):
+    """Vérifie un critère avec l'IA (Anthropic en priorité, puis Gemini)"""
+    if IA_ACTIVE:
+        try:
+            cv_extrait = cv_text[:3000] if cv_text else ""
+            lettre_extrait = (lettre_text or "")[:1000]
+            prompt = f"""Tu es un expert en recrutement bancaire. Analyse si le candidat remplit ce critère.
+POSTE: {poste}
+CRITERE: "{criterion}"
+--- CV ---
+{cv_extrait}
+--- LETTRE ---
+{lettre_extrait if lettre_extrait else "(non fournie)"}
+Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, "justification": "", "elements_trouves": []}}"""
+            response = claude_client.messages.create(
+                model=ANTHROPIC_MODEL,
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            import json
+            import re
+            json_match = re.search(r'\{[^{}]*\}', response.content[0].text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                return result.get('valide', False), float(result.get('confiance', 0.5)), result.get('justification', ''), result.get('elements_trouves', [])
+            return None, 0.0, "", []
+        except Exception as e:
+            logger.warning(f"Anthropic error: {e}")
+            return None, 0.0, "", []
+    elif GEMINI_ACTIVE:
+        return check_criterion_with_gemini(criterion, cv_text, lettre_text, poste)
+    else:
+        return None, 0.0, "", []
+
 def check_criterion_with_gemini(criterion, cv_text, lettre_text, poste):
     if not GEMINI_ACTIVE:
         return None, 0.0, "", []
@@ -729,18 +787,18 @@ Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, 
         return None, 0.0, "", []
 
 def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_text=None, raw_full_text=None):
-    # === ETAPE 1: Essayer Gemini si disponible et pertinent ===
-    if GEMINI_ACTIVE and poste in POSTES_AVEC_SCORING_12 + POSTES_AVEC_SCORING_14:
+    # === ETAPE 1: Essayer l'IA (Anthropic ou Gemini) si disponible et pertinent ===
+    if (IA_ACTIVE or GEMINI_ACTIVE) and poste in POSTES_AVEC_SCORING_12 + POSTES_AVEC_SCORING_14:
         try:
-            valide, confiance, justification, elements = check_criterion_with_gemini(criterion, cv_text, lettre_text, poste)
+            valide, confiance, justification, elements = check_criterion_with_ia(criterion, cv_text, lettre_text, poste)
             if valide is not None and confiance >= 0.5:
-                logger.info(f"✅ Gemini: '{criterion}' → {valide} (conf: {confiance:.2f})")
+                logger.info(f"✅ IA ({'Anthropic' if IA_ACTIVE else 'Gemini'}): '{criterion}' → {valide} (conf: {confiance:.2f})")
                 return valide, confiance, elements
             elif valide is not None and valide:
-                logger.info(f"⚠️ Gemini conf faible: '{criterion}' → {valide} (conf: {confiance:.2f})")
+                logger.info(f"⚠️ IA conf faible: '{criterion}' → {valide} (conf: {confiance:.2f})")
                 return True, confiance, elements
         except Exception as e:
-            logger.warning(f"Gemini fallback: {e}")
+            logger.warning(f"IA fallback: {e}")
     
     # === ETAPE 2: Fallback robuste avec mots-clés élargis ===
     if raw_full_text:
@@ -1098,7 +1156,7 @@ def generate_excel_report(candidats_data, poste_filter=None, date_start=None, da
     wb = Workbook()
     ws = wb.active
     ws.title = "Candidatures"
-    headers = ['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note']
+    headers = ['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note', 'Raisons Rejet/Élimination']
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
@@ -1115,8 +1173,11 @@ def generate_excel_report(candidats_data, poste_filter=None, date_start=None, da
         ws.cell(row=row_idx, column=8, value=c.get('score', 0))
         ws.cell(row=row_idx, column=9, value=c.get('date_candidature', '')[:10] if c.get('date_candidature') else '')
         ws.cell(row=row_idx, column=10, value=c.get('note', ''))
+        # Ajouter les raisons de rejet/élimination (nouvelle colonne)
+        raisons = c.get('raisons_rejet_eliminaton', c.get('raisons_rejet', ''))
+        ws.cell(row=row_idx, column=11, value=raisons)
     for col in range(1, len(headers) + 1):
-        ws.column_dimensions[get_column_letter(col)].width = 20
+        ws.column_dimensions[get_column_letter(col)].width = 25
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
@@ -1343,8 +1404,40 @@ def run_analysis_for_candidat_semantic(token, cv_filename, lettre_filename, atte
             # Mise à jour automatique du statut si éliminatoire
             if result['score_breakdown'].get('bloc1_eliminatoire'):
                 update_data['statut'] = 'exclu'
+                # Envoyer email d'élimination avec détails
+                candidat_info = supabase.table('candidats').select('email, nom, prenom, poste').eq('token', token).execute()
+                if candidat_info.data:
+                    cand = candidat_info.data[0]
+                    sujet = f"Votre candidature au poste de {poste} - Décision"
+                    corps = f"""Bonjour {cand.get('prenom', '')} {cand.get('nom', '')},
+
+Nous vous informons que votre candidature au poste de {poste} n'a pas été retenue.
+
+Raisons principales :
+{raisons_text}
+
+Merci de l'intérêt porté à notre entreprise.
+Cordialement,
+L'équipe RH"""
+                    threading.Thread(target=send_email, args=(cand.get('email'), sujet, corps), daemon=True).start()
             elif result['score_breakdown'].get('decision', '').startswith('❌ Rejet'):
                 update_data['statut'] = 'rejete'
+                # Envoyer email de rejet avec détails
+                candidat_info = supabase.table('candidats').select('email, nom, prenom, poste').eq('token', token).execute()
+                if candidat_info.data:
+                    cand = candidat_info.data[0]
+                    sujet = f"Votre candidature au poste de {poste} - Décision"
+                    corps = f"""Bonjour {cand.get('prenom', '')} {cand.get('nom', '')},
+
+Nous vous informons que votre candidature au poste de {poste} n'a pas été retenue.
+
+Raisons principales :
+{raisons_text}
+
+Merci de l'intérêt porté à notre entreprise.
+Cordialement,
+L'équipe RH"""
+                    threading.Thread(target=send_email, args=(cand.get('email'), sujet, corps), daemon=True).start()
             
             supabase.table('candidats').update(update_data).eq('token', token).execute()
     except Exception as e:
@@ -1816,8 +1909,10 @@ def test_gemini():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v4.0-complete",
+        "version": "v4.1-ia-alertes",
         "postes_actifs": POSTES_ACTIFS,
+        "ia_active": IA_ACTIVE,
+        "anthropic_model": ANTHROPIC_MODEL if IA_ACTIVE else "inactif",
         "gemini_active": GEMINI_ACTIVE,
         "gemini_model": GEMINI_MODEL if GEMINI_ACTIVE else "inactif",
         "exports": {"excel": OPENPYXL_AVAILABLE, "pdf": REPORTLAB_AVAILABLE, "word": DOCX_AVAILABLE}
@@ -1825,7 +1920,9 @@ def health_version():
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    if GEMINI_ACTIVE:
+    if IA_ACTIVE:
+        print(f"🧠 Anthropic Claude activé: {ANTHROPIC_MODEL}")
+    elif GEMINI_ACTIVE:
         print(f"🧠 Gemini activé: {GEMINI_MODEL}")
     print(f"📊 Export Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'}")
     print(f"📄 Export PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
