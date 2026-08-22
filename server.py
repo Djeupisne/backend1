@@ -254,165 +254,366 @@ POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Loc
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
-GRILLE = {
-    "Responsable Administration de Crédit": {
-        "eliminatoire": ["Expérience bancaire", "Minimum 3 ans en crédit / risque (hors stage)", "Exposition aux garanties ou conformité"],
-        "a_verifier": ["Validation de dossiers de crédit", "Gestion des garanties", "Participation à des audits"],
-        "signaux_forts": ["IFRS 9", "COBAC / conformité", "Suivi portefeuille / impayés"],
-        "points_attention": ["Parcours trop comptable pur", "Rôle uniquement administratif sans responsabilité", "CV flou avec missions génériques"]
-    },
-    "Analyste Crédit CCB": {
-        "eliminatoire": ["Expérience en analyse crédit", "Capacité à lire des états financiers", "Minimum 3 ans institution financière (hors stage)"],
-        "a_verifier": ["Clients PME", "Clients particuliers", "Structuration de crédit", "Avis de crédit"],
-        "signaux_forts": ["Cash-flow analysis", "Montage de crédit", "Comités de crédit"],
-        "points_attention": ["CV trop relation client", "Aucune notion de risque", "Expériences très courtes sans progression"]
-    },
-    "Archiviste (Administration Crédit)": {
-        "eliminatoire": ["Expérience en gestion documentaire structurée", "Rigueur démontrée"],
-        "a_verifier": ["Archivage physique et électronique", "Gestion des dossiers sensibles"],
-        "signaux_forts": ["Expérience en banque ou juridique", "Manipulation de garanties ou contrats"],
-        "points_attention": ["Profils trop généralistes", "CV désorganisé"]
-    },
-    "Senior Finance Officer": {
-        "eliminatoire": ["Expérience en reporting financier structuré", "Exposition aux états financiers", "Interaction avec auditeurs", "Minimum 3 ans département finance ou en cabinet d'audit (hors stage)"],
-        "a_verifier": ["Production états financiers", "Reporting groupe", "Connaissance IFRS", "Contraintes réglementaires"],
-        "signaux_forts": ["IFRS / consolidation", "Reporting groupe", "Interaction avec CAC", "Outils SPECTRA / CERBER / ERP"],
-        "points_attention": ["Profil comptable junior amélioré", "Pas de responsabilité réelle", "CV flou sur les livrables"]
-    },
-    "Market Risk Officer": {
-        "eliminatoire": ["Base en risques de marché", "Exposition à FX / taux / liquidité", "Minimum 3 ans institution financière (hors stage)"],
-        "a_verifier": ["Maîtrise VaR / stress testing", "Analyse des positions", "Excel avancé", "VBA ou Python"],
-        "signaux_forts": ["Bâle II / III", "Gestion ALM / liquidité", "Produits FICC", "Reporting risque"],
-        "points_attention": ["CV trop théorique académique", "Aucune mention d'outils", "Incapacité implicite à modéliser"]
-    },
-    "IT Réseau & Infrastructure": {
-        "eliminatoire": ["Expérience en réseau / infrastructure", "Exposition à environnement critique", "Notion de sécurité IT", "Minimum 2 ans expérience (hors stage)"],
-        "a_verifier": ["Gestion réseaux LAN/WAN/VPN", "Gestion serveurs Windows/Linux", "Cloud même basique", "Gestion des incidents", "Assurance de la disponibilité"],
-        "signaux_forts": ["Cybersécurité / firewall", "Haute disponibilité / PRA/PCA", "Gestion ATM ou systèmes bancaires", "Certifications Cisco ou Microsoft"],
-        "points_attention": ["Profil trop helpdesk", "CV sans détail technique", "Aucune mention de sécurité"]
-    },
-    "Auditeur interne": {
-        "eliminatoire": ["Expérience réelle en audit interne ou externe", "Minimum 3 ans en audit bancaire ou cabinet d'audit (hors stage)", "Connaissance des normes d'audit et contrôle interne"],
-        "a_verifier": ["Missions d'audit sur site", "Évaluation des risques opérationnels", "Rédaction de rapports d'audit", "Suivi des recommandations"],
-        "signaux_forts": ["Normes IIA / IPPF", "COBAC / réglementation bancaire", "Audit IT ou systèmes d'information", "Certification CIA / CPA / ACCA"],
-        "points_attention": ["Profil purement comptable sans audit", "Aucune expérience terrain en audit", "CV flou sur les missions réalisées"]
-    },
-    "Chef service contrôle des engagements": {
-        "eliminatoire": ["Maîtrise du risque crédit et analyse financière", "Expérience significative en octroi de crédits", "Minimum 5 ans en institution financière (hors stage)"],
-        "a_verifier": ["Analyse financière d'entreprises", "Structuration de crédits complexes", "Animation de comité de crédit", "Management d'équipe"],
-        "signaux_forts": ["IFRS 9 / classification des risques", "Grande entreprise / Corporate", "Restructuration de dossiers sensibles", "Formation risk management"],
-        "points_attention": ["Profil purement commercial sans analyse", "Aucune expérience en analyse financière", "CV orienté relation client uniquement"]
-    },
-    "Chef service IT (maintenance/support)": {
-        "eliminatoire": ["Background IT solide avec expérience technique réelle", "Minimum 5 ans en maintenance et support informatique", "Exposition à environnement critique (banque, datacenter)"],
-        "a_verifier": ["Maintenance préventive et curative", "Support utilisateurs niveau 2/3", "Gestion de parc informatique", "Supervision d'infrastructures"],
-        "signaux_forts": ["ITIL / gestion de services IT", "Virtualisation (VMware, Hyper-V)", "Systèmes bancaires core banking", "Certifications Microsoft / Cisco / ITIL"],
-        "points_attention": ["Profil trop helpdesk niveau 1", "CV sans détail technique précis", "Aucune expérience en maintenance infrastructure"]
-    },
-    "Chef service finance": {
-        "eliminatoire": ["Expérience significative en finance bancaire (minimum 7 ans)", "Maîtrise du reporting financier et comptabilité bancaire", "Expérience avérée en management d'équipe"],
-        "a_verifier": ["Production d'états financiers", "Reporting réglementaire (BEAC, COBAC)", "Relations avec auditeurs externes", "Pilotage de la performance financière"],
-        "signaux_forts": ["IFRS / normes internationales", "Consolidation de comptes", "Outils SPECTRA / CERBER / ERP bancaires", "Bac+5 + Certification (ACCA, CPA, CFA)"],
-        "points_attention": ["Profil comptable junior sans évolution", "Pas de responsabilité managériale réelle", "Expérience hors secteur bancaire"]
-    },
-    "Chef service risques de marché": {
-        "eliminatoire": ["Expérience avérée en risques de marché (FX, taux, liquidité)", "Exposition aux produits de trésorerie et ALM", "Minimum 5 ans en institution financière (hors stage)"],
-        "a_verifier": ["Calcul et suivi de la VaR", "Stress testing et scénarios de crise", "Reporting des risques à la direction", "Maîtrise Excel avancé / VBA"],
-        "signaux_forts": ["Bâle II / III / réglementation prudentielle", "Gestion ALM (Asset Liability Management)", "Produits FICC (Fixed Income, Currencies, Commodities)", "Python / R pour modélisation financière"],
-        "points_attention": ["Profil trop théorique académique", "Aucune exposition aux marchés financiers", "CV sans mention d'outils de modélisation"]
-    },
-    "Chef service reporting réglementaire": {
-        "eliminatoire": ["Comptabilité bancaire approfondie", "Expérience en reporting réglementaire (BEAC, COBAC, SPECTRA)", "Minimum 5 ans en banque ou cabinet d'audit bancaire"],
-        "a_verifier": ["Production de rapports réglementaires", "Contrôle de cohérence des données", "Veille réglementaire bancaire", "Interaction avec autorités de tutelle"],
-        "signaux_forts": ["SPECTRA / CERBER / outils BEAC", "Normes COBAC précises", "Reporting prudentiel Bâle", "Formation comptabilité bancaire spécialisée"],
-        "points_attention": ["Profil généraliste sans spécialisation bancaire", "Aucune expérience reporting réglementaire", "CV flou sur les livrables produits"]
+GRILLE_POSITIVE = {
+    "Chef de Division Local Corporate": {
+        "eliminatoire": [
+            "A une expérience significative dans le secteur bancaire (minimum 5 ans)",
+            "A un diplôme de niveau Bac+4 ou supérieur (Master, MBA ou équivalent)",
+            "A géré un portefeuille de clients Corporate avec des résultats mesurables",
+            "A une expérience managériale démontrée (encadrement d'équipe d'au moins 3 personnes)",
+            "Maîtrise la gestion du risque de crédit et le suivi de portefeuille (NPL, provisions)"
+        ],
+        "a_verifier": [
+            "A piloté une activité Corporate avec des objectifs de revenus atteints",
+            "A développé un portefeuille Corporate avec acquisition de nouveaux clients",
+            "A encadré et évalué une équipe commerciale ou bancaire",
+            "A suivi la qualité du portefeuille de crédit avec reporting à la direction",
+            "A développé des ventes croisées (cross-selling) avec d'autres départements",
+            "A produit ou supervisé des rapports de performance commerciale et financière",
+            "A une connaissance de la réglementation bancaire locale (COBAC, BEAC)"
+        ],
+        "signaux_forts": [
+            "A piloté une division Corporate avec atteinte des objectifs de revenus",
+            "A géré activement le ratio NPL avec des résultats chiffrés",
+            "A une expérience avérée en cross-selling avec des équipes TSG ou Trade Finance",
+            "A développé le portefeuille Corporate avec acquisition de clients majeurs",
+            "A démontré un leadership fort avec développement des collaborateurs",
+            "Possède une certification bancaire (Moody's, ITB, CFA, ou équivalent)",
+            "A une connaissance du marché corporate tchadien ou de la zone CEMAC/UEMOA"
+        ],
+        "points_attention": [
+            "Parcours exclusivement back-office ou risques sans expérience commerciale Corporate",
+            "Profil technique sans expérience managériale ni pilotage de P&L",
+            "Expériences très courtes (moins de 2 ans par poste) sans progression hiérarchique",
+            "CV sans résultats chiffrés (missions décrites sans indicateurs atteints)",
+            "Mobilité géographique ou sectorielle excessive dans le parcours"
+        ]
     },
     "Chef de Section Compensation": {
-        "eliminatoire": ["Expérience en banque ou établissement financier réglementé", "Minimum 3 ans en opérations bancaires ou back-office (hors stage)", "Exposition aux opérations de compensation interbancaire (chèques, virements, prélèvements)", "Connaissance des règles BEAC / GIMAC ou d'un système de compensation équivalent", "Gestion de suspens, rejets ou réclamations interbancaires", "Expérience d'encadrement ou de supervision d'équipe (poste de chef de section)", "Profil bancaire avec exposition interbancaire (hors microfinance isolée)"],
-        "a_verifier": ["Supervision quotidienne des opérations de compensation interbancaire", "Dénouement de positions nettes en fin de journée", "Gestion de suspens, rejets et réclamations interbancaires", "Encadrement et coordination d'une équipe opérationnelle", "Utilisation de systèmes bancaires de compensation (SYSTAC, SYGMA, SWIFT)", "Production de reportings opérationnels ou réglementaires", "Participation à des contrôles internes, audits COBAC ou inspections réglementaires"],
-        "signaux_forts": ["BEAC / GIMAC / compensation interbancaire (SYSTAC, SYGMA)", "Règlement de positions nettes dans les délais réglementaires", "Contrôle de conformité réglementaire et procédurale", "Maîtrise du contrôle interne et de la comptabilité bancaire (SYSCOHADA)", "Gestion de fin de journée comptable / clôture des opérations interbancaires", "Rapports opérationnels ou réglementaires produits", "Expérience dans une banque de la zone CEMAC / UEMOA", "Audits COBAC ou contrôles internes réussis sans réserve majeure", "Gestion d'une équipe avec résultats mesurables"],
-        "points_attention": ["Parcours purement comptable sans exposition aux opérations interbancaires", "Rôle uniquement administratif ou de support, sans responsabilité opérationnelle", "Absence de tout rôle managérial", "CV aux missions trop génériques, sans livrables ni résultats quantifiés", "Expériences très courtes (< 1 an par poste) sans progression visible", "Maîtrise des outils non mentionnée (SWIFT, compensation, ERP bancaire)", "Trous inexpliqués dans le parcours professionnel"]
+        "eliminatoire": [
+            "A une expérience en banque ou établissement financier réglementé",
+            "A un diplôme de niveau Bac+3 minimum (Licence, Bachelor ou équivalent)",
+            "A minimum 3 ans d'expérience en opérations bancaires ou back-office",
+            "A une exposition aux opérations de compensation interbancaire",
+            "A une connaissance des règles BEAC / GIMAC ou d'un système de compensation équivalent"
+        ],
+        "a_verifier": [
+            "Supervise quotidiennement les opérations de compensation interbancaire",
+            "Gère les suspens, rejets et réclamations interbancaires",
+            "Encadre et coordonne une équipe opérationnelle",
+            "Utilise des systèmes bancaires de compensation (SYSTAC, SYGMA, SWIFT)",
+            "Produit des reportings opérationnels ou réglementaires",
+            "Participe à des contrôles internes, audits COBAC ou inspections réglementaires"
+        ],
+        "signaux_forts": [
+            "Maîtrise le règlement de positions nettes dans les délais réglementaires",
+            "A une expérience dans une banque de la zone CEMAC / UEMOA",
+            "A réussi des audits COBAC ou contrôles internes sans réserve majeure",
+            "Gère une équipe avec des résultats mesurables",
+            "Maîtrise le contrôle interne et la comptabilité bancaire (SYSCOHADA)"
+        ],
+        "points_attention": [
+            "Parcours purement comptable sans exposition aux opérations interbancaires",
+            "Rôle uniquement administratif ou de support, sans responsabilité opérationnelle",
+            "Absence de tout rôle managérial dans le parcours",
+            "CV avec missions trop génériques, sans livrables ni résultats quantifiés"
+        ]
     },
     "Chargé(e) d'Administration de Crédit": {
         "eliminatoire": [
-            "Expérience dans une banque ou un établissement financier réglementé",
-            "Niveau de diplôme minimum Bac +3 (école de commerce, gestion, comptabilité ou équivalent)",
-            "Minimum 1 an d'expérience dans une fonction bancaire (administration de crédit, back-office, risques ou analyse crédit)",
-            "Exposition au cycle de vie du crédit bancaire (mise en place, suivi, garanties, échéances)",
-            "Connaissance des normes comptables bancaires ou de la réglementation COBAC",
-            "Expérience de production de reportings ou tableaux de bord de portefeuille",
-            "Maîtrise des outils bureautiques courants (Excel, traitement de texte, messagerie)"
+            "A une expérience dans une banque ou un établissement financier réglementé",
+            "A un diplôme de niveau Bac+3 minimum (Licence, Bachelor ou équivalent)",
+            "A minimum 1 an d'expérience dans une fonction bancaire",
+            "A une exposition au cycle de vie du crédit bancaire",
+            "A une connaissance des normes comptables bancaires ou de la réglementation COBAC"
         ],
         "a_verifier": [
-            "Gestion du cycle complet d'un crédit (conditions d'approbation, documentation, mise en place, déblocage)",
-            "Suivi et sécurisation des garanties (enregistrement, valorisation, renouvellement des assurances)",
-            "Supervision des échéances et production d'alertes ou rappels aux gestionnaires de portefeuille",
-            "Détection et remontée des impayés, dépassements ou incidents dans un portefeuille de crédit",
-            "Production de reportings de portefeuille (tableaux de bord, rapports IFRS 9, déclarations COBAC/BEAC)",
-            "Participation à des comités de risque, audits internes ou inspections réglementaires",
-            "Classement physique et numérique des dossiers de crédit et originaux de garanties",
-            "Maîtrise d'un système bancaire de gestion du crédit (Finacle, T24, Amplitude ou équivalent)"
+            "Gère le cycle complet d'un crédit (mise en place, suivi, garanties, clôture)",
+            "Suit et sécurise les garanties (enregistrement, valorisation, renouvellement)",
+            "Supervise les échéances et produit des alertes aux gestionnaires de portefeuille",
+            "Détecte et remonte les impayés, dépassements ou incidents de portefeuille",
+            "Produit des reportings de portefeuille (tableaux de bord, rapports)",
+            "Participe à des comités de risque, audits internes ou inspections réglementaires",
+            "Maîtrise un système bancaire de gestion du crédit (Finacle, T24, Amplitude)"
         ],
         "signaux_forts": [
-            "Mention explicite de la gestion administrative du cycle de crédit (mise en place, suivi, clôture)",
-            "Exposition à la norme IFRS 9 : staging du portefeuille (Stage 1, 2, 3), ECL, provisions",
-            "Suivi et sécurisation des garanties (enregistrement, valorisation, coffre, coordination juridique)",
-            "Production de reportings portefeuille (encours, impayés, dépassements, couverture par garanties)",
-            "Participation aux comités de risque et traitement des anomalies (COBAC, audit interne)",
-            "Maîtrise des Produits de Portefeuille (PP) et de la politique de crédit (GCPPM ou équivalent)",
-            "Expérience dans une banque de la zone CEMAC / UEMOA avec exposition réglementaire COBAC",
-            "Audits ou contrôles internes réussis sans réserve majeure",
-            "Rigueur documentaire : dossiers complets, traçabilité des actes, zéro anomalie détectée en contrôle interne"
+            "Maîtrise la norme IFRS 9 : staging du portefeuille (Stage 1, 2, 3), ECL, provisions",
+            "Suit et sécurise les garanties avec coordination juridique",
+            "Produit des reportings portefeuille (encours, impayés, dépassements, couverture)",
+            "Participe aux comités de risque et traite les anomalies",
+            "Maîtrise les Produits de Portefeuille (PP) et la politique de crédit (GCPPM)",
+            "A réussi des audits ou contrôles internes sans réserve majeure",
+            "Démontre une rigueur documentaire exemplaire"
         ],
         "points_attention": [
             "Parcours purement commercial ou front-office sans exposition à l'administration des crédits",
             "Profil uniquement comptable (SYSCOHADA) sans gestion du cycle de crédit bancaire",
-            "Profil exclusivement théorique (stage ou formation seule) sans expérience opérationnelle en banque",
-            "CV aux missions trop génériques, sans livrables précis ni résultats quantifiés",
-            "Expériences très courtes (< 1 an par poste) sans progression visible dans la fonction",
-            "Absence totale de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)",
-            "Trous inexpliqués dans le parcours professionnel"
+            "Profil exclusivement théorique (stage ou formation seule) sans expérience opérationnelle",
+            "Expériences très courtes (< 1 an par poste) sans progression dans la fonction",
+            "Absence de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)"
         ]
     },
-    "Chef de Division Local Corporate": {
+    "Auditeur interne": {
         "eliminatoire": [
-            "Aucune expérience dans le secteur bancaire ou financier réglementé",
-            "Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)",
-            "Moins de 5 ans d'expérience professionnelle, dont une partie significative en banque",
-            "Aucune expérience en gestion d'un portefeuille de clients Corporate ou d'entreprises",
-            "Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale",
-            "Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)"
+            "A une expérience réelle en audit interne ou externe",
+            "A minimum 3 ans en audit bancaire ou cabinet d'audit",
+            "A une connaissance des normes d'audit et contrôle interne",
+            "A un diplôme de niveau Bac+4 ou supérieur",
+            "A une expérience en rédaction de rapports d'audit"
         ],
         "a_verifier": [
-            "Pilotage d'une activité Corporate ou d'un segment entreprises avec des objectifs chiffrés (revenus, volumes, marges)",
-            "Gestion d'un portefeuille de clients Corporate et capacité à le développer",
-            "Encadrement et évaluation d'une équipe commerciale ou bancaire",
-            "Suivi de la qualité du portefeuille de crédit (NPL, CIR, provisions) et reporting à la direction",
-            "Développement de ventes croisées (cross-selling) ou de partenariats interdépartementaux",
-            "Production ou supervision de rapports de performance commerciale et financière",
-            "Exposition à la réglementation bancaire locale (COBAC, BEAC) ou internationale"
+            "A réalisé des missions d'audit sur site",
+            "Évalue les risques opérationnels",
+            "Rédige des rapports d'audit détaillés",
+            "Assure le suivi des recommandations",
+            "Connaît les normes IIA / IPPF",
+            "Maîtrise la réglementation bancaire (COBAC)",
+            "A une expérience en audit IT ou systèmes d'information"
         ],
         "signaux_forts": [
-            "Pilotage d'une division ou d'une ligne Corporate avec atteinte des objectifs de revenus et de portefeuille",
-            "Gestion active du ratio NPL et du ratio coût/revenu (CIR) — résultats chiffrés mentionnés",
-            "Expérience avérée en cross-selling avec des équipes TSG, Trade Finance ou Cash Management",
-            "Développement réel du portefeuille Corporate : acquisition de clients, fidélisation, nombre de produits par client",
-            "Leadership démontré : constitution d'équipe, développement des collaborateurs, vivier de talents",
-            "Certification Ecobank, Moody's ou ITB (Institut Technique de Banque) ou équivalent",
-            "Connaissance du marché corporate tchadien ou de la zone CEMAC / UEMOA",
-            "Exposition aux plateformes numériques bancaires (OMNI, Cash Management ou équivalent)",
-            "Résultats commerciaux quantifiés et vérifiables dans le CV (chiffres d'affaires, taux de croissance, NPS)"
+            "Possède une certification CIA / CPA / ACCA",
+            "A une expérience dans une banque de la zone CEMAC / UEMOA",
+            "A participé à des inspections réglementaires",
+            "A une expertise en audit des risques de crédit",
+            "Maîtrise les outils d'audit (ACL, IDEA, etc.)"
         ],
         "points_attention": [
-            "Parcours exclusivement back-office ou risques sans expérience commerciale Corporate",
-            "Profil techniquement solide (crédit, analyse) mais sans expérience managériale ni pilotage d'une P&L",
-            "Expériences très courtes (moins de 2 ans par poste) ou trajectoire sans progression hiérarchique visible",
-            "CV sans aucun résultat chiffré : missions décrites en responsabilités sans livrables ni indicateurs atteints",
-            "Mobilité géographique ou sectorielle excessive sans ancrage dans le secteur bancaire Corporate",
-            "Trous inexpliqués dans le parcours ou incohérences entre les postes déclarés"
+            "Profil purement comptable sans expérience d'audit",
+            "Aucune expérience terrain en audit (uniquement du support)",
+            "CV flou sur les missions d'audit réalisées",
+            "Absence de connaissances en réglementation bancaire"
+        ]
+    },
+    "Chef service contrôle des engagements": {
+        "eliminatoire": [
+            "Maîtrise le risque crédit et l'analyse financière",
+            "A une expérience significative en octroi de crédits",
+            "A minimum 5 ans en institution financière",
+            "A un diplôme de niveau Bac+4 ou supérieur",
+            "A une expérience en animation de comité de crédit"
+        ],
+        "a_verifier": [
+            "Analyse financièrement les dossiers d'entreprises",
+            "Structure des crédits complexes",
+            "Anime des comités de crédit",
+            "Encadre et manage une équipe",
+            "Maîtrise la classification des risques (IFRS 9)",
+            "A une expérience en restructuration de dossiers sensibles",
+            "Possède une formation en risk management"
+        ],
+        "signaux_forts": [
+            "A géré des dossiers de crédit à enjeux importants",
+            "A une expérience en banque Corporate",
+            "A participé à des audits ou inspections réglementaires",
+            "Possède une certification en risk management (FRM, PRMIA)"
+        ],
+        "points_attention": [
+            "Profil purement commercial sans analyse financière",
+            "Aucune expérience en analyse de risque crédit",
+            "CV orienté relation client uniquement"
+        ]
+    },
+    "Senior Finance Officer": {
+        "eliminatoire": [
+            "A une expérience en reporting financier structuré",
+            "A une exposition aux états financiers",
+            "A minimum 3 ans en département finance ou cabinet d'audit",
+            "A une interaction avec les auditeurs",
+            "A un diplôme de niveau Bac+4 ou supérieur en finance/comptabilité"
+        ],
+        "a_verifier": [
+            "Produit des états financiers",
+            "Réalise le reporting groupe",
+            "Connaît les normes IFRS",
+            "Maîtrise les contraintes réglementaires",
+            "A une expérience en consolidation de comptes",
+            "Utilise des outils ERP (SPECTRA, CERBER, SAP)"
+        ],
+        "signaux_forts": [
+            "A une expertise en IFRS / consolidation",
+            "A interagi avec les commissaires aux comptes (CAC)",
+            "Maîtrise les outils SPECTRA / CERBER / ERP",
+            "Possède une certification ACCA, CPA ou CFA",
+            "A une expérience en reporting groupe"
+        ],
+        "points_attention": [
+            "Profil comptable junior sans responsabilité réelle",
+            "Pas de responsabilité en production d'états financiers",
+            "CV flou sur les livrables produits"
+        ]
+    },
+    "Market Risk Officer": {
+        "eliminatoire": [
+            "A une base solide en risques de marché",
+            "A une exposition à FX / taux / liquidité",
+            "A minimum 3 ans en institution financière",
+            "A un diplôme de niveau Bac+4 ou supérieur en finance/quantitatif",
+            "Maîtrise VaR ou stress testing"
+        ],
+        "a_verifier": [
+            "Analyse des positions de marché",
+            "Maîtrise Excel avancé",
+            "Connaît VBA ou Python",
+            "Produit du reporting risque",
+            "Connaît les produits FICC",
+            "A une expérience en gestion ALM / liquidité"
+        ],
+        "signaux_forts": [
+            "Maîtrise Bâle II / III",
+            "A une expérience en modélisation de risques",
+            "Utilise des outils de quantification (R, Python)",
+            "Possède une certification FRM ou équivalent",
+            "A une expérience en reporting prudentiel"
+        ],
+        "points_attention": [
+            "CV trop théorique académique",
+            "Aucune mention d'outils de modélisation",
+            "Absence d'expérience en gestion de risques"
+        ]
+    },
+    "IT Réseau & Infrastructure": {
+        "eliminatoire": [
+            "A une expérience en réseau / infrastructure",
+            "A une exposition à environnement critique",
+            "A une notion de sécurité IT",
+            "A minimum 2 ans d'expérience",
+            "A une expérience en gestion de réseaux LAN/WAN/VPN"
+        ],
+        "a_verifier": [
+            "Gère les réseaux LAN/WAN/VPN",
+            "Administre des serveurs Windows/Linux",
+            "A une connaissance du Cloud (AWS, Azure, GCP)",
+            "Gère les incidents IT",
+            "Assure la disponibilité des systèmes",
+            "A une expérience en cybersécurité / firewall"
+        ],
+        "signaux_forts": [
+            "A une certification Cisco ou Microsoft",
+            "A une expérience en virtualisation (VMware, Hyper-V)",
+            "A une expérience en systèmes bancaires core banking",
+            "Maîtrise ITIL / gestion de services IT",
+            "A une expérience en haute disponibilité / PRA/PCA"
+        ],
+        "points_attention": [
+            "Profil trop helpdesk sans expertise réseau",
+            "CV sans détail technique précis",
+            "Aucune mention de sécurité informatique"
+        ]
+    },
+    "Chef service reporting réglementaire": {
+        "eliminatoire": [
+            "A une comptabilité bancaire approfondie",
+            "A une expérience en reporting réglementaire (BEAC, COBAC, SPECTRA)",
+            "A minimum 5 ans en banque ou cabinet d'audit bancaire",
+            "A un diplôme de niveau Bac+4 ou supérieur",
+            "A une expérience en production de rapports réglementaires"
+        ],
+        "a_verifier": [
+            "Produit des rapports réglementaires",
+            "Effectue le contrôle de cohérence des données",
+            "Assure la veille réglementaire bancaire",
+            "Interagit avec les autorités de tutelle",
+            "Maîtrise SPECTRA / CERBER / outils BEAC",
+            "Connaît les normes COBAC"
+        ],
+        "signaux_forts": [
+            "A une expertise en reporting prudentiel Bâle",
+            "A une formation en comptabilité bancaire spécialisée",
+            "A une expérience en audits réglementaires",
+            "A participé à des inspections COBAC"
+        ],
+        "points_attention": [
+            "Profil généraliste sans spécialisation bancaire",
+            "Aucune expérience en reporting réglementaire",
+            "CV flou sur les livrables produits"
+        ]
+    },
+    "Archiviste (Administration Crédit)": {
+        "eliminatoire": [
+            "A une expérience en gestion documentaire structurée",
+            "Démontre une rigueur dans son parcours",
+            "A une expérience en archivage physique et électronique",
+            "A une expérience en gestion de dossiers sensibles"
+        ],
+        "a_verifier": [
+            "Gère l'archivage physique et électronique",
+            "Manipule des garanties ou contrats",
+            "Utilise des systèmes GED",
+            "Assure la traçabilité des documents",
+            "Applique les procédures d'archivage",
+            "A une expérience en banque ou juridique"
+        ],
+        "signaux_forts": [
+            "A une expérience en banque ou secteur juridique",
+            "Manipule des garanties ou contrats",
+            "A une certification en gestion documentaire",
+            "A une expérience en dématérialisation"
+        ],
+        "points_attention": [
+            "Profil trop généraliste",
+            "CV désorganisé sans expérience documentaire",
+            "Absence de mention de GED ou d'archivage numérique"
+        ]
+    },
+    "Responsable Administration de Crédit": {
+        "eliminatoire": [
+            "A une expérience bancaire significative (minimum 3 ans en crédit/risque)",
+            "A une exposition aux garanties ou à la conformité",
+            "A un diplôme de niveau Bac+4 ou supérieur",
+            "A une expérience en validation de dossiers de crédit",
+            "A une expérience en gestion des garanties"
+        ],
+        "a_verifier": [
+            "A validé des dossiers de crédit",
+            "A géré des garanties",
+            "A participé à des audits",
+            "Connaît IFRS 9",
+            "Connaît COBAC / conformité",
+            "A suivi un portefeuille / impayés"
+        ],
+        "signaux_forts": [
+            "Maîtrise IFRS 9",
+            "Maîtrise COBAC / conformité",
+            "A suivi un portefeuille avec résultats",
+            "A participé à des comités de crédit",
+            "Possède une certification en risk management"
+        ],
+        "points_attention": [
+            "Parcours trop comptable pur",
+            "Rôle uniquement administratif sans responsabilité",
+            "CV flou avec missions génériques"
+        ]
+    },
+    "Analyste Crédit CCB": {
+        "eliminatoire": [
+            "A une expérience en analyse crédit",
+            "A une capacité à lire des états financiers",
+            "A minimum 3 ans en institution financière",
+            "A un diplôme de niveau Bac+4 ou supérieur en finance",
+            "A une expérience en structuration de crédit"
+        ],
+        "a_verifier": [
+            "A travaillé avec des clients PME",
+            "A travaillé avec des clients particuliers",
+            "A structuré des crédits",
+            "A rédigé des avis de crédit",
+            "A réalisé des analyses financières (cash-flow)",
+            "A participé à des comités de crédit"
+        ],
+        "signaux_forts": [
+            "Maîtrise l'analyse cash-flow",
+            "A monté des crédits complexes",
+            "A participé à des comités de crédit",
+            "A une certification en analyse financière"
+        ],
+        "points_attention": [
+            "CV trop relation client sans analyse",
+            "Aucune notion de risque",
+            "Expériences très courtes sans progression"
         ]
     }
 }
+GRILLE = GRILLE_POSITIVE
 SCORING_CONFIG = {
     "Responsable Administration de Crédit": None,
     "Analyste Crédit CCB": None,
@@ -1112,7 +1313,6 @@ EXP_MIN_YEARS_MAP = {
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
-        # Si le critère n'a pas de mapping, on retourne False mais avec un score plus indulgent
         return False, 0.5, []
     exp_markers = [kw for kw in keywords if kw.startswith("EXP_")]
     if exp_markers:
@@ -1140,10 +1340,6 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                 if kw in text_normalized:
                     return True, 1.0, [kw]
             return False, 0.0, []
-    if poste:
-        # On ne bloque plus sur check_criterion_context pour les critères éliminatoires
-        # On laisse passer et on évalue normalement
-        pass
     best_score = 0.0
     found_kws = []
     text_clean, text_tokens = normalize_for_matching(normalized_text)
@@ -1157,18 +1353,18 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
             continue
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 80:  # Seuil abaissé de 85 à 80 pour plus d'indulgence
+            if ratio >= 80:
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
                     best_score = max(best_score, ratio / 100)
                 continue
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(2, len(kw_tokens) * 0.6):  # Seuil abaissé de 0.7 à 0.6
+            if len(common) >= max(2, len(kw_tokens) * 0.6):
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
-    return best_score >= 0.60, round(best_score, 2), found_kws  # Seuil abaissé de 0.70 à 0.60
+    return best_score >= 0.60, round(best_score, 2), found_kws
 def detect_language(text):
     if not text or not LANGDETECT_AVAILABLE:
         return None
@@ -1746,15 +1942,11 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         checklist[key] = is_present
         if not is_present:
             eliminatoire_failed = True
-            # On note le critère manquant mais on n'élimine plus automatiquement
             flags_elim.append(f"❌ {crit} (confiance: {confidence:.0%})")
             details['alertes_attention'].append(f"🔴 Critère manquant: {crit}")
             details['matching_details'][crit] = {'found': False, 'confidence': confidence, 'status': 'MANQUANT'}
         else:
             details['matching_details'][crit] = {'found': True, 'confidence': confidence, 'matched': found_kws}
-    
-    # On continue l'analyse même si des critères éliminatoires manquent
-    # Le score final déterminera la recommandation
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
         is_present, confidence, found_kws = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
@@ -1784,13 +1976,17 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
     lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
-    
-    # Calcul du nombre de critères éliminatoires manquants pour affichage
     nb_elim_manquants = len(flags_elim)
-    
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'bloc2_criteres_valides': len(details['criteres_valides_bloc2']), 'bloc2_points': points_bloc2, 'bloc3_signaux_detectes': len(signaux), 'bloc3_points': points_bloc3, 'total_raw_points': points_bloc2 + points_bloc3, 'score_final': score_final, 'note': f"Score: {score_final}/10", 'documents_analyses': details['documents_analyses']}}
 def normalize_text_for_matching(text):
     return normalize_for_matching(text)[0]
+try:
+    from analyzer_v2 import analyze_candidature_humain
+    SEMANTIC_ANALYZER_AVAILABLE = True
+    logger.info("✅ Analyseur sémantique v2 chargé avec succès")
+except ImportError:
+    SEMANTIC_ANALYZER_AVAILABLE = False
+    logger.warning("⚠️ analyzer_v2 non trouvé, utilisation de l'ancien système")
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
         if not force and not is_poste_actif(poste):
@@ -1829,6 +2025,56 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         nlp_enrichment = enrich_analysis_with_nlp(cv_text, lm_text, detected_lang)
         if nlp_enrichment and supabase:
             supabase.table('candidats').update({"nlp_enrichment": json.dumps(nlp_enrichment, ensure_ascii=False)}).eq('token', token).execute()
+        if SEMANTIC_ANALYZER_AVAILABLE and poste in GRILLE:
+            logger.info(f"🧠 Utilisation de l'analyseur sémantique v2 pour {token}")
+            grille = GRILLE.get(poste, {})
+            result = analyze_candidature_humain(
+                cv_text=cv_text,
+                lettre_text=lm_text,
+                attestations=att_texts,
+                poste=poste,
+                grille=grille
+            )
+            score_breakdown = {
+                'score_final': result['score'],
+                'score_max': result['max_score'],
+                'decision': result['decision'],
+                'moteur_analyse': 'semantique_v2',
+                'score_type': result['details'].get('score_type', '10'),
+                'sous_scores': {}
+            }
+            if 'details' in result and isinstance(result['details'], dict):
+                for key, value in result['details'].items():
+                    if isinstance(value, dict) and key in ['eliminatoires', 'a_verifier', 'signaux_forts', 'points_attention']:
+                        score_breakdown['sous_scores'][key] = {
+                            k: {'passed': v.get('passed', False), 'confidence': v.get('confidence', 0)}
+                            for k, v in value.items()
+                        }
+            analyse_details = {
+                'points_forts': result['strengths'],
+                'points_vigilance': result['weaknesses'],
+                'synthese_recruteur': result['summary'],
+                'criteria': result['criteria'],
+                'moteur': 'semantique_v2'
+            }
+            checklist = {}
+            for criterion in result['criteria']:
+                key = criterion['criterion'][:50].replace(' ', '_')
+                checklist[key] = criterion['passed']
+            if supabase:
+                supabase.table('candidats').update({
+                    "score": str(result['score']),
+                    "score_breakdown": json.dumps(score_breakdown, ensure_ascii=False),
+                    "analyse_details": json.dumps(analyse_details, ensure_ascii=False),
+                    "checklist": json.dumps(checklist, ensure_ascii=False),
+                    "flags_eliminatoires": json.dumps([], ensure_ascii=False),
+                    "signaux_detectes": json.dumps(result['strengths'], ensure_ascii=False),
+                    "decision": result['decision'],
+                    "analyse_status": "completed",
+                    "analyse_auto_date": datetime.datetime.now().isoformat()
+                }).eq('token', token).execute()
+            logger.info(f"✅ [{result['decision']}] Score {token}: {result['score']}/{result['max_score']} (sémantique v2)")
+            return
         result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
         if result is None:
             if poste == "Chef de Section Compensation":
@@ -1885,11 +2131,11 @@ def get_recommandation_from_score(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
         if s >= 10: return "🥇 Entretien prioritaire"
-        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"  # Un candidat avec 7/12 ou 8/12 doit être considéré
+        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"
         else: return "❌ Rejet"
     if poste and poste in POSTES_AVEC_SCORING_14:
         if s >= 11: return "🥇 Entretien prioritaire"
-        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"  # Un candidat avec 7/14 ou 8/14 ne doit pas être rejeté
+        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"
         else: return "❌ Rejet"
     if poste and poste in POSTES_AVEC_SCORING_100:
         if s >= 80: return "Shortlist"
@@ -1897,7 +2143,7 @@ def get_recommandation_from_score(score, poste=None):
         elif s >= 60: return "Faible"
         else: return "Rejet"
     if s >= 8: return "🥇 Entretien prioritaire"
-    elif s >= 5: return "🥈 Potentiel à évaluer en entretien"  # Seuil abaissé de 6 à 5
+    elif s >= 5: return "🥈 Potentiel à évaluer en entretien"
     else: return "❌ Rejet"
 def get_decision_from_score(score, poste=None):
     if not poste or (poste not in POSTES_AVEC_SCORING_100 and poste not in POSTES_AVEC_SCORING_12 and poste not in POSTES_AVEC_SCORING_14):
@@ -1906,21 +2152,21 @@ def get_decision_from_score(score, poste=None):
 def get_recommandation_color(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
-        if s >= 10: return "00FF00"  # Vert
-        elif s >= 7: return "FFA500"  # Orange - potentiel à évaluer
-        else: return "FF0000"  # Rouge
+        if s >= 10: return "00FF00"
+        elif s >= 7: return "FFA500"
+        else: return "FF0000"
     if poste and poste in POSTES_AVEC_SCORING_14:
-        if s >= 11: return "00FF00"  # Vert
-        elif s >= 7: return "FFA500"  # Orange - potentiel à évaluer
-        else: return "FF0000"  # Rouge
+        if s >= 11: return "00FF00"
+        elif s >= 7: return "FFA500"
+        else: return "FF0000"
     if poste and poste in POSTES_AVEC_SCORING_100:
-        if s >= 80: return "00FF00"  # Vert
-        elif s >= 70: return "90EE90"  # Vert clair
-        elif s >= 60: return "FFA500"  # Orange
-        else: return "FF0000"  # Rouge
-    if s >= 8: return "00FF00"  # Vert
-    elif s >= 5: return "FFA500"  # Orange - potentiel à évaluer
-    else: return "FF0000"  # Rouge
+        if s >= 80: return "00FF00"
+        elif s >= 70: return "90EE90"
+        elif s >= 60: return "FFA500"
+        else: return "FF0000"
+    if s >= 8: return "00FF00"
+    elif s >= 5: return "FFA500"
+    else: return "FF0000"
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
         return 12
@@ -3437,7 +3683,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v3.1-oom-fix",
+        "version": "v4.0-semantic-analyzer",
         "postes_actifs_defined": 'POSTES_ACTIFS' in globals(),
         "postes_actifs": POSTES_ACTIFS if 'POSTES_ACTIFS' in globals() else "NON DÉFINI",
         "is_poste_actif_exists": 'is_poste_actif' in globals(),
@@ -3445,7 +3691,9 @@ def health_version():
         "fast_reanalyze_route": "AVAILABLE",
         "ia_prompt": "AUTHENTICITY STRICT",
         "cleanup_route_available": True,
-        "oom_fixes": "PDF 10MB limit, gc.collect(), ZIP 4 workers, boot resume DISABLED",
+        "semantic_analyzer": "ENABLED" if SEMANTIC_ANALYZER_AVAILABLE else "DISABLED (fallback mots-clés)",
+        "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
+        "no_auto_reject": "TRUE (8/14 = Potentiel à évaluer)",
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3454,5 +3702,10 @@ if __name__ == '__main__':
         logger.info(f"🧠 Moteur d'analyse INTELLIGENT activé (modèle: {ANTHROPIC_MODEL})")
     else:
         logger.warning("⚠️ Moteur IA désactivé (ANTHROPIC_API_KEY manquante) — repli sur le moteur mots-clés")
-    logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE (économie mémoire ~250-300 MB) — utilisez /api/recruteur/reanalyze-all si besoin")
+    if SEMANTIC_ANALYZER_AVAILABLE:
+        logger.info("🧠 Analyseur sémantique v2 disponible — compréhension du sens des phrases")
+    else:
+        logger.warning("⚠️ Analyseur sémantique v2 non disponible — fallback sur l'ancien système")
+    logger.info("📊 Nouveaux seuils: 8/14 = POTENTIEL À ÉVALUER (pas de rejet automatique)")
+    logger.info("⚠️ Auto-reprise au boot DÉSACTIVÉE — utilisez /api/recruteur/reanalyze-all si besoin")
     app.run(host="0.0.0.0", port=port, debug=False)
