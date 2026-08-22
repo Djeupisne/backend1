@@ -3033,66 +3033,7 @@ def trigger_analyze(token):
 # ═══════════════════════════════════════════════════════════════
 #  ★★★ RÉANALYSE ULTRA-RAPIDE PARALLÉLISÉE ★★★
 # ═══════════════════════════════════════════════════════════════
-@app.route('/api/recruteur/reanalyze-all', methods=['POST'])
-@jwt_required()
-def reanalyze_all_candidates():
-    """Réanalyse PARALLÈLE (2 workers) des postes actifs uniquement."""
-    try:
-        if not supabase:
-            return jsonify({'error': 'Supabase non configuré'}), 500
-        response = supabase.table('candidats').select('*').execute()
-        keys = response.data if response.data else []
-        if not keys:
-            return jsonify({'message': 'Aucune candidature à réanalyser'}), 200
-        candidates_to_reanalyze = [data for data in keys if data.get('poste') in POSTES_ACTIFS]
-        candidates_skipped = len(keys) - len(candidates_to_reanalyze)
-        if not candidates_to_reanalyze:
-            return jsonify({'message': 'Aucun candidat sur poste actif à réanalyser', 'skipped_closed_posts': candidates_skipped}), 200
-        now_iso = datetime.datetime.now().isoformat()
-        for c in candidates_to_reanalyze:
-            if c.get('cv_filename'):
-                try:
-                    supabase.table('candidats').update({
-                        "analyse_status": "reanalyzing",
-                        "reanalyze_trigger": now_iso,
-                        "reanalyze_reason": "Réanalyse parallélisée (postes actifs)"
-                    }).eq('token', c.get('token')).execute()
-                except Exception:
-                    pass
-        def analyze_one(data):
-            try:
-                token = data.get('token')
-                cv_fn = data.get('cv_filename')
-                lm_fn = data.get('lettre_filename')
-                att_raw = data.get('attestation_filenames', '[]')
-                poste = data.get('poste')
-                if not cv_fn:
-                    return (token, False, "CV manquant")
-                run_analysis_for_candidat(token, cv_fn, lm_fn, att_raw, poste, False)
-                return (token, True, "OK")
-            except Exception as e:
-                return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(2, len(candidates_to_reanalyze))
-        logger.info(f"🚀 Réanalyse parallèle : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
-        start_time = time.time()
-        reanalyzed_count = 0
-        errors = []
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = {executor.submit(analyze_one, c): c for c in candidates_to_reanalyze if c.get('cv_filename')}
-            for future in as_completed(futures):
-                try:
-                    token, success, msg = future.result(timeout=180)
-                    if success: reanalyzed_count += 1
-                    else: errors.append(f"Token {token}: {msg}")
-                except Exception as e:
-                    errors.append(f"Timeout ou erreur: {str(e)}")
-        elapsed = time.time() - start_time
-        # 🛡️ OOM-FIX: nettoyage mémoire après réanalyse massive
-        gc.collect()
-        return jsonify({'message': f'Réanalyse terminée en {elapsed:.1f}s : {reanalyzed_count}/{len(candidates_to_reanalyze)}', 'reanalyzed_count': reanalyzed_count, 'skipped_closed_posts': candidates_skipped, 'workers_used': MAX_WORKERS, 'elapsed_seconds': round(elapsed, 1), 'errors': errors[:10]}), 202
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
