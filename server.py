@@ -104,10 +104,11 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-# === GEMINI (API REST DIRECTE) ===
+# === GEMINI (API REST DIRECTE - VERSION V1) ===
 def call_gemini_api(prompt, api_key, model="gemini-1.5-flash"):
-    """Appelle l'API Gemini via REST avec la bonne version"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    """Appelle l'API Gemini via REST avec la version v1"""
+    # Utiliser l'API v1 au lieu de v1beta
+    url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={api_key}"
     
     payload = {
         "contents": [{
@@ -125,7 +126,7 @@ def call_gemini_api(prompt, api_key, model="gemini-1.5-flash"):
         if response.status_code == 200:
             return response.json()
         else:
-            logger.warning(f"Gemini API error: {response.status_code} - {response.text}")
+            logger.warning(f"Gemini API error: {response.status_code} - {response.text[:200]}")
             return None
     except Exception as e:
         logger.warning(f"Gemini request error: {e}")
@@ -146,7 +147,7 @@ if GEMINI_API_KEY:
             logger.info(f"✅ Gemini activé avec succès: {GEMINI_MODEL}")
         else:
             # Essayer d'autres modèles
-            for model in ["gemini-1.5-pro", "gemini-1.0-pro", "gemini-pro"]:
+            for model in ["gemini-1.5-pro", "gemini-1.0-pro"]:
                 test_result = call_gemini_api(test_prompt, GEMINI_API_KEY, model)
                 if test_result and "candidates" in test_result:
                     GEMINI_ACTIVE = True
@@ -663,7 +664,7 @@ def extract_text_robust_from_bytes(file_bytes, filename):
         logger.error(f"Extraction error: {e}")
         return ""
 
-# === GEMINI SEMANTIC ANALYSIS (API REST) ===
+# === GEMINI SEMANTIC ANALYSIS ===
 def check_criterion_with_gemini(criterion, cv_text, lettre_text, poste):
     if not GEMINI_ACTIVE:
         return None, 0.0, "", []
