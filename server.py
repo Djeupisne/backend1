@@ -8,12 +8,14 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-# === GEMINI ===
+# === GEMINI (NOUVELLE API) ===
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
+    print("✅ google.genai importé avec succès")
 except ImportError:
     GEMINI_AVAILABLE = False
+    print("⚠️ google.genai non installé. Installez: pip install google-genai")
 
 # === EXTRACTION TEXT ===
 try:
@@ -78,24 +80,25 @@ except ImportError:
 
 # === CONFIGURATION GEMINI ===
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
         models_to_try = [
+            "gemini-1.5-flash",
             "gemini-1.5-pro",
             "gemini-1.0-pro",
-            "gemini-pro",
-            "models/gemini-1.5-pro",
-            "models/gemini-1.0-pro"
+            "gemini-pro"
         ]
         GEMINI_ACTIVE = False
         for model_name in models_to_try:
             try:
-                gemini_model = genai.GenerativeModel(model_name)
-                test_response = gemini_model.generate_content("Test")
-                if test_response:
+                response = gemini_client.models.generate_content(
+                    model=model_name,
+                    contents="Test"
+                )
+                if response:
                     GEMINI_ACTIVE = True
                     GEMINI_MODEL = model_name
                     print(f"✅ Gemini activé avec succès: {model_name}")
@@ -110,7 +113,7 @@ if GEMINI_AVAILABLE and GEMINI_API_KEY:
         print(f"⚠️ Gemini erreur: {e}")
 else:
     GEMINI_ACTIVE = False
-    print("⚠️ Gemini désactivé")
+    print("⚠️ Gemini désactivé - clé API manquante")
 
 # === APP ===
 app = Flask(__name__)
@@ -432,8 +435,151 @@ GRILLE.update({
     }
 })
 
-# === KEYWORD MAPPING ===
+# === KEYWORD MAPPING ÉLARGI ===
 KEYWORD_MAPPING = {
+    # Chargé(e) d'Administration de Crédit
+    "Aucune expérience ou formation dans un domaine bancaire, financier ou comptable": [
+        "banque", "bancaire", "finance", "comptabilite", "comptable",
+        "audit", "gestion", "economie", "banking", "accounting",
+        "financial", "business", "management", "credit", "risque",
+        "institution financiere", "etablissement bancaire", "bank",
+        "finance d entreprise", "comptabilite generale"
+    ],
+    "Niveau de diplôme inférieur à Bac +3": [
+        "bac+3", "bac +3", "licence", "bachelor", "bts", "dut",
+        "diplome universitaire", "etudes superieures", "bac+2",
+        "licence pro", "master", "bac+5", "mba", "ingenieur",
+        "diplome d etat", "baccalaureat", "brevet de technicien"
+    ],
+    "Aucune notion du crédit bancaire": [
+        "credit", "credit bancaire", "financement", "octroi", "pret",
+        "garantie", "remboursement", "portefeuille", "loan",
+        "lending", "borrowing", "credit analysis", "analyse credit",
+        "instruction credit", "dossier credit", "montage credit",
+        "credit immobilier", "credit consommation", "financement d entreprise"
+    ],
+    "Exposition au cycle de crédit": [
+        "cycle credit", "approbation", "mise en place", "suivi echeances",
+        "credit approval", "loan processing", "credit monitoring",
+        "repayment", "deblocage", "documentation credit",
+        "credit origination", "credit underwriting", "loan cycle"
+    ],
+    "Gestion ou participation au suivi des garanties": [
+        "garantie", "collateral", "suivi garanties", "enregistrement garantie",
+        "valorisation", "renouvellement assurance", "guarantee",
+        "surete", "hypotheque", "nantissement", "security",
+        "collateral management", "guarantee tracking", "pledge"
+    ],
+    "Production ou contribution à des reportings": [
+        "reporting", "tableau de bord", "dashboard", "rapport portefeuille",
+        "kpi", "indicateurs", "portfolio report", "credit report",
+        "production de rapports", "reporting credit", "monthly report",
+        "quarterly report", "performance report"
+    ],
+    "Expérience avec un système bancaire": [
+        "finacle", "t24", "amplitude", "flexcube", "core banking",
+        "systeme bancaire", "banking system", "temenos", "sigma",
+        "banking software", "credit system", "portfolio tool",
+        "erp bancaire", "sytac", "sygma"
+    ],
+    "Détection ou signalement d'anomalies": [
+        "anomalie", "impaye", "depassement", "incident", "alerte",
+        "default", "overdue", "past due", "exception", "signalement",
+        "detection", "remontee", "non-payment", "fraude",
+        "irregularite", "ecart"
+    ],
+    
+    # Chef de Division Local Corporate
+    "Aucune expérience dans le secteur bancaire ou financier réglementé": [
+        "banque", "bancaire", "etablissement financier", "institution financiere",
+        "banque commerciale", "commercial bank", "financial institution",
+        "credit institution", "ecobank", "orabank", "uba", "bank of africa",
+        "financial", "banking", "regulated financial institution",
+        "secteur bancaire", "groupe bancaire", "filiale bancaire"
+    ],
+    "Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)": [
+        "master", "bac+5", "bac +5", "mba", "ingenieur", "doctorat", "phd",
+        "diplome d'etudes superieures", "diplome superieur", "graduate degree",
+        "bac+4", "bac +4", "maitrise", "licence professionnelle",
+        "master of science", "master en finance", "master gestion"
+    ],
+    "Moins de 5 ans d'expérience professionnelle": ["EXP_5ANS_BANQUE"],
+    "Aucune expérience en gestion d'un portefeuille de clients Corporate": [
+        "portefeuille", "corporate", "grandes entreprises", "gestion portefeuille",
+        "client corporate", "sme", "local corporate", "enterprise",
+        "grands comptes", "portefeuille client", "gestion client",
+        "client entreprise", "corporate client", "key account"
+    ],
+    "Aucune expérience managériale": [
+        "management", "encadrement", "supervision", "team lead", "chef equipe",
+        "manager", "responsable equipe", "pilotage", "direction",
+        "gestion equipe", "leadership", "manageur", "superviseur",
+        "head of", "directeur", "coordination equipe"
+    ],
+    "Aucune exposition à la gestion du risque de crédit": [
+        "npl", "non performing", "risque credit", "credit risk", "provision",
+        "qualite portefeuille", "impaye", "default", "portefeuille credit",
+        "non-performing", "loan", "credit", "portfolio quality",
+        "credit risk management", "risk assessment"
+    ],
+    
+    # Signaux forts - Chef Division
+    "Pilotage d'une division Corporate avec atteinte des objectifs": [
+        "pilotage", "division", "corporate", "objectifs", "revenus",
+        "volumes", "marges", "performance", "resultats", "business plan",
+        "budget", "croissance", "developpement", "chiffre d'affaires",
+        "objectif", "resultat", "performance commerciale"
+    ],
+    "Gestion active du ratio NPL et du ratio coût/revenu (CIR)": [
+        "npl", "non performing", "cir", "cost income", "ratio npl",
+        "reduction npl", "amelioration cir", "npl ratio",
+        "cost-to-income", "performance ratio"
+    ],
+    "Expérience avérée en cross-selling avec équipes TSG ou Cash Management": [
+        "cross selling", "ventes croisees", "up selling", "cross-sell",
+        "partenariats", "interdepartemental", "synergie", "collaboration",
+        "trade finance", "cash management", "tsg", "upselling",
+        "cross-sell", "partenariat", "collaboration interdepartementale"
+    ],
+    "Développement réel du portefeuille Corporate": [
+        "acquisition client", "fidelisation client", "nombre produits client",
+        "penetration client", "developpement portefeuille", "client corporate",
+        "client acquisition", "retention", "product per client",
+        "growth", "client relationship", "portfolio development"
+    ],
+    "Leadership démontré": [
+        "leadership", "constitution equipe", "developpement collaborateurs",
+        "vivier talents", "recrutement equipe", "formation equipe",
+        "mentorat", "coaching", "team building", "talent development",
+        "people management", "team management"
+    ],
+    "Certification Ecobank, Moody's ou ITB": [
+        "ecobank certification", "moody's", "itb", "institut technique banque",
+        "certification bancaire", "formation banque", "certified", "moodys",
+        "ecobank", "moodys", "itb", "banking certification",
+        "credit certification", "risk certification"
+    ],
+    "Connaissance du marché CEMAC / UEMOA": [
+        "cemac", "uemoa", "zone cemac", "zone uemoa", "afrique centrale",
+        "afrique de l'ouest", "marche corporate", "marche local",
+        "tchad", "chad", "west africa", "central africa",
+        "bceao", "beac", "zone franc"
+    ],
+    "Exposition aux plateformes numériques bancaires": [
+        "omni", "cash management", "plateforme numerique", "digital banking",
+        "banque en ligne", "mobile banking", "core banking", "ebanking",
+        "digital", "online banking", "fintech", "banking platform",
+        "digital transformation", "banking app"
+    ],
+    "Résultats commerciaux quantifiés": [
+        "croissance", "chiffre d'affaires", "taux de croissance", "nps",
+        "resultats commerciaux", "performance commerciale", "objectifs atteints",
+        "ca", "benefices", "marges", "part de marche", "growth rate",
+        "revenue", "profit", "market share", "turnover",
+        "resultats chiffres", "indicateurs atteints"
+    ],
+    
+    # Critères génériques
     "Expérience en banque": ["banque", "bancaire", "institution financiere", "bank", "financial institution"],
     "Minimum 3 ans en crédit": ["credit", "risque", "analyse credit", "loan", "credit analysis"],
     "Exposition aux garanties": ["garantie", "collateral", "surete", "hypotheque", "guarantee"],
@@ -451,6 +597,22 @@ KEYWORD_MAPPING = {
     "IFRS 9 staging": ["ifrs 9", "stage 1", "stage 2", "stage 3", "ecl"],
     "BEAC/GIMAC": ["beac", "gimac", "systac", "sygma", "swift"],
     "Compensation": ["compensation", "interbancaire", "clearing", "chambre de compensation"]
+}
+
+EXP_MIN_YEARS_MAP = {
+    "EXP_5ANS_BANQUE": 5.0,
+    "EXP_CREDIT_3ANS": 3.0,
+    "EXP_FIN_3ANS": 3.0,
+    "EXP_BACKOFFICE_3ANS": 3.0,
+    "EXP_BANK_1ANS": 1.0
+}
+
+DOMAIN_KEYWORDS_MAP = {
+    "EXP_5ANS_BANQUE": ["banque", "bancaire", "banking", "institution financiere", "credit", "finance"],
+    "EXP_CREDIT_3ANS": ["credit", "risque", "analyse credit", "loan", "credit analysis"],
+    "EXP_FIN_3ANS": ["finance", "comptable", "comptabilite", "reporting", "tresorerie"],
+    "EXP_BACKOFFICE_3ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire"],
+    "EXP_BANK_1ANS": ["banque", "bancaire", "credit", "institution financiere", "banking"]
 }
 
 _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
@@ -557,7 +719,7 @@ def extract_text_robust_from_bytes(file_bytes, filename):
         logger.error(f"Extraction error: {e}")
         return ""
 
-# === GEMINI SEMANTIC ANALYSIS ===
+# === GEMINI SEMANTIC ANALYSIS (NOUVELLE API) ===
 def check_criterion_with_gemini(criterion, cv_text, lettre_text, poste):
     if not GEMINI_ACTIVE:
         return None, 0.0, "", []
@@ -572,7 +734,10 @@ CRITERE: "{criterion}"
 {lettre_extrait if lettre_extrait else "(non fournie)"}
 Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, "justification": "", "elements_trouves": []}}"""
     try:
-        response = gemini_model.generate_content(prompt)
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt
+        )
         import json
         import re
         json_match = re.search(r'\{[^{}]*\}', response.text, re.DOTALL)
@@ -897,22 +1062,7 @@ def analyze_cv_against_grille_semantic(cv_text, lettre_text, attestation_texts_l
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'score_final': score_final}}
 
-# === FONCTIONS D'EXPORT AVEC FILTRES ===
-def get_filtered_candidats(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
-    """Filtre les candidats selon les critères"""
-    filtered = candidats_data
-    if poste_filter:
-        filtered = [c for c in filtered if c.get('poste') == poste_filter]
-    if statut_filter:
-        filtered = [c for c in filtered if c.get('statut') == statut_filter]
-    if date_start:
-        filtered = [c for c in filtered if c.get('date_candidature', '') >= date_start]
-    if date_end:
-        filtered = [c for c in filtered if c.get('date_candidature', '') <= date_end + 'T23:59:59']
-    if min_score is not None:
-        filtered = [c for c in filtered if int(c.get('score', 0)) >= min_score]
-    return filtered
-
+# === FONCTIONS D'EXPORT ===
 def generate_excel_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
     if not OPENPYXL_AVAILABLE:
         return None
@@ -968,7 +1118,6 @@ def generate_pdf_report(candidats_data, poste_filter=None, date_start=None, date
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontSize=16, alignment=TA_CENTER, spaceAfter=20)
     subtitle_style = ParagraphStyle('SubtitleStyle', parent=styles['Normal'], fontSize=10, alignment=TA_CENTER, spaceAfter=15, textColor=colors.grey)
-    # Filtres info
     filters_info = []
     if poste_filter:
         filters_info.append(f"Poste: {poste_filter}")
@@ -1023,7 +1172,6 @@ def generate_word_report(candidats_data, poste_filter=None, date_start=None, dat
     doc = Document()
     title = doc.add_heading('Rapport des Candidatures', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    # Filtres
     filters_info = []
     if poste_filter:
         filters_info.append(f"Poste: {poste_filter}")
@@ -1061,7 +1209,20 @@ def generate_word_report(candidats_data, poste_filter=None, date_start=None, dat
     output.seek(0)
     return output
 
-# === TÉLÉCHARGEMENT ZIP AVEC FILTRES ===
+def get_filtered_candidats(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    filtered = candidats_data
+    if poste_filter:
+        filtered = [c for c in filtered if c.get('poste') == poste_filter]
+    if statut_filter:
+        filtered = [c for c in filtered if c.get('statut') == statut_filter]
+    if date_start:
+        filtered = [c for c in filtered if c.get('date_candidature', '') >= date_start]
+    if date_end:
+        filtered = [c for c in filtered if c.get('date_candidature', '') <= date_end + 'T23:59:59']
+    if min_score is not None:
+        filtered = [c for c in filtered if int(c.get('score', 0)) >= min_score]
+    return filtered
+
 def download_dossiers_zip_filtered(candidats_data, poste_filter=None, date_start=None, date_end=None):
     filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end)
     zip_buffer = io.BytesIO()
@@ -1438,7 +1599,6 @@ def get_reanalyze_status():
 def export_report(format):
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
-    # Récupérer tous les filtres
     poste_filter = request.args.get('poste', '')
     statut_filter = request.args.get('statut', '')
     date_start = request.args.get('date_start', '')
