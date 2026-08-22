@@ -9,61 +9,40 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 
-# === GEMINI (API REST DIRECTE) ===
-def call_gemini_api(prompt, api_key, model="gemini-1.5-flash"):
-    """Appelle l'API Gemini via REST avec la bonne version"""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 1024,
-            "topP": 0.9
-        }
-    }
-    
-    try:
-        response = requests.post(url, json=payload, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logger.warning(f"Gemini API error: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        logger.warning(f"Gemini request error: {e}")
-        return None
+# === APP (défini avant Gemini pour logger) ===
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logging.getLogger('pdfminer').setLevel(logging.WARNING)
+logging.getLogger('pdfplumber').setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
 
-# === VÉRIFICATION DE L'API GEMINI ===
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+    response.headers.add('Access-Control-Max-Age', '600')
+    if request.method == 'OPTIONS':
+        response.status_code = 204
+    return response
 
-GEMINI_ACTIVE = False
-if GEMINI_API_KEY:
-    try:
-        # Tester avec un appel simple
-        test_prompt = "Test"
-        test_result = call_gemini_api(test_prompt, GEMINI_API_KEY, GEMINI_MODEL)
-        if test_result and "candidates" in test_result:
-            GEMINI_ACTIVE = True
-            print(f"✅ Gemini activé avec succès: {GEMINI_MODEL}")
-        else:
-            # Essayer d'autres modèles
-            for model in ["gemini-1.5-pro", "gemini-1.0-pro", "gemini-pro"]:
-                test_result = call_gemini_api(test_prompt, GEMINI_API_KEY, model)
-                if test_result and "candidates" in test_result:
-                    GEMINI_ACTIVE = True
-                    GEMINI_MODEL = model
-                    print(f"✅ Gemini activé avec succès: {model}")
-                    break
-            if not GEMINI_ACTIVE:
-                print("❌ Aucun modèle Gemini disponible")
-    except Exception as e:
-        print(f"⚠️ Gemini erreur: {e}")
-else:
-    print("⚠️ Gemini désactivé - clé API manquante")
+@app.route('/', methods=['GET', 'HEAD'])
+def health_check():
+    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
+
+app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
+jwt = JWTManager(app)
+
+# === SUPABASE ===
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
+app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
 
 # === AUTRES IMPORTS ===
 try:
@@ -125,43 +104,61 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-# === APP ===
-app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
-logging.getLogger('pdfminer').setLevel(logging.WARNING)
-logging.getLogger('pdfplumber').setLevel(logging.WARNING)
-logger = logging.getLogger(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
+# === GEMINI (API REST DIRECTE) ===
+def call_gemini_api(prompt, api_key, model="gemini-1.5-flash"):
+    """Appelle l'API Gemini via REST avec la bonne version"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 1024,
+            "topP": 0.9
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.warning(f"Gemini API error: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        logger.warning(f"Gemini request error: {e}")
+        return None
 
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
-    response.headers.add('Access-Control-Max-Age', '600')
-    if request.method == 'OPTIONS':
-        response.status_code = 204
-    return response
+# === CONFIGURATION GEMINI ===
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-@app.route('/', methods=['GET', 'HEAD'])
-def health_check():
-    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
-
-app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
-jwt = JWTManager(app)
-
-# === SUPABASE ===
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
-app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+GEMINI_ACTIVE = False
+if GEMINI_API_KEY:
+    try:
+        # Tester avec un appel simple
+        test_prompt = "Test"
+        test_result = call_gemini_api(test_prompt, GEMINI_API_KEY, GEMINI_MODEL)
+        if test_result and "candidates" in test_result:
+            GEMINI_ACTIVE = True
+            logger.info(f"✅ Gemini activé avec succès: {GEMINI_MODEL}")
+        else:
+            # Essayer d'autres modèles
+            for model in ["gemini-1.5-pro", "gemini-1.0-pro", "gemini-pro"]:
+                test_result = call_gemini_api(test_prompt, GEMINI_API_KEY, model)
+                if test_result and "candidates" in test_result:
+                    GEMINI_ACTIVE = True
+                    GEMINI_MODEL = model
+                    logger.info(f"✅ Gemini activé avec succès: {model}")
+                    break
+            if not GEMINI_ACTIVE:
+                logger.warning("❌ Aucun modèle Gemini disponible")
+    except Exception as e:
+        logger.warning(f"⚠️ Gemini erreur: {e}")
+else:
+    logger.warning("⚠️ Gemini désactivé - clé API manquante")
 
 # === SUPABASE FUNCTIONS ===
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
@@ -686,7 +683,6 @@ Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, 
     try:
         result = call_gemini_api(prompt, GEMINI_API_KEY, GEMINI_MODEL)
         if result and "candidates" in result:
-            # Extraire le texte de la réponse
             response_text = result["candidates"][0]["content"]["parts"][0]["text"]
             import re
             json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
@@ -704,7 +700,6 @@ Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, 
         return None, 0.0, "", []
 
 def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_text=None, raw_full_text=None):
-    # Essayer Gemini d'abord
     if GEMINI_ACTIVE and poste in POSTES_AVEC_SCORING_12 + POSTES_AVEC_SCORING_14:
         try:
             valide, confiance, justification, elements = check_criterion_with_gemini(criterion, cv_text, lettre_text, poste)
@@ -717,7 +712,6 @@ def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_
         except Exception as e:
             logger.warning(f"Gemini fallback: {e}")
     
-    # Fallback mots-clés
     if raw_full_text:
         normalized, _ = normalize_for_matching(raw_full_text)
     else:
