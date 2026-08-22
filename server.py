@@ -3709,7 +3709,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v4.1-corrected-scoring",
+        "version": "v4.2-final-corrected",
         "postes_actifs_defined": 'POSTES_ACTIFS' in globals(),
         "postes_actifs": POSTES_ACTIFS if 'POSTES_ACTIFS' in globals() else "NON DÉFINI",
         "is_poste_actif_exists": 'is_poste_actif' in globals(),
