@@ -5,46 +5,17 @@ import os, hashlib, datetime, uuid, json, re, threading, io, csv, unicodedata, z
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from supabase import create_client
 import logging
-import requests
 from dotenv import load_dotenv
 load_dotenv()
 
-# === APP ===
-app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
-logging.getLogger('pdfminer').setLevel(logging.WARNING)
-logging.getLogger('pdfplumber').setLevel(logging.WARNING)
-logger = logging.getLogger(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
+# === GEMINI ===
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
 
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
-    response.headers.add('Access-Control-Max-Age', '600')
-    if request.method == 'OPTIONS':
-        response.status_code = 204
-    return response
-
-@app.route('/', methods=['GET', 'HEAD'])
-def health_check():
-    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
-
-app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
-jwt = JWTManager(app)
-
-# === SUPABASE ===
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
-app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
-
-# === AUTRES IMPORTS ===
+# === EXTRACTION TEXT ===
 try:
     import pdfplumber
     PDFPLUMBER_AVAILABLE = True
@@ -84,12 +55,12 @@ except ImportError:
 
 # === REPORTLAB (PDF) ===
 try:
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
@@ -98,74 +69,86 @@ except ImportError:
 try:
     import openpyxl
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.styles.numbers import FORMAT_DATE
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-# === GEMINI (API REST DIRECTE AVEC MODÈLES COMPATIBLES) ===
-def call_gemini_api(prompt, api_key, model="gemini-pro"):
-    """Appelle l'API Gemini via REST avec les modèles compatibles"""
-    # Utiliser le bon format d'URL pour l'API v1
-    url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={api_key}"
-    
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 1024,
-            "topP": 0.9
-        }
-    }
-    
-    try:
-        response = requests.post(url, json=payload, timeout=30)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logger.warning(f"Gemini API error: {response.status_code} - {response.text[:200]}")
-            return None
-    except Exception as e:
-        logger.warning(f"Gemini request error: {e}")
-        return None
-
-# === CONFIGURATION GEMINI AVEC MODÈLES COMPATIBLES ===
+# === CONFIGURATION GEMINI ===
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-pro")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
 
-GEMINI_ACTIVE = False
-if GEMINI_API_KEY:
+if GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
-        # Liste des modèles compatibles (du plus récent au plus ancien)
+        genai.configure(api_key=GEMINI_API_KEY)
         models_to_try = [
-            "gemini-1.5-flash",
-            "gemini-1.5-pro", 
-            "gemini-pro",
+            "gemini-1.5-pro",
             "gemini-1.0-pro",
-            "models/gemini-1.5-flash",
+            "gemini-pro",
             "models/gemini-1.5-pro",
-            "models/gemini-pro"
+            "models/gemini-1.0-pro"
         ]
-        
-        for model in models_to_try:
-            test_result = call_gemini_api("Test", GEMINI_API_KEY, model)
-            if test_result and "candidates" in test_result:
-                GEMINI_ACTIVE = True
-                GEMINI_MODEL = model
-                logger.info(f"✅ Gemini activé avec succès: {model}")
-                break
-            # Petit délai entre les tentatives
-            time.sleep(0.5)
-            
+        GEMINI_ACTIVE = False
+        for model_name in models_to_try:
+            try:
+                gemini_model = genai.GenerativeModel(model_name)
+                test_response = gemini_model.generate_content("Test")
+                if test_response:
+                    GEMINI_ACTIVE = True
+                    GEMINI_MODEL = model_name
+                    print(f"✅ Gemini activé avec succès: {model_name}")
+                    break
+            except Exception as e:
+                print(f"⚠️ Échec avec {model_name}: {e}")
+                continue
         if not GEMINI_ACTIVE:
-            logger.warning("❌ Aucun modèle Gemini disponible")
+            print("❌ Aucun modèle Gemini disponible")
     except Exception as e:
-        logger.warning(f"⚠️ Gemini erreur: {e}")
+        GEMINI_ACTIVE = False
+        print(f"⚠️ Gemini erreur: {e}")
 else:
-    logger.warning("⚠️ Gemini désactivé - clé API manquante")
+    GEMINI_ACTIVE = False
+    print("⚠️ Gemini désactivé")
+
+# === APP ===
+app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logging.getLogger('pdfminer').setLevel(logging.WARNING)
+logging.getLogger('pdfplumber').setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+    response.headers.add('Access-Control-Max-Age', '600')
+    if request.method == 'OPTIONS':
+        response.status_code = 204
+    return response
+
+@app.route('/', methods=['GET', 'HEAD'])
+def health_check():
+    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running'}), 200
+
+app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
+jwt = JWTManager(app)
+
+# === SUPABASE ===
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
+app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # === SUPABASE FUNCTIONS ===
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
@@ -451,113 +434,23 @@ GRILLE.update({
 
 # === KEYWORD MAPPING ===
 KEYWORD_MAPPING = {
-    "Aucune expérience ou formation dans un domaine bancaire, financier ou comptable": [
-        "banque", "bancaire", "finance", "comptabilite", "comptable",
-        "audit", "gestion", "economie", "banking", "accounting",
-        "financial", "business", "management", "credit", "risque"
-    ],
-    "Niveau de diplôme inférieur à Bac +3": [
-        "bac+3", "bac +3", "licence", "bachelor", "bts", "dut",
-        "diplome universitaire", "etudes superieures", "bac+2",
-        "licence pro", "master", "bac+5", "mba", "ingenieur"
-    ],
-    "Aucune notion du crédit bancaire": [
-        "credit", "credit bancaire", "financement", "octroi", "pret",
-        "garantie", "remboursement", "portefeuille", "loan",
-        "lending", "borrowing", "credit analysis", "analyse credit"
-    ],
-    "Exposition au cycle de crédit": [
-        "cycle credit", "approbation", "mise en place", "suivi echeances",
-        "credit approval", "loan processing", "credit monitoring"
-    ],
-    "Gestion ou participation au suivi des garanties": [
-        "garantie", "collateral", "suivi garanties", "enregistrement garantie",
-        "valorisation", "renouvellement assurance", "guarantee",
-        "surete", "hypotheque", "nantissement", "security"
-    ],
-    "Production ou contribution à des reportings": [
-        "reporting", "tableau de bord", "dashboard", "rapport portefeuille",
-        "kpi", "indicateurs", "portfolio report", "credit report"
-    ],
-    "Expérience avec un système bancaire": [
-        "finacle", "t24", "amplitude", "flexcube", "core banking",
-        "systeme bancaire", "banking system", "temenos", "sigma"
-    ],
-    "Détection ou signalement d'anomalies": [
-        "anomalie", "impaye", "depassement", "incident", "alerte",
-        "default", "overdue", "past due", "exception", "signalement"
-    ],
-    "Aucune expérience dans le secteur bancaire ou financier réglementé": [
-        "banque", "bancaire", "etablissement financier", "institution financiere",
-        "banque commerciale", "commercial bank", "financial institution",
-        "ecobank", "orabank", "uba", "bank of africa"
-    ],
-    "Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)": [
-        "master", "bac+5", "bac +5", "mba", "ingenieur", "doctorat",
-        "diplome d'etudes superieures", "bac+4", "maitrise"
-    ],
-    "Moins de 5 ans d'expérience professionnelle": ["EXP_5ANS_BANQUE"],
-    "Aucune expérience en gestion d'un portefeuille de clients Corporate": [
-        "portefeuille", "corporate", "grandes entreprises", "gestion portefeuille",
-        "client corporate", "sme", "local corporate", "enterprise"
-    ],
-    "Aucune expérience managériale": [
-        "management", "encadrement", "supervision", "team lead", "chef equipe",
-        "manager", "responsable equipe", "pilotage", "direction"
-    ],
-    "Aucune exposition à la gestion du risque de crédit": [
-        "npl", "non performing", "risque credit", "credit risk", "provision",
-        "qualite portefeuille", "impaye", "default", "portefeuille credit"
-    ],
-    "Pilotage d'une division Corporate avec atteinte des objectifs": [
-        "pilotage", "division", "corporate", "objectifs", "revenus",
-        "volumes", "marges", "performance", "resultats", "business plan"
-    ],
-    "Gestion active du ratio NPL et du ratio coût/revenu (CIR)": [
-        "npl", "non performing", "cir", "cost income", "ratio npl"
-    ],
-    "Expérience avérée en cross-selling avec équipes TSG ou Cash Management": [
-        "cross selling", "ventes croisees", "up selling", "cross-sell",
-        "trade finance", "cash management", "tsg"
-    ],
-    "Développement réel du portefeuille Corporate": [
-        "acquisition client", "fidelisation client", "developpement portefeuille"
-    ],
-    "Leadership démontré": [
-        "leadership", "constitution equipe", "developpement collaborateurs",
-        "vivier talents", "recrutement equipe", "formation equipe"
-    ],
-    "Certification Ecobank, Moody's ou ITB": [
-        "ecobank certification", "moody's", "itb", "institut technique banque"
-    ],
-    "Connaissance du marché CEMAC / UEMOA": [
-        "cemac", "uemoa", "zone cemac", "zone uemoa", "afrique centrale",
-        "afrique de l'ouest", "tchad", "chad"
-    ],
-    "Exposition aux plateformes numériques bancaires": [
-        "omni", "cash management", "plateforme numerique", "digital banking",
-        "banque en ligne", "mobile banking", "core banking"
-    ],
-    "Résultats commerciaux quantifiés": [
-        "croissance", "chiffre d'affaires", "taux de croissance", "nps",
-        "resultats commerciaux", "performance commerciale"
-    ]
-}
-
-EXP_MIN_YEARS_MAP = {
-    "EXP_5ANS_BANQUE": 5.0,
-    "EXP_CREDIT_3ANS": 3.0,
-    "EXP_FIN_3ANS": 3.0,
-    "EXP_BACKOFFICE_3ANS": 3.0,
-    "EXP_BANK_1ANS": 1.0
-}
-
-DOMAIN_KEYWORDS_MAP = {
-    "EXP_5ANS_BANQUE": ["banque", "bancaire", "banking", "institution financiere", "credit", "finance"],
-    "EXP_CREDIT_3ANS": ["credit", "risque", "analyse credit", "loan", "credit analysis"],
-    "EXP_FIN_3ANS": ["finance", "comptable", "comptabilite", "reporting", "tresorerie"],
-    "EXP_BACKOFFICE_3ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire"],
-    "EXP_BANK_1ANS": ["banque", "bancaire", "credit", "institution financiere", "banking"]
+    "Expérience en banque": ["banque", "bancaire", "institution financiere", "bank", "financial institution"],
+    "Minimum 3 ans en crédit": ["credit", "risque", "analyse credit", "loan", "credit analysis"],
+    "Exposition aux garanties": ["garantie", "collateral", "surete", "hypotheque", "guarantee"],
+    "IFRS 9": ["ifrs 9", "ifrs9", "ecl", "provisionnement", "staging"],
+    "COBAC / conformité": ["cobac", "conformite", "bceao", "regulation bancaire", "compliance"],
+    "Suivi portefeuille": ["portefeuille", "impayes", "npl", "encours", "portfolio"],
+    "Pilotage Corporate": ["corporate", "pilotage", "grandes entreprises", "sme", "local corporate"],
+    "Management": ["management", "encadrement", "supervision", "equipe", "manager"],
+    "Cross-selling": ["cross selling", "ventes croisees", "upselling", "cross-sell"],
+    "NPL": ["npl", "non performing", "cir", "cost income"],
+    "CEMAC": ["cemac", "uemoa", "bceao", "beac", "afrique centrale"],
+    "Certification": ["ecobank", "moody's", "itb", "certification", "mba", "master"],
+    "Reporting": ["reporting", "tableau de bord", "dashboard", "rapport"],
+    "Système bancaire": ["finacle", "t24", "amplitude", "flexcube", "core banking"],
+    "IFRS 9 staging": ["ifrs 9", "stage 1", "stage 2", "stage 3", "ecl"],
+    "BEAC/GIMAC": ["beac", "gimac", "systac", "sygma", "swift"],
+    "Compensation": ["compensation", "interbancaire", "clearing", "chambre de compensation"]
 }
 
 _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
@@ -668,10 +561,8 @@ def extract_text_robust_from_bytes(file_bytes, filename):
 def check_criterion_with_gemini(criterion, cv_text, lettre_text, poste):
     if not GEMINI_ACTIVE:
         return None, 0.0, "", []
-    
     cv_extrait = cv_text[:3000] if cv_text else ""
     lettre_extrait = (lettre_text or "")[:1000]
-    
     prompt = f"""Tu es un expert en recrutement bancaire. Analyse si le candidat remplit ce critère.
 POSTE: {poste}
 CRITERE: "{criterion}"
@@ -680,21 +571,14 @@ CRITERE: "{criterion}"
 --- LETTRE ---
 {lettre_extrait if lettre_extrait else "(non fournie)"}
 Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, "justification": "", "elements_trouves": []}}"""
-    
     try:
-        result = call_gemini_api(prompt, GEMINI_API_KEY, GEMINI_MODEL)
-        if result and "candidates" in result:
-            response_text = result["candidates"][0]["content"]["parts"][0]["text"]
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
-            if json_match:
-                parsed = json.loads(json_match.group())
-                return (
-                    parsed.get('valide', False),
-                    float(parsed.get('confiance', 0.5)),
-                    parsed.get('justification', ''),
-                    parsed.get('elements_trouves', [])
-                )
+        response = gemini_model.generate_content(prompt)
+        import json
+        import re
+        json_match = re.search(r'\{[^{}]*\}', response.text, re.DOTALL)
+        if json_match:
+            result = json.loads(json_match.group())
+            return result.get('valide', False), float(result.get('confiance', 0.5)), result.get('justification', ''), result.get('elements_trouves', [])
         return None, 0.0, "", []
     except Exception as e:
         logger.warning(f"Gemini error: {e}")
@@ -712,15 +596,12 @@ def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_
                 return True, confiance, elements
         except Exception as e:
             logger.warning(f"Gemini fallback: {e}")
-    
     if raw_full_text:
         normalized, _ = normalize_for_matching(raw_full_text)
     else:
         normalized = normalized_text or ""
-    
     keywords = KEYWORD_MAPPING.get(criterion, [criterion.lower()])
     text_clean, text_tokens = normalize_for_matching(normalized)
-    
     for kw in keywords:
         kw_clean, kw_tokens = normalize_for_matching(kw)
         if kw_clean in text_clean:
@@ -736,7 +617,6 @@ def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_
             if len(common) >= max(1, len(kw_tokens) * 0.5):
                 logger.info(f"✅ Mots-clés tokens: '{criterion}' trouvé via '{kw}' ({len(common)}/{len(kw_tokens)})")
                 return True, len(common)/len(kw_tokens), [f"{kw}[{len(common)}/{len(kw_tokens)}]"]
-    
     logger.info(f"❌ Critère non trouvé: '{criterion}'")
     return False, 0.0, []
 
@@ -1017,7 +897,22 @@ def analyze_cv_against_grille_semantic(cv_text, lettre_text, attestation_texts_l
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'score_final': score_final}}
 
-# === FONCTIONS D'EXPORT ===
+# === FONCTIONS D'EXPORT AVEC FILTRES ===
+def get_filtered_candidats(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    """Filtre les candidats selon les critères"""
+    filtered = candidats_data
+    if poste_filter:
+        filtered = [c for c in filtered if c.get('poste') == poste_filter]
+    if statut_filter:
+        filtered = [c for c in filtered if c.get('statut') == statut_filter]
+    if date_start:
+        filtered = [c for c in filtered if c.get('date_candidature', '') >= date_start]
+    if date_end:
+        filtered = [c for c in filtered if c.get('date_candidature', '') <= date_end + 'T23:59:59']
+    if min_score is not None:
+        filtered = [c for c in filtered if int(c.get('score', 0)) >= min_score]
+    return filtered
+
 def generate_excel_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
     if not OPENPYXL_AVAILABLE:
         return None
@@ -1073,6 +968,7 @@ def generate_pdf_report(candidats_data, poste_filter=None, date_start=None, date
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontSize=16, alignment=TA_CENTER, spaceAfter=20)
     subtitle_style = ParagraphStyle('SubtitleStyle', parent=styles['Normal'], fontSize=10, alignment=TA_CENTER, spaceAfter=15, textColor=colors.grey)
+    # Filtres info
     filters_info = []
     if poste_filter:
         filters_info.append(f"Poste: {poste_filter}")
@@ -1127,6 +1023,7 @@ def generate_word_report(candidats_data, poste_filter=None, date_start=None, dat
     doc = Document()
     title = doc.add_heading('Rapport des Candidatures', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Filtres
     filters_info = []
     if poste_filter:
         filters_info.append(f"Poste: {poste_filter}")
@@ -1164,20 +1061,7 @@ def generate_word_report(candidats_data, poste_filter=None, date_start=None, dat
     output.seek(0)
     return output
 
-def get_filtered_candidats(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
-    filtered = candidats_data
-    if poste_filter:
-        filtered = [c for c in filtered if c.get('poste') == poste_filter]
-    if statut_filter:
-        filtered = [c for c in filtered if c.get('statut') == statut_filter]
-    if date_start:
-        filtered = [c for c in filtered if c.get('date_candidature', '') >= date_start]
-    if date_end:
-        filtered = [c for c in filtered if c.get('date_candidature', '') <= date_end + 'T23:59:59']
-    if min_score is not None:
-        filtered = [c for c in filtered if int(c.get('score', 0)) >= min_score]
-    return filtered
-
+# === TÉLÉCHARGEMENT ZIP AVEC FILTRES ===
 def download_dossiers_zip_filtered(candidats_data, poste_filter=None, date_start=None, date_end=None):
     filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end)
     zip_buffer = io.BytesIO()
@@ -1554,6 +1438,7 @@ def get_reanalyze_status():
 def export_report(format):
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
+    # Récupérer tous les filtres
     poste_filter = request.args.get('poste', '')
     statut_filter = request.args.get('statut', '')
     date_start = request.args.get('date_start', '')
@@ -1625,8 +1510,6 @@ if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     if GEMINI_ACTIVE:
         print(f"🧠 Gemini activé: {GEMINI_MODEL}")
-    else:
-        print("⚠️ Gemini désactivé - fallback sur mots-clés")
     print(f"📊 Export Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'}")
     print(f"📄 Export PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
     print(f"📝 Export Word: {'✅' if DOCX_AVAILABLE else '❌'}")
