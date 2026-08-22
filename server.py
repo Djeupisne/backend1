@@ -8,12 +8,22 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-# === GEMINI ===
+# === GEMINI (NOUVEAU SDK) ===
 try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
+    from google import genai
+    from google.genai.types import GenerateContentConfig
+    GEMINI_NEW_SDK_AVAILABLE = True
 except ImportError:
-    GEMINI_AVAILABLE = False
+    GEMINI_NEW_SDK_AVAILABLE = False
+    genai = None
+    GenerateContentConfig = None
+
+# === ANCIEN GEMINI (fallback) ===
+try:
+    import google.generativeai as genai_legacy
+    GEMINI_LEGACY_AVAILABLE = True
+except ImportError:
+    GEMINI_LEGACY_AVAILABLE = False
 
 # === EXTRACTION TEXT ===
 try:
@@ -81,11 +91,13 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 IA_ACTIVE = False
+ANTHROPIC_CLIENT = None
+
 if ANTHROPIC_API_KEY:
     try:
         import anthropic
-        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        test_response = claude_client.messages.create(
+        ANTHROPIC_CLIENT = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        test_response = ANTHROPIC_CLIENT.messages.create(
             model=ANTHROPIC_MODEL,
             max_tokens=10,
             messages=[{"role": "user", "content": "Test"}]
@@ -95,43 +107,79 @@ if ANTHROPIC_API_KEY:
             print(f"✅ Anthropic Claude activé avec succès: {ANTHROPIC_MODEL}")
     except Exception as e:
         IA_ACTIVE = False
+        ANTHROPIC_CLIENT = None
         print(f"⚠️ Anthropic erreur: {e}")
 else:
     IA_ACTIVE = False
     print("⚠️ Anthropic désactivé (pas de clé API)")
 
-# === GEMINI (fallback) ===
+# === GEMINI (NOUVEAU SDK - priorité) ===
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 
 GEMINI_ACTIVE = False
-if not IA_ACTIVE and GEMINI_AVAILABLE and GEMINI_API_KEY:
+GEMINI_CLIENT = None
+
+if not IA_ACTIVE and GEMINI_NEW_SDK_AVAILABLE and GEMINI_API_KEY:
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
+        GEMINI_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
+        # Liste des modèles à essayer (nouveaux modèles 2024-2025)
         models_to_try = [
+            "gemini-2.0-flash-exp",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
             "gemini-1.5-pro",
-            "gemini-1.0-pro",
-            "gemini-pro",
-            "models/gemini-1.5-pro",
-            "models/gemini-1.0-pro"
         ]
         for model_name in models_to_try:
             try:
-                gemini_model = genai.GenerativeModel(model_name)
-                test_response = gemini_model.generate_content("Test")
+                test_response = GEMINI_CLIENT.models.generate_content(
+                    model=model_name,
+                    contents="Test"
+                )
                 if test_response:
                     GEMINI_ACTIVE = True
                     GEMINI_MODEL = model_name
-                    print(f"✅ Gemini activé avec succès: {model_name}")
+                    print(f"✅ Gemini (nouveau SDK) activé avec succès: {model_name}")
                     break
             except Exception as e:
                 print(f"⚠️ Échec avec {model_name}: {e}")
                 continue
         if not GEMINI_ACTIVE:
-            print("❌ Aucun modèle Gemini disponible")
+            print("❌ Aucun modèle Gemini disponible avec le nouveau SDK")
     except Exception as e:
         GEMINI_ACTIVE = False
-        print(f"⚠️ Gemini erreur: {e}")
+        GEMINI_CLIENT = None
+        print(f"⚠️ Gemini (nouveau SDK) erreur: {e}")
+
+# === GEMINI (ANCIEN SDK - fallback) ===
+if not IA_ACTIVE and not GEMINI_ACTIVE and GEMINI_LEGACY_AVAILABLE and GEMINI_API_KEY:
+    try:
+        genai_legacy.configure(api_key=GEMINI_API_KEY)
+        legacy_models_to_try = [
+            "gemini-1.5-pro",
+            "gemini-1.0-pro", 
+            "gemini-pro",
+            "models/gemini-1.5-pro",
+            "models/gemini-1.0-pro"
+        ]
+        for model_name in legacy_models_to_try:
+            try:
+                gemini_model = genai_legacy.GenerativeModel(model_name)
+                test_response = gemini_model.generate_content("Test")
+                if test_response:
+                    GEMINI_ACTIVE = True
+                    GEMINI_MODEL = model_name
+                    GEMINI_CLIENT = gemini_model  # Pour compatibilité
+                    print(f"✅ Gemini (ancien SDK) activé avec succès: {model_name}")
+                    break
+            except Exception as e:
+                print(f"⚠️ Échec avec {model_name} (legacy): {e}")
+                continue
+        if not GEMINI_ACTIVE:
+            print("❌ Aucun modèle Gemini disponible (ancien SDK)")
+    except Exception as e:
+        GEMINI_ACTIVE = False
+        print(f"⚠️ Gemini (ancien SDK) erreur: {e}")
 
 if not IA_ACTIVE and not GEMINI_ACTIVE:
     print("⚠️ IA désactivée (ni Anthropic ni Gemini)")
@@ -725,10 +773,10 @@ def extract_text_robust_from_bytes(file_bytes, filename):
         logger.error(f"Extraction error: {e}")
         return ""
 
-# === GEMINI SEMANTIC ANALYSIS ===
+# === IA SEMANTIC ANALYSIS ===
 def check_criterion_with_ia(criterion, cv_text, lettre_text, poste):
     """Vérifie un critère avec l'IA (Anthropic en priorité, puis Gemini)"""
-    if IA_ACTIVE:
+    if IA_ACTIVE and ANTHROPIC_CLIENT:
         try:
             cv_extrait = cv_text[:3000] if cv_text else ""
             lettre_extrait = (lettre_text or "")[:1000]
@@ -740,7 +788,7 @@ CRITERE: "{criterion}"
 --- LETTRE ---
 {lettre_extrait if lettre_extrait else "(non fournie)"}
 Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, "justification": "", "elements_trouves": []}}"""
-            response = claude_client.messages.create(
+            response = ANTHROPIC_CLIENT.messages.create(
                 model=ANTHROPIC_MODEL,
                 max_tokens=200,
                 messages=[{"role": "user", "content": prompt}]
@@ -761,8 +809,10 @@ Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, 
         return None, 0.0, "", []
 
 def check_criterion_with_gemini(criterion, cv_text, lettre_text, poste):
-    if not GEMINI_ACTIVE:
+    """Vérifie un critère avec Gemini (nouveau ou ancien SDK)"""
+    if not GEMINI_ACTIVE or not GEMINI_CLIENT:
         return None, 0.0, "", []
+    
     cv_extrait = cv_text[:3000] if cv_text else ""
     lettre_extrait = (lettre_text or "")[:1000]
     prompt = f"""Tu es un expert en recrutement bancaire. Analyse si le candidat remplit ce critère.
@@ -773,11 +823,25 @@ CRITERE: "{criterion}"
 --- LETTRE ---
 {lettre_extrait if lettre_extrait else "(non fournie)"}
 Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, "justification": "", "elements_trouves": []}}"""
+    
     try:
-        response = gemini_model.generate_content(prompt)
+        # Nouveau SDK Gemini
+        if GEMINI_NEW_SDK_AVAILABLE and hasattr(GEMINI_CLIENT, 'models'):
+            response = GEMINI_CLIENT.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt
+            )
+            response_text = response.text if hasattr(response, 'text') else str(response)
+        # Ancien SDK Gemini
+        elif GEMINI_LEGACY_AVAILABLE and hasattr(GEMINI_CLIENT, 'generate_content'):
+            response = GEMINI_CLIENT.generate_content(prompt)
+            response_text = response.text if hasattr(response, 'text') else str(response)
+        else:
+            return None, 0.0, "", []
+        
         import json
         import re
-        json_match = re.search(r'\{[^{}]*\}', response.text, re.DOTALL)
+        json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
         if json_match:
             result = json.loads(json_match.group())
             return result.get('valide', False), float(result.get('confiance', 0.5)), result.get('justification', ''), result.get('elements_trouves', [])
@@ -1150,32 +1214,48 @@ def get_filtered_candidats(candidats_data, poste_filter=None, date_start=None, d
     return filtered
 
 def generate_excel_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    """Génère un rapport Excel avec classement par score décroissant"""
     if not OPENPYXL_AVAILABLE:
         return None
     filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
+    # Tri par score décroissant (classement)
+    filtered_sorted = sorted(filtered, key=lambda x: int(x.get('score', 0)), reverse=True)
+    
     wb = Workbook()
     ws = wb.active
     ws.title = "Candidatures"
-    headers = ['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note', 'Raisons Rejet/Élimination']
+    headers = ['Rang', 'Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note', 'Raisons Rejet/Élimination']
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
         cell.alignment = Alignment(horizontal="center")
-    for row_idx, c in enumerate(filtered, 2):
-        ws.cell(row=row_idx, column=1, value=c.get('numero_dossier', ''))
-        ws.cell(row=row_idx, column=2, value=c.get('nom', ''))
-        ws.cell(row=row_idx, column=3, value=c.get('prenom', ''))
-        ws.cell(row=row_idx, column=4, value=c.get('email', ''))
-        ws.cell(row=row_idx, column=5, value=c.get('telephone', ''))
-        ws.cell(row=row_idx, column=6, value=c.get('poste', ''))
-        ws.cell(row=row_idx, column=7, value=c.get('statut', ''))
-        ws.cell(row=row_idx, column=8, value=c.get('score', 0))
-        ws.cell(row=row_idx, column=9, value=c.get('date_candidature', '')[:10] if c.get('date_candidature') else '')
-        ws.cell(row=row_idx, column=10, value=c.get('note', ''))
-        # Ajouter les raisons de rejet/élimination (nouvelle colonne)
+    
+    for row_idx, c in enumerate(filtered_sorted, 2):
+        ws.cell(row=row_idx, column=1, value=row_idx - 1)  # Rang
+        ws.cell(row=row_idx, column=2, value=c.get('numero_dossier', ''))
+        ws.cell(row=row_idx, column=3, value=c.get('nom', ''))
+        ws.cell(row=row_idx, column=4, value=c.get('prenom', ''))
+        ws.cell(row=row_idx, column=5, value=c.get('email', ''))
+        ws.cell(row=row_idx, column=6, value=c.get('telephone', ''))
+        ws.cell(row=row_idx, column=7, value=c.get('poste', ''))
+        ws.cell(row=row_idx, column=8, value=c.get('statut', ''))
+        ws.cell(row=row_idx, column=9, value=c.get('score', 0))
+        ws.cell(row=row_idx, column=10, value=c.get('date_candidature', '')[:10] if c.get('date_candidature') else '')
+        ws.cell(row=row_idx, column=11, value=c.get('note', ''))
+        # Ajouter les raisons de rejet/élimination
         raisons = c.get('raisons_rejet_eliminaton', c.get('raisons_rejet', ''))
-        ws.cell(row=row_idx, column=11, value=raisons)
+        ws.cell(row=row_idx, column=12, value=raisons)
+        
+        # Coloration selon le statut
+        statut = c.get('statut', '').lower()
+        if 'retenu' in statut or 'preselctionné' in statut or 'présélectionné' in statut:
+            ws.cell(row=row_idx, column=9).fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # Vert
+        elif 'rejete' in statut or 'rejeté' in statut:
+            ws.cell(row=row_idx, column=9).fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Rouge clair
+        elif 'exclu' in statut:
+            ws.cell(row=row_idx, column=9).fill = PatternFill(start_color="FF6347", end_color="FF6347", fill_type="solid")  # Rouge
+    
     for col in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col)].width = 25
     output = io.BytesIO()
@@ -1184,12 +1264,17 @@ def generate_excel_report(candidats_data, poste_filter=None, date_start=None, da
     return output
 
 def generate_csv_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    """Génère un rapport CSV avec classement par score décroissant"""
     filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
+    # Tri par score décroissant (classement)
+    filtered_sorted = sorted(filtered, key=lambda x: int(x.get('score', 0)), reverse=True)
+    
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note'])
-    for c in filtered:
+    writer.writerow(['Rang', 'Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note'])
+    for idx, c in enumerate(filtered_sorted, 1):
         writer.writerow([
+            idx,  # Rang
             c.get('numero_dossier', ''), c.get('nom', ''), c.get('prenom', ''),
             c.get('email', ''), c.get('telephone', ''), c.get('poste', ''),
             c.get('statut', ''), c.get('score', 0),
@@ -1199,9 +1284,13 @@ def generate_csv_report(candidats_data, poste_filter=None, date_start=None, date
     return io.BytesIO(output.getvalue().encode('utf-8-sig'))
 
 def generate_pdf_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    """Génère un rapport PDF avec classement par score décroissant"""
     if not REPORTLAB_AVAILABLE:
         return None
     filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
+    # Tri par score décroissant (classement)
+    filtered_sorted = sorted(filtered, key=lambda x: int(x.get('score', 0)), reverse=True)
+    
     output = io.BytesIO()
     doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
@@ -1220,9 +1309,10 @@ def generate_pdf_report(candidats_data, poste_filter=None, date_start=None, date
     if min_score is not None:
         filters_info.append(f"Score ≥ {min_score}")
     filter_text = " | ".join(filters_info) if filters_info else "Tous les candidats"
-    data = [['N° Dossier', 'Nom', 'Prénom', 'Poste', 'Statut', 'Score']]
-    for c in filtered:
+    data = [['Rang', 'N° Dossier', 'Nom', 'Prénom', 'Poste', 'Statut', 'Score']]
+    for idx, c in enumerate(filtered_sorted, 1):
         data.append([
+            str(idx),  # Rang
             c.get('numero_dossier', '')[:10],
             c.get('nom', '')[:15],
             c.get('prenom', '')[:15],
@@ -1230,7 +1320,7 @@ def generate_pdf_report(candidats_data, poste_filter=None, date_start=None, date
             c.get('statut', '')[:15],
             str(c.get('score', 0))
         ])
-    table = Table(data, colWidths=[2*cm, 3*cm, 3*cm, 4*cm, 3*cm, 2*cm])
+    table = Table(data, colWidths=[1.5*cm, 2*cm, 3*cm, 3*cm, 4*cm, 3*cm, 2*cm])
     table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -1254,9 +1344,13 @@ def generate_pdf_report(candidats_data, poste_filter=None, date_start=None, date
     return output
 
 def generate_word_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    """Génère un rapport Word avec classement par score décroissant"""
     if not DOCX_AVAILABLE:
         return None
     filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
+    # Tri par score décroissant (classement)
+    filtered_sorted = sorted(filtered, key=lambda x: int(x.get('score', 0)), reverse=True)
+    
     from docx.shared import Inches, Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     doc = Document()
@@ -1278,23 +1372,25 @@ def generate_word_report(candidats_data, poste_filter=None, date_start=None, dat
     doc.add_paragraph(f"Filtres: {filter_text}")
     doc.add_paragraph(f"Total: {len(filtered)} candidat(s)")
     doc.add_paragraph("")
-    table = doc.add_table(rows=1, cols=6)
+    table = doc.add_table(rows=1, cols=7)
     table.style = 'Table Grid'
     hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'N° Dossier'
-    hdr_cells[1].text = 'Nom'
-    hdr_cells[2].text = 'Prénom'
-    hdr_cells[3].text = 'Poste'
-    hdr_cells[4].text = 'Statut'
-    hdr_cells[5].text = 'Score'
-    for c in filtered:
+    hdr_cells[0].text = 'Rang'
+    hdr_cells[1].text = 'N° Dossier'
+    hdr_cells[2].text = 'Nom'
+    hdr_cells[3].text = 'Prénom'
+    hdr_cells[4].text = 'Poste'
+    hdr_cells[5].text = 'Statut'
+    hdr_cells[6].text = 'Score'
+    for idx, c in enumerate(filtered_sorted, 1):
         row_cells = table.add_row().cells
-        row_cells[0].text = c.get('numero_dossier', '')[:10]
-        row_cells[1].text = c.get('nom', '')[:20]
-        row_cells[2].text = c.get('prenom', '')[:20]
-        row_cells[3].text = c.get('poste', '')[:25]
-        row_cells[4].text = c.get('statut', '')
-        row_cells[5].text = str(c.get('score', 0))
+        row_cells[0].text = str(idx)  # Rang
+        row_cells[1].text = c.get('numero_dossier', '')[:10]
+        row_cells[2].text = c.get('nom', '')[:20]
+        row_cells[3].text = c.get('prenom', '')[:20]
+        row_cells[4].text = c.get('poste', '')[:25]
+        row_cells[5].text = c.get('statut', '')
+        row_cells[6].text = str(c.get('score', 0))
     output = io.BytesIO()
     doc.save(output)
     output.seek(0)
@@ -1909,13 +2005,15 @@ def test_gemini():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v4.1-ia-alertes",
+        "version": "v5.0-nouveau-gemini-classement",
         "postes_actifs": POSTES_ACTIFS,
         "ia_active": IA_ACTIVE,
         "anthropic_model": ANTHROPIC_MODEL if IA_ACTIVE else "inactif",
+        "gemini_new_sdk_available": GEMINI_NEW_SDK_AVAILABLE,
+        "gemini_legacy_available": GEMINI_LEGACY_AVAILABLE,
         "gemini_active": GEMINI_ACTIVE,
         "gemini_model": GEMINI_MODEL if GEMINI_ACTIVE else "inactif",
-        "exports": {"excel": OPENPYXL_AVAILABLE, "pdf": REPORTLAB_AVAILABLE, "word": DOCX_AVAILABLE}
+        "exports": {"excel": OPENPYXL_AVAILABLE, "pdf": REPORTLAB_AVAILABLE, "word": DOCX_AVAILABLE, "csv": True}
     }), 200
 
 # === ROUTE POUR ACCÉDER AUX DOCUMENTS (CV, LETTRE, ATTESTATIONS) ===
@@ -1959,8 +2057,13 @@ if __name__ == '__main__':
     if IA_ACTIVE:
         print(f"🧠 Anthropic Claude activé: {ANTHROPIC_MODEL}")
     elif GEMINI_ACTIVE:
-        print(f"🧠 Gemini activé: {GEMINI_MODEL}")
+        if GEMINI_NEW_SDK_AVAILABLE:
+            print(f"🧠 Gemini (nouveau SDK) activé: {GEMINI_MODEL}")
+        else:
+            print(f"🧠 Gemini (ancien SDK) activé: {GEMINI_MODEL}")
     print(f"📊 Export Excel: {'✅' if OPENPYXL_AVAILABLE else '❌'}")
     print(f"📄 Export PDF: {'✅' if REPORTLAB_AVAILABLE else '❌'}")
     print(f"📝 Export Word: {'✅' if DOCX_AVAILABLE else '❌'}")
+    print(f"📑 Export CSV: ✅")
+    print(f"📋 Rapports avec classement: ✅")
     app.run(host="0.0.0.0", port=port, debug=False)
