@@ -1112,7 +1112,8 @@ EXP_MIN_YEARS_MAP = {
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
-        return False, 0.0, []
+        # Si le critère n'a pas de mapping, on retourne False mais avec un score plus indulgent
+        return False, 0.5, []
     exp_markers = [kw for kw in keywords if kw.startswith("EXP_")]
     if exp_markers:
         marker = exp_markers[0]
@@ -1140,8 +1141,9 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                     return True, 1.0, [kw]
             return False, 0.0, []
     if poste:
-        if not check_criterion_context(criterion, raw_full_text, poste):
-            return False, 0.0, []
+        # On ne bloque plus sur check_criterion_context pour les critères éliminatoires
+        # On laisse passer et on évalue normalement
+        pass
     best_score = 0.0
     found_kws = []
     text_clean, text_tokens = normalize_for_matching(normalized_text)
@@ -1155,18 +1157,18 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
             continue
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 85:
+            if ratio >= 80:  # Seuil abaissé de 85 à 80 pour plus d'indulgence
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
                     best_score = max(best_score, ratio / 100)
                 continue
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(2, len(kw_tokens) * 0.7):
+            if len(common) >= max(2, len(kw_tokens) * 0.6):  # Seuil abaissé de 0.7 à 0.6
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
-    return best_score >= 0.70, round(best_score, 2), found_kws
+    return best_score >= 0.60, round(best_score, 2), found_kws  # Seuil abaissé de 0.70 à 0.60
 def detect_language(text):
     if not text or not LANGDETECT_AVAILABLE:
         return None
@@ -1744,19 +1746,15 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         checklist[key] = is_present
         if not is_present:
             eliminatoire_failed = True
+            # On note le critère manquant mais on n'élimine plus automatiquement
             flags_elim.append(f"❌ {crit} (confiance: {confidence:.0%})")
-            details['alertes_attention'].append(f"🔴 Éliminatoire manquant: {crit}")
-            details['matching_details'][crit] = {'found': False, 'confidence': confidence, 'status': 'ÉLIMINATOIRE'}
+            details['alertes_attention'].append(f"🔴 Critère manquant: {crit}")
+            details['matching_details'][crit] = {'found': False, 'confidence': confidence, 'status': 'MANQUANT'}
         else:
             details['matching_details'][crit] = {'found': True, 'confidence': confidence, 'matched': found_kws}
-    if eliminatoire_failed:
-        for i, crit in enumerate(grille.get('a_verifier', [])):
-            checklist[f'verif_{i}'] = False
-        for i, crit in enumerate(grille.get('signaux_forts', [])):
-            checklist[f'signal_{i}'] = False
-        for i, crit in enumerate(grille.get('points_attention', [])):
-            checklist[f'attn_{i}'] = False
-        return {'score': 0, 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [], 'details': details, 'score_breakdown': {'bloc1_eliminatoire': True, 'flags_eliminatoires_count': len(flags_elim), 'adequation_experience': 0, 'coherence_parcours': 0, 'exposition_risque_metier': 0, 'qualite_cv': 0, 'lettre_motivation': 0, 'total_raw_points': 0, 'score_final': 0, 'note': f"ÉLIMINÉ : {len(flags_elim)} critère(s)", 'documents_analyses': details['documents_analyses']}}
+    
+    # On continue l'analyse même si des critères éliminatoires manquent
+    # Le score final déterminera la recommandation
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
         is_present, confidence, found_kws = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
@@ -1786,7 +1784,11 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
     lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
-    return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': [], 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'bloc2_criteres_valides': len(details['criteres_valides_bloc2']), 'bloc2_points': points_bloc2, 'bloc3_signaux_detectes': len(signaux), 'bloc3_points': points_bloc3, 'total_raw_points': points_bloc2 + points_bloc3, 'score_final': score_final, 'note': f"Score Excel: {score_final}/10", 'documents_analyses': details['documents_analyses']}}
+    
+    # Calcul du nombre de critères éliminatoires manquants pour affichage
+    nb_elim_manquants = len(flags_elim)
+    
+    return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'bloc2_criteres_valides': len(details['criteres_valides_bloc2']), 'bloc2_points': points_bloc2, 'bloc3_signaux_detectes': len(signaux), 'bloc3_points': points_bloc3, 'total_raw_points': points_bloc2 + points_bloc3, 'score_final': score_final, 'note': f"Score: {score_final}/10", 'documents_analyses': details['documents_analyses']}}
 def normalize_text_for_matching(text):
     return normalize_for_matching(text)[0]
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
@@ -1883,11 +1885,11 @@ def get_recommandation_from_score(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
         if s >= 10: return "🥇 Entretien prioritaire"
-        elif s >= 7: return "🥈 Entretien si besoin (vivier de réserve)"
+        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"  # Un candidat avec 7/12 ou 8/12 doit être considéré
         else: return "❌ Rejet"
     if poste and poste in POSTES_AVEC_SCORING_14:
         if s >= 11: return "🥇 Entretien prioritaire"
-        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"
+        elif s >= 7: return "🥈 Potentiel à évaluer en entretien"  # Un candidat avec 7/14 ou 8/14 ne doit pas être rejeté
         else: return "❌ Rejet"
     if poste and poste in POSTES_AVEC_SCORING_100:
         if s >= 80: return "Shortlist"
@@ -1895,7 +1897,7 @@ def get_recommandation_from_score(score, poste=None):
         elif s >= 60: return "Faible"
         else: return "Rejet"
     if s >= 8: return "🥇 Entretien prioritaire"
-    elif s >= 6: return "🥈 Entretien si besoin"
+    elif s >= 5: return "🥈 Potentiel à évaluer en entretien"  # Seuil abaissé de 6 à 5
     else: return "❌ Rejet"
 def get_decision_from_score(score, poste=None):
     if not poste or (poste not in POSTES_AVEC_SCORING_100 and poste not in POSTES_AVEC_SCORING_12 and poste not in POSTES_AVEC_SCORING_14):
@@ -1904,21 +1906,21 @@ def get_decision_from_score(score, poste=None):
 def get_recommandation_color(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
-        if s >= 10: return "00FF00"
-        elif s >= 7: return "FFA500"
-        else: return "FF0000"
+        if s >= 10: return "00FF00"  # Vert
+        elif s >= 7: return "FFA500"  # Orange - potentiel à évaluer
+        else: return "FF0000"  # Rouge
     if poste and poste in POSTES_AVEC_SCORING_14:
-        if s >= 11: return "00FF00"
-        elif s >= 7: return "FFA500"
-        else: return "FF0000"
+        if s >= 11: return "00FF00"  # Vert
+        elif s >= 7: return "FFA500"  # Orange - potentiel à évaluer
+        else: return "FF0000"  # Rouge
     if poste and poste in POSTES_AVEC_SCORING_100:
-        if s >= 80: return "00FF00"
-        elif s >= 70: return "90EE90"
-        elif s >= 60: return "FFA500"
-        else: return "FF0000"
-    if s >= 8: return "00FF00"
-    elif s >= 6: return "FFA500"
-    else: return "FF0000"
+        if s >= 80: return "00FF00"  # Vert
+        elif s >= 70: return "90EE90"  # Vert clair
+        elif s >= 60: return "FFA500"  # Orange
+        else: return "FF0000"  # Rouge
+    if s >= 8: return "00FF00"  # Vert
+    elif s >= 5: return "FFA500"  # Orange - potentiel à évaluer
+    else: return "FF0000"  # Rouge
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
         return 12
