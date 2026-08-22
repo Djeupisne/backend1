@@ -1307,14 +1307,28 @@ def run_analysis_for_candidat_semantic(token, cv_filename, lettre_filename, atte
             return
         result = analyze_cv_against_grille_semantic(cv_text, lm_text, att_texts, poste)
         if result and supabase:
+            # Préparer les raisons d'élimination/rejet
+            flags_eliminatoires = result.get('flags_eliminatoires', [])
+            points_vigilance = result.get('details', {}).get('points_vigilance', [])
+            
+            # Construire un texte de rejet/élimination détaillé
+            raisons_detaillees = []
+            if flags_eliminatoires:
+                raisons_detaillees.extend(flags_eliminatoires)
+            if points_vigilance:
+                raisons_detaillees.extend([f"⚠️ {p}" for p in points_vigilance[:3]])  # Max 3 points de vigilance
+            
+            raisons_text = " | ".join(raisons_detaillees[:5]) if raisons_detaillees else ""
+            
             update_data = {
                 "score": str(result['score']),
                 "checklist": json.dumps(result.get('checklist', {}), ensure_ascii=False),
-                "flags_eliminatoires": json.dumps(result['flags_eliminatoires'], ensure_ascii=False),
+                "flags_eliminatoires": json.dumps(flags_eliminatoires, ensure_ascii=False),
                 "signaux_detectes": json.dumps(result['signaux_detectes'], ensure_ascii=False),
                 "analyse_details": json.dumps(result['details'], ensure_ascii=False),
                 "score_breakdown": json.dumps(result['score_breakdown'], ensure_ascii=False),
                 "decision": result['score_breakdown'].get('decision', ''),
+                "raisons_rejet_eliminaton": raisons_text,  # Nouveau champ pour les raisons
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }
@@ -1569,8 +1583,8 @@ def update_candidat(token):
     # === AJOUTER LES RAISONS DE REJET/ELIMINATION SI APPLICABLE ===
     update_data = {"statut": statut, "note": note}
     
-    # Si le statut est "rejete", récupérer les raisons de l'analyse
-    if statut == 'rejete':
+    # Si le statut est "rejete" ou "exclu", récupérer les raisons de l'analyse
+    if statut in ('rejete', 'exclu'):
         candidat = response.data[0]
         score_breakdown_raw = candidat.get('score_breakdown', '{}')
         flags_eliminatoires = []
@@ -1580,7 +1594,13 @@ def update_candidat(token):
             # Récupérer les flags éliminatoires depuis l'analyse
             flags_eliminatoires = score_breakdown.get('flags_eliminatoires', [])
             
-            # Si pas de flags dans score_breakdown, vérifier les critères éliminatoires de la grille
+            # Si pas de flags dans score_breakdown, utiliser le champ raisons_rejet_eliminaton
+            if not flags_eliminatoires:
+                raisons_stockees = candidat.get('raisons_rejet_eliminaton', '')
+                if raisons_stockees:
+                    flags_eliminatoires = raisons_stockees.split(' | ')
+            
+            # Si toujours pas de flags, vérifier les critères éliminatoires de la grille
             if not flags_eliminatoires:
                 poste = candidat.get('poste', '')
                 grille = GRILLE.get(poste)

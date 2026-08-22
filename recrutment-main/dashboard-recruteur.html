@@ -1645,13 +1645,13 @@ function renderRecent(data) {
         const starUnit = scoreMax / 5;
         const stars = '★'.repeat(Math.floor(score / starUnit)) + '☆'.repeat(5 - Math.floor(score / starUnit));
         const decision = c.score_breakdown_parsed?.decision || c.statut || '';
-        return '<tr>'
+        return '<tr style="cursor:pointer" onclick="openModal(\'" + c.id + "\')">'
             + '<td><strong>' + escHtml(c.prenom) + ' ' + escHtml(c.nom) + '</strong><br><small style="color:var(--text-muted)">' + escHtml(c.email) + '</small></td>'
             + '<td style="font-size:.82rem">' + escHtml(c.poste) + '</td>'
             + '<td style="font-size:.8rem;color:var(--text-muted)">' + fmtDate(c.date_candidature) + '</td>'
             + '<td>' + badgePill(decision || c.statut) + '</td>'
             + '<td style="font-size:.9rem;font-family:monospace">' + stars + ' <span style="color:var(--text-secondary);font-family:inherit">(' + score + '/' + scoreMax + ')</span></td>'
-            + '<td><button class="btn btn-primary btn-sm" onclick="openModal(\'' + c.id + '\')">📂 Voir</button></td>'
+            + '<td onclick="event.stopPropagation()"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openModal(\'' + c.id + '\')">📂 Voir</button></td>'
             + '</tr>';
     }).join('');
     container.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Candidat</th><th>Poste</th><th>Date</th><th>Statut</th><th>Score</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
