@@ -57,10 +57,10 @@ except ImportError:
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
@@ -71,24 +71,46 @@ try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.styles.numbers import FORMAT_DATE
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
 # === CONFIGURATION GEMINI ===
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro")
+
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel(GEMINI_MODEL)
-        GEMINI_ACTIVE = True
-        print("✅ Gemini activé")
+        models_to_try = [
+            "gemini-1.5-pro",
+            "gemini-1.0-pro",
+            "gemini-pro",
+            "models/gemini-1.5-pro",
+            "models/gemini-1.0-pro"
+        ]
+        GEMINI_ACTIVE = False
+        for model_name in models_to_try:
+            try:
+                gemini_model = genai.GenerativeModel(model_name)
+                test_response = gemini_model.generate_content("Test")
+                if test_response:
+                    GEMINI_ACTIVE = True
+                    GEMINI_MODEL = model_name
+                    print(f"✅ Gemini activé avec succès: {model_name}")
+                    break
+            except Exception as e:
+                print(f"⚠️ Échec avec {model_name}: {e}")
+                continue
+        if not GEMINI_ACTIVE:
+            print("❌ Aucun modèle Gemini disponible")
     except Exception as e:
         GEMINI_ACTIVE = False
         print(f"⚠️ Gemini erreur: {e}")
 else:
     GEMINI_ACTIVE = False
+    print("⚠️ Gemini désactivé")
 
 # === APP ===
 app = Flask(__name__)
@@ -335,7 +357,6 @@ GRILLE = {
     }
 }
 
-# Ajouter les grilles pour les autres postes
 GRILLE.update({
     "Responsable Administration de Crédit": {
         "eliminatoire": ["Expérience bancaire", "Minimum 3 ans en crédit / risque", "Exposition aux garanties ou conformité"],
@@ -431,6 +452,7 @@ KEYWORD_MAPPING = {
     "BEAC/GIMAC": ["beac", "gimac", "systac", "sygma", "swift"],
     "Compensation": ["compensation", "interbancaire", "clearing", "chambre de compensation"]
 }
+
 _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
 
 # === FONCTIONS D'EXTRACTION ===
@@ -567,7 +589,11 @@ def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_
         try:
             valide, confiance, justification, elements = check_criterion_with_gemini(criterion, cv_text, lettre_text, poste)
             if valide is not None and confiance >= 0.5:
+                logger.info(f"✅ Gemini: '{criterion}' → {valide} (conf: {confiance:.2f})")
                 return valide, confiance, elements
+            elif valide is not None and valide:
+                logger.info(f"⚠️ Gemini conf faible: '{criterion}' → {valide} (conf: {confiance:.2f})")
+                return True, confiance, elements
         except Exception as e:
             logger.warning(f"Gemini fallback: {e}")
     if raw_full_text:
@@ -579,15 +605,19 @@ def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_
     for kw in keywords:
         kw_clean, kw_tokens = normalize_for_matching(kw)
         if kw_clean in text_clean:
+            logger.info(f"✅ Mots-clés: '{criterion}' trouvé via '{kw}'")
             return True, 1.0, [kw]
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 85:
+            if ratio >= 80:
+                logger.info(f"✅ Mots-clés fuzzy: '{criterion}' trouvé via '{kw}' (ratio: {ratio}%)")
                 return True, ratio/100, [f"{kw}~{ratio/100:.2f}"]
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(2, len(kw_tokens) * 0.7):
+            if len(common) >= max(1, len(kw_tokens) * 0.5):
+                logger.info(f"✅ Mots-clés tokens: '{criterion}' trouvé via '{kw}' ({len(common)}/{len(kw_tokens)})")
                 return True, len(common)/len(kw_tokens), [f"{kw}[{len(common)}/{len(kw_tokens)}]"]
+    logger.info(f"❌ Critère non trouvé: '{criterion}'")
     return False, 0.0, []
 
 # === FONCTIONS DE SCORING ===
@@ -604,7 +634,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             flags.append(crit)
     if flags:
         return {'score': 0, 'score_max': 14, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': {}, 'checklist': {}, 'detail': f"ÉLIMINÉ: {len(flags)} critère(s)"}
-    # Scoring
     exp_criteria = ["Pilotage Corporate", "Gestion portefeuille Corporate", "Développement portefeuille"]
     n_exp = sum(1 for c in exp_criteria if check_criterion_semantic(c, cv_text, lettre_text, poste, normalized, raw_full)[0])
     adequation = min(3, n_exp)
@@ -868,22 +897,36 @@ def analyze_cv_against_grille_semantic(cv_text, lettre_text, attestation_texts_l
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'score_final': score_final}}
 
-# === FONCTIONS D'EXPORT ===
-def generate_excel_report(candidats_data, poste_filter=None):
+# === FONCTIONS D'EXPORT AVEC FILTRES ===
+def get_filtered_candidats(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    """Filtre les candidats selon les critères"""
+    filtered = candidats_data
+    if poste_filter:
+        filtered = [c for c in filtered if c.get('poste') == poste_filter]
+    if statut_filter:
+        filtered = [c for c in filtered if c.get('statut') == statut_filter]
+    if date_start:
+        filtered = [c for c in filtered if c.get('date_candidature', '') >= date_start]
+    if date_end:
+        filtered = [c for c in filtered if c.get('date_candidature', '') <= date_end + 'T23:59:59']
+    if min_score is not None:
+        filtered = [c for c in filtered if int(c.get('score', 0)) >= min_score]
+    return filtered
+
+def generate_excel_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
     if not OPENPYXL_AVAILABLE:
         return None
+    filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
     wb = Workbook()
     ws = wb.active
     ws.title = "Candidatures"
-    headers = ['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature']
+    headers = ['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note']
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
         cell.alignment = Alignment(horizontal="center")
-    for row_idx, c in enumerate(candidats_data, 2):
-        if poste_filter and c.get('poste') != poste_filter:
-            continue
+    for row_idx, c in enumerate(filtered, 2):
         ws.cell(row=row_idx, column=1, value=c.get('numero_dossier', ''))
         ws.cell(row=row_idx, column=2, value=c.get('nom', ''))
         ws.cell(row=row_idx, column=3, value=c.get('prenom', ''))
@@ -893,6 +936,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
         ws.cell(row=row_idx, column=7, value=c.get('statut', ''))
         ws.cell(row=row_idx, column=8, value=c.get('score', 0))
         ws.cell(row=row_idx, column=9, value=c.get('date_candidature', '')[:10] if c.get('date_candidature') else '')
+        ws.cell(row=row_idx, column=10, value=c.get('note', ''))
     for col in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col)].width = 20
     output = io.BytesIO()
@@ -900,32 +944,45 @@ def generate_excel_report(candidats_data, poste_filter=None):
     output.seek(0)
     return output
 
-def generate_csv_report(candidats_data, poste_filter=None):
+def generate_csv_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
+    filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature'])
-    for c in candidats_data:
-        if poste_filter and c.get('poste') != poste_filter:
-            continue
+    writer.writerow(['Numéro Dossier', 'Nom', 'Prénom', 'Email', 'Téléphone', 'Poste', 'Statut', 'Score', 'Date Candidature', 'Note'])
+    for c in filtered:
         writer.writerow([
             c.get('numero_dossier', ''), c.get('nom', ''), c.get('prenom', ''),
             c.get('email', ''), c.get('telephone', ''), c.get('poste', ''),
             c.get('statut', ''), c.get('score', 0),
-            c.get('date_candidature', '')[:10] if c.get('date_candidature') else ''
+            c.get('date_candidature', '')[:10] if c.get('date_candidature') else '',
+            c.get('note', '')
         ])
     return io.BytesIO(output.getvalue().encode('utf-8-sig'))
 
-def generate_pdf_report(candidats_data, poste_filter=None):
+def generate_pdf_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
     if not REPORTLAB_AVAILABLE:
         return None
+    filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
     output = io.BytesIO()
     doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('TitleStyle', parent=styles['Title'], fontSize=16, alignment=TA_CENTER, spaceAfter=20)
+    subtitle_style = ParagraphStyle('SubtitleStyle', parent=styles['Normal'], fontSize=10, alignment=TA_CENTER, spaceAfter=15, textColor=colors.grey)
+    # Filtres info
+    filters_info = []
+    if poste_filter:
+        filters_info.append(f"Poste: {poste_filter}")
+    if date_start:
+        filters_info.append(f"Du: {date_start}")
+    if date_end:
+        filters_info.append(f"Au: {date_end}")
+    if statut_filter:
+        filters_info.append(f"Statut: {statut_filter}")
+    if min_score is not None:
+        filters_info.append(f"Score ≥ {min_score}")
+    filter_text = " | ".join(filters_info) if filters_info else "Tous les candidats"
     data = [['N° Dossier', 'Nom', 'Prénom', 'Poste', 'Statut', 'Score']]
-    for c in candidats_data:
-        if poste_filter and c.get('poste') != poste_filter:
-            continue
+    for c in filtered:
         data.append([
             c.get('numero_dossier', '')[:10],
             c.get('nom', '')[:15],
@@ -945,19 +1002,43 @@ def generate_pdf_report(candidats_data, poste_filter=None):
         ('GRID', (0, 0), (-1, -1), 1, colors.grey),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey])
     ]))
-    elements = [Paragraph("Rapport des Candidatures", title_style), Spacer(1, 0.5*cm), table]
+    elements = [
+        Paragraph("Rapport des Candidatures", title_style),
+        Paragraph(f"Filtres: {filter_text}", subtitle_style),
+        Spacer(1, 0.5*cm),
+        table,
+        Spacer(1, 1*cm),
+        Paragraph(f"Total: {len(filtered)} candidat(s) | Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}", styles['Normal'])
+    ]
     doc.build(elements)
     output.seek(0)
     return output
 
-def generate_word_report(candidats_data, poste_filter=None):
+def generate_word_report(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
     if not DOCX_AVAILABLE:
         return None
+    filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end, statut_filter, min_score)
     from docx.shared import Inches, Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     doc = Document()
     title = doc.add_heading('Rapport des Candidatures', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Filtres
+    filters_info = []
+    if poste_filter:
+        filters_info.append(f"Poste: {poste_filter}")
+    if date_start:
+        filters_info.append(f"Du: {date_start}")
+    if date_end:
+        filters_info.append(f"Au: {date_end}")
+    if statut_filter:
+        filters_info.append(f"Statut: {statut_filter}")
+    if min_score is not None:
+        filters_info.append(f"Score ≥ {min_score}")
+    filter_text = " | ".join(filters_info) if filters_info else "Tous les candidats"
+    doc.add_paragraph(f"Filtres: {filter_text}")
+    doc.add_paragraph(f"Total: {len(filtered)} candidat(s)")
+    doc.add_paragraph("")
     table = doc.add_table(rows=1, cols=6)
     table.style = 'Table Grid'
     hdr_cells = table.rows[0].cells
@@ -967,9 +1048,7 @@ def generate_word_report(candidats_data, poste_filter=None):
     hdr_cells[3].text = 'Poste'
     hdr_cells[4].text = 'Statut'
     hdr_cells[5].text = 'Score'
-    for c in candidats_data:
-        if poste_filter and c.get('poste') != poste_filter:
-            continue
+    for c in filtered:
         row_cells = table.add_row().cells
         row_cells[0].text = c.get('numero_dossier', '')[:10]
         row_cells[1].text = c.get('nom', '')[:20]
@@ -981,6 +1060,38 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.save(output)
     output.seek(0)
     return output
+
+# === TÉLÉCHARGEMENT ZIP AVEC FILTRES ===
+def download_dossiers_zip_filtered(candidats_data, poste_filter=None, date_start=None, date_end=None):
+    filtered = get_filtered_candidats(candidats_data, poste_filter, date_start, date_end)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for c in filtered:
+            cv_fn = c.get('cv_filename')
+            if cv_fn:
+                cv_bytes = download_file_from_supabase(cv_fn)
+                if cv_bytes:
+                    ext = cv_fn.rsplit('.', 1)[-1].lower() if '.' in cv_fn else 'pdf'
+                    zip_file.writestr(f"{c.get('prenom')}_{c.get('nom')}_CV.{ext}", cv_bytes)
+            lm_fn = c.get('lettre_filename')
+            if lm_fn:
+                lm_bytes = download_file_from_supabase(lm_fn)
+                if lm_bytes:
+                    ext = lm_fn.rsplit('.', 1)[-1].lower() if '.' in lm_fn else 'pdf'
+                    zip_file.writestr(f"{c.get('prenom')}_{c.get('nom')}_Lettre.{ext}", lm_bytes)
+            att_filenames = []
+            try:
+                att_filenames = json.loads(c.get('attestation_filenames', '[]'))
+            except:
+                pass
+            for idx, att_fn in enumerate(att_filenames):
+                if att_fn:
+                    att_bytes = download_file_from_supabase(att_fn)
+                    if att_bytes:
+                        ext = att_fn.rsplit('.', 1)[-1].lower() if '.' in att_fn else 'pdf'
+                        zip_file.writestr(f"{c.get('prenom')}_{c.get('nom')}_Certificat_{idx+1}.{ext}", att_bytes)
+    zip_buffer.seek(0)
+    return zip_buffer
 
 # === RÉANALYSE ===
 reanalyze_status = {"in_progress": False, "total": 0, "processed": 0, "success": 0, "errors": 0}
@@ -1218,6 +1329,9 @@ def list_candidats():
     poste_filter = request.args.get('poste', '')
     statut_filter = request.args.get('statut', '')
     search = request.args.get('search', '').lower()
+    date_start = request.args.get('date_start', '')
+    date_end = request.args.get('date_end', '')
+    min_score = request.args.get('min_score', type=int)
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
     response = supabase.table('candidats').select('*').execute()
@@ -1229,8 +1343,14 @@ def list_candidats():
             continue
         if statut_filter and c.get('statut') != statut_filter:
             continue
+        if min_score is not None and int(c.get('score', 0)) < min_score:
+            continue
+        if date_start and c.get('date_candidature', '') < date_start:
+            continue
+        if date_end and c.get('date_candidature', '') > date_end + 'T23:59:59':
+            continue
         if search:
-            hay = (f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')} {c.get('poste','')}").lower()
+            hay = (f"{c.get('nom','')} {c.get('prenom','')} {c.get('email','')} {c.get('poste','')} {c.get('numero_dossier','')}").lower()
             if search not in hay:
                 continue
         if c.get('score_breakdown'):
@@ -1318,28 +1438,37 @@ def get_reanalyze_status():
 def export_report(format):
     if not supabase:
         return jsonify({'error': 'Supabase non configuré'}), 500
+    # Récupérer tous les filtres
     poste_filter = request.args.get('poste', '')
+    statut_filter = request.args.get('statut', '')
+    date_start = request.args.get('date_start', '')
+    date_end = request.args.get('date_end', '')
+    min_score = request.args.get('min_score', type=int)
     response = supabase.table('candidats').select('*').execute()
     candidats = response.data if response.data else []
     format = format.lower()
     if format == 'excel':
-        output = generate_excel_report(candidats, poste_filter)
+        output = generate_excel_report(candidats, poste_filter, date_start, date_end, statut_filter, min_score)
         if not output:
             return jsonify({'error': 'Openpyxl non disponible'}), 500
-        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name='rapport_candidats.xlsx')
+        filename = f"rapport_candidats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=filename)
     elif format == 'csv':
-        output = generate_csv_report(candidats, poste_filter)
-        return send_file(output, mimetype='text/csv', as_attachment=True, download_name='rapport_candidats.csv')
+        output = generate_csv_report(candidats, poste_filter, date_start, date_end, statut_filter, min_score)
+        filename = f"rapport_candidats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        return send_file(output, mimetype='text/csv', as_attachment=True, download_name=filename)
     elif format == 'pdf':
-        output = generate_pdf_report(candidats, poste_filter)
+        output = generate_pdf_report(candidats, poste_filter, date_start, date_end, statut_filter, min_score)
         if not output:
             return jsonify({'error': 'Reportlab non disponible'}), 500
-        return send_file(output, mimetype='application/pdf', as_attachment=True, download_name='rapport_candidats.pdf')
+        filename = f"rapport_candidats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        return send_file(output, mimetype='application/pdf', as_attachment=True, download_name=filename)
     elif format == 'word':
-        output = generate_word_report(candidats, poste_filter)
+        output = generate_word_report(candidats, poste_filter, date_start, date_end, statut_filter, min_score)
         if not output:
             return jsonify({'error': 'python-docx non disponible'}), 500
-        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document', as_attachment=True, download_name='rapport_candidats.docx')
+        filename = f"rapport_candidats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+        return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document', as_attachment=True, download_name=filename)
     return jsonify({'error': 'Format non supporté'}), 400
 
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
@@ -1352,37 +1481,9 @@ def download_dossiers_zip():
     date_end = request.args.get('date_end', '')
     response = supabase.table('candidats').select('*').execute()
     candidats = response.data if response.data else []
-    if poste_filter:
-        candidats = [c for c in candidats if c.get('poste') == poste_filter]
-    if date_start:
-        candidats = [c for c in candidats if c.get('date_candidature', '') >= date_start]
-    if date_end:
-        candidats = [c for c in candidats if c.get('date_candidature', '') <= date_end + 'T23:59:59']
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for c in candidats:
-            cv_fn = c.get('cv_filename')
-            if cv_fn:
-                cv_bytes = download_file_from_supabase(cv_fn)
-                if cv_bytes:
-                    zip_file.writestr(f"{c.get('prenom')}_{c.get('nom')}_CV.pdf", cv_bytes)
-            lm_fn = c.get('lettre_filename')
-            if lm_fn:
-                lm_bytes = download_file_from_supabase(lm_fn)
-                if lm_bytes:
-                    zip_file.writestr(f"{c.get('prenom')}_{c.get('nom')}_Lettre.pdf", lm_bytes)
-            att_filenames = []
-            try:
-                att_filenames = json.loads(c.get('attestation_filenames', '[]'))
-            except:
-                pass
-            for idx, att_fn in enumerate(att_filenames):
-                if att_fn:
-                    att_bytes = download_file_from_supabase(att_fn)
-                    if att_bytes:
-                        zip_file.writestr(f"{c.get('prenom')}_{c.get('nom')}_Certificat_{idx+1}.pdf", att_bytes)
-    zip_buffer.seek(0)
-    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='dossiers_candidats.zip')
+    output = download_dossiers_zip_filtered(candidats, poste_filter, date_start, date_end)
+    filename = f"dossiers_candidats_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    return send_file(output, mimetype='application/zip', as_attachment=True, download_name=filename)
 
 @app.route('/api/recruteur/debug/test-gemini', methods=['POST'])
 @jwt_required()
@@ -1401,6 +1502,7 @@ def health_version():
         "version": "v4.0-complete",
         "postes_actifs": POSTES_ACTIFS,
         "gemini_active": GEMINI_ACTIVE,
+        "gemini_model": GEMINI_MODEL if GEMINI_ACTIVE else "inactif",
         "exports": {"excel": OPENPYXL_AVAILABLE, "pdf": REPORTLAB_AVAILABLE, "word": DOCX_AVAILABLE}
     }), 200
 
