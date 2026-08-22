@@ -434,23 +434,167 @@ GRILLE.update({
 
 # === KEYWORD MAPPING ===
 KEYWORD_MAPPING = {
-    "Expérience en banque": ["banque", "bancaire", "institution financiere", "bank", "financial institution"],
-    "Minimum 3 ans en crédit": ["credit", "risque", "analyse credit", "loan", "credit analysis"],
-    "Exposition aux garanties": ["garantie", "collateral", "surete", "hypotheque", "guarantee"],
-    "IFRS 9": ["ifrs 9", "ifrs9", "ecl", "provisionnement", "staging"],
-    "COBAC / conformité": ["cobac", "conformite", "bceao", "regulation bancaire", "compliance"],
-    "Suivi portefeuille": ["portefeuille", "impayes", "npl", "encours", "portfolio"],
-    "Pilotage Corporate": ["corporate", "pilotage", "grandes entreprises", "sme", "local corporate"],
-    "Management": ["management", "encadrement", "supervision", "equipe", "manager"],
-    "Cross-selling": ["cross selling", "ventes croisees", "upselling", "cross-sell"],
-    "NPL": ["npl", "non performing", "cir", "cost income"],
-    "CEMAC": ["cemac", "uemoa", "bceao", "beac", "afrique centrale"],
-    "Certification": ["ecobank", "moody's", "itb", "certification", "mba", "master"],
-    "Reporting": ["reporting", "tableau de bord", "dashboard", "rapport"],
-    "Système bancaire": ["finacle", "t24", "amplitude", "flexcube", "core banking"],
-    "IFRS 9 staging": ["ifrs 9", "stage 1", "stage 2", "stage 3", "ecl"],
-    "BEAC/GIMAC": ["beac", "gimac", "systac", "sygma", "swift"],
-    "Compensation": ["compensation", "interbancaire", "clearing", "chambre de compensation"]
+    # === CRITERES ELIMINATOIRES - BANQUE & FINANCE ===
+    "Expérience en banque": [
+        "banque", "bancaire", "institution financiere", "bank", "financial institution",
+        "etablissement financier", "credit institution", "societe financière", "finance company",
+        "organisme de credit", "lending institution", "maison de crédit", "credit house"
+    ],
+    "Minimum 3 ans en crédit": [
+        "credit", "risque", "analyse credit", "loan", "credit analysis",
+        "octroi de credit", "loan origination", "gestion du risque", "risk management",
+        "scoring credit", "credit scoring", "évaluation du risque", "risk assessment",
+        "dossier de credit", "loan file", "comité de credit", "credit committee"
+    ],
+    "Exposition aux garanties": [
+        "garantie", "collateral", "surete", "hypotheque", "guarantee",
+        "nantissement", "pledge", "caution", "bond", "sûreté réelle", "real security",
+        "sûreté personnelle", "personal guarantee", "gage", "mortgage", "fiducie", "trust"
+    ],
+    # === IFRS 9 & COMPTABILITE ===
+    "IFRS 9": [
+        "ifrs 9", "ifrs9", "ecl", "provisionnement", "staging",
+        "expected credit loss", "perte de credit attendue", "depreciation", "impairment",
+        "stage 1", "stage 2", "stage 3", "probabilité de défaut", "probability of default",
+        "perte en cas de défaut", "loss given default", "exposition au défaut", "exposure at default",
+        "norme ifrs", "ifrs standard", "ias 39", "classification comptable"
+    ],
+    "COBAC / conformité": [
+        "cobac", "conformite", "bceao", "regulation bancaire", "compliance",
+        "beac", "gimac", "reglementation", "regulatory", "supervision bancaire",
+        "banking supervision", "contrôle prudentiel", "prudential control", "bâle", "basel",
+        "bâle II", "bâle III", "basel II", "basel III", "ratio de solvabilité", "solvency ratio",
+        "lutte anti-blanchiment", "anti-money laundering", "aml", "kyc", "know your customer"
+    ],
+    # === GESTION DE PORTEFEUILLE ===
+    "Suivi portefeuille": [
+        "portefeuille", "impayes", "npl", "encours", "portfolio",
+        "non-performing loans", "créances douteuses", "doubtful debts", "recouvrement", "collection",
+        "qualité du portefeuille", "portfolio quality", "dépréciation", "write-off",
+        "surveillance continue", "ongoing monitoring", "review périodique", "periodic review",
+        "classement des risques", "risk classification", "cotation interne", "internal rating"
+    ],
+    # === MANAGEMENT & PILOTAGE ===
+    "Pilotage Corporate": [
+        "corporate", "pilotage", "grandes entreprises", "sme", "local corporate",
+        "entreprises corporates", "corporate clients", "segment entreprises", "business segment",
+        "direction commerciale", "commercial direction", "développement business", "business development",
+        "gestion de comptes clés", "key account management", "portefeuille corporate",
+        "financement entreprises", "corporate financing", "crédits structurés", "structured finance"
+    ],
+    "Management": [
+        "management", "encadrement", "supervision", "equipe", "manager",
+        "gestion d'équipe", "team management", "leadership", "chef de service", "head of",
+        "responsable", "supervisor", "coordinateur", "coordinator", "directeur", "director",
+        "animation d'équipe", "team leading", "mentorat", "mentoring", "formation équipe",
+        "évaluation collaborateurs", "performance review", "gestion des talents", "talent management"
+    ],
+    "Cross-selling": [
+        "cross selling", "ventes croisees", "upselling", "cross-sell",
+        "vente additionnelle", "additional sales", "produits complémentaires", "complementary products",
+        "offre globale", "comprehensive offer", "solution intégrée", "integrated solution",
+        "synergie produits", "product synergy", "multi-équipement", "multi-product"
+    ],
+    # === RISQUES & INDICATEURS ===
+    "NPL": [
+        "npl", "non performing", "cir", "cost income",
+        "ratio de coût", "cost ratio", "efficacité opérationnelle", "operational efficiency",
+        "taux de défaut", "default rate", "créances compromises", "impaired assets",
+        "provisionnement spécifique", "specific provisioning", "couverture des risques", "risk coverage"
+    ],
+    "CEMAC": [
+        "cemac", "uemoa", "bceao", "beac", "afrique centrale",
+        "zone cfa", "cfa zone", "cameroun", "gabon", "congo", "tchad", "guinée équatoriale",
+        "réglementation locale", "local regulation", "marché africain", "african market",
+        "contexte régional", "regional context", "environnement économique", "economic environment"
+    ],
+    "Certification": [
+        "ecobank", "moody's", "itb", "certification", "mba", "master",
+        "diplôme supérieur", "advanced degree", "formation spécialisée", "specialized training",
+        "accréditation", "accreditation", "qualification professionnelle", "professional qualification",
+        "cia", "acca", "cfa", "frm", "prmia", "garp", "association professionnelle"
+    ],
+    # === REPORTING & OUTILS ===
+    "Reporting": [
+        "reporting", "tableau de bord", "dashboard", "rapport",
+        "suivi d'activité", "activity tracking", "indicateurs de performance", "kpis",
+        "analyse périodique", "periodic analysis", "synthèse mensuelle", "monthly summary",
+        "présentation direction", "management presentation", "comité de pilotage", "steering committee"
+    ],
+    "Système bancaire": [
+        "finacle", "t24", "amplitude", "flexcube", "core banking",
+        "système d'information", "information system", "logiciel métier", "business software",
+        "plateforme bancaire", "banking platform", "application de gestion", "management application",
+        "base de données", "database", "sql", "oracle", "sap", "siebel"
+    ],
+    "IFRS 9 staging": [
+        "ifrs 9", "stage 1", "stage 2", "stage 3", "ecl",
+        "classification par stade", "stage classification", "dégradation du risque", "risk deterioration",
+        "augmentation significative", "significant increase", "sicr", "credit-impaired",
+        "actifs dépréciés", "impaired assets", "calcul des provisions", "provision calculation"
+    ],
+    # === COMPENSATION & OPERATIONS ===
+    "BEAC/GIMAC": [
+        "beac", "gimac", "systac", "sygma", "swift",
+        "compensation interbancaire", "interbank clearing", "règlement-livraison", "settlement",
+        "chambre de compensation", "clearing house", "opérations de paiement", "payment operations",
+        "flux financiers", "financial flows", "transactions interbancaires", "interbank transactions"
+    ],
+    "Compensation": [
+        "compensation", "interbancaire", "clearing", "chambre de compensation",
+        "règlement", "settlement", "nettoyage", "netting", "position nette", "net position",
+        "solde de compensation", "clearing balance", "suspens", "suspense account",
+        "rejets de paiement", "payment rejects", "incidents de règlement", "settlement fails"
+    ],
+    # === CYCLE DE CREDIT ===
+    "Cycle de crédit": [
+        "cycle de credit", "credit cycle", "processus credit", "loan process",
+        "instruction dossier", "file processing", "analyse demande", "loan application analysis",
+        "décision credit", "credit decision", "mise en place", "loan disbursement",
+        "suivi post-déblocage", "post-disbursement monitoring", "gestion échéances", "installment management"
+    ],
+    "Garanties": [
+        "garanties", "collateral", "sûretés", "securities",
+        "évaluation garantie", "collateral valuation", "prise de garantie", "collateral perfection",
+        "mainlevée", "release", "réalisation garantie", "collateral enforcement",
+        "couverture garantie", "collateral coverage", "taux de couverture", "coverage ratio"
+    ],
+    "Reportings": [
+        "reportings", "reports", "tableaux de bord", "dashboards",
+        "rapports réglementaires", "regulatory reports", "rapports internes", "internal reports",
+        "données consolidées", "consolidated data", "analyse statistique", "statistical analysis"
+    ],
+    "Rigueur documentaire": [
+        "rigueur documentaire", "documentary rigor", "conformité documentaire", "documentary compliance",
+        "vérification pièces", "document verification", "complétude dossier", "file completeness",
+        "archivage", "filing", "traçabilité", "traceability", "audit trail"
+    ],
+    # === COMPETENCES SPECIFIQUES ===
+    "Cash-flow analysis": [
+        "cash flow", "flux de trésorerie", "capacité remboursement", "repayment capacity",
+        "analyse financière", "financial analysis", "ratios financiers", "financial ratios",
+        "état de flux", "cash flow statement", "free cash flow", "cash disponible"
+    ],
+    "Montage de crédit": [
+        "montage credit", "loan structuring", "structuration financement", "financing structure",
+        "schéma de financement", "financing scheme", "plan de financement", "financing plan",
+        "termes et conditions", "terms and conditions", "covenants", "engagements"
+    ],
+    "Comités de crédit": [
+        "comité credit", "credit committee", "commission credit", "loan committee",
+        "présentation dossier", "file presentation", "avis credit", "credit opinion",
+        "décision collégiale", "collective decision", "validation hiérarchique", "hierarchical approval"
+    ],
+    # === DIPLÔMES & FORMATION ===
+    "Diplôme Bac+5": [
+        "bac+5", "master", "mba", "diplôme ingénieur", "engineering degree",
+        "grande école", "graduate school", "troisième cycle", "third cycle",
+        "doctorat", "phd", "deas", "descaf", "magistère"
+    ],
+    "Diplôme Bac+3": [
+        "bac+3", "licence", "bachelor", "degree",
+        "premier cycle", "first cycle", "formation supérieure", "higher education"
+    ]
 }
 
 _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
@@ -585,6 +729,7 @@ Réponds UNIQUEMENT avec ce JSON: {{"valide": true/false, "confiance": 0.0-1.0, 
         return None, 0.0, "", []
 
 def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_text=None, raw_full_text=None):
+    # === ETAPE 1: Essayer Gemini si disponible et pertinent ===
     if GEMINI_ACTIVE and poste in POSTES_AVEC_SCORING_12 + POSTES_AVEC_SCORING_14:
         try:
             valide, confiance, justification, elements = check_criterion_with_gemini(criterion, cv_text, lettre_text, poste)
@@ -596,27 +741,60 @@ def check_criterion_semantic(criterion, cv_text, lettre_text, poste, normalized_
                 return True, confiance, elements
         except Exception as e:
             logger.warning(f"Gemini fallback: {e}")
+    
+    # === ETAPE 2: Fallback robuste avec mots-clés élargis ===
     if raw_full_text:
         normalized, _ = normalize_for_matching(raw_full_text)
     else:
         normalized = normalized_text or ""
+    
+    # Récupérer les mots-clés du mapping (déjà enrichis en FR/EN avec synonymes)
     keywords = KEYWORD_MAPPING.get(criterion, [criterion.lower()])
     text_clean, text_tokens = normalize_for_matching(normalized)
+    
+    # Recherche exacte de mots-clés
     for kw in keywords:
         kw_clean, kw_tokens = normalize_for_matching(kw)
         if kw_clean in text_clean:
             logger.info(f"✅ Mots-clés: '{criterion}' trouvé via '{kw}'")
             return True, 1.0, [kw]
-        if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
-            ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 80:
-                logger.info(f"✅ Mots-clés fuzzy: '{criterion}' trouvé via '{kw}' (ratio: {ratio}%)")
-                return True, ratio/100, [f"{kw}~{ratio/100:.2f}"]
-        if kw_tokens and text_tokens:
-            common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(1, len(kw_tokens) * 0.5):
-                logger.info(f"✅ Mots-clés tokens: '{criterion}' trouvé via '{kw}' ({len(common)}/{len(kw_tokens)})")
-                return True, len(common)/len(kw_tokens), [f"{kw}[{len(common)}/{len(kw_tokens)}]"]
+    
+    # Recherche fuzzy (tolérance aux fautes/frappes)
+    if RAPIDFUZZ_AVAILABLE:
+        for kw in keywords:
+            kw_clean, kw_tokens = normalize_for_matching(kw)
+            if len(kw_clean) >= 3:
+                ratio = fuzz.partial_ratio(kw_clean, text_clean)
+                if ratio >= 75:  # Seuil abaissé à 75% pour plus de tolérance
+                    logger.info(f"✅ Mots-clés fuzzy: '{criterion}' trouvé via '{kw}' (ratio: {ratio}%)")
+                    return True, ratio/100, [f"{kw}~{ratio/100:.2f}"]
+    
+    # Recherche par tokens communs
+    if keywords and text_tokens:
+        for kw in keywords:
+            kw_clean, kw_tokens = normalize_for_matching(kw)
+            if kw_tokens:
+                common = set(kw_tokens) & set(text_tokens)
+                if len(common) >= max(1, len(kw_tokens) * 0.4):  # Seuil abaissé à 40%
+                    logger.info(f"✅ Mots-clés tokens: '{criterion}' trouvé via '{kw}' ({len(common)}/{len(kw_tokens)})")
+                    return True, len(common)/len(kw_tokens), [f"{kw}[{len(common)}/{len(kw_tokens)}]"]
+    
+    # === ETAPE 3: Recherche sémantique basique avec variantes ===
+    # Si le critère contient des mots importants, chercher leurs racines
+    crit_words = criterion.lower().split()
+    important_roots = []
+    for word in crit_words:
+        if len(word) >= 4:
+            # Extraire la racine (premiers caractères)
+            root = word[:max(4, len(word)//2)]
+            important_roots.append(root)
+    
+    if important_roots:
+        for root in important_roots:
+            if root in text_clean:
+                logger.info(f"✅ Racine trouvée: '{criterion}' via '{root}'")
+                return True, 0.6, [f"racine:{root}"]
+    
     logger.info(f"❌ Critère non trouvé: '{criterion}'")
     return False, 0.0, []
 
@@ -1387,8 +1565,78 @@ def update_candidat(token):
     note = data.get('note', '')
     if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
         return jsonify({'error': 'Statut invalide'}), 400
-    supabase.table('candidats').update({"statut": statut, "note": note}).eq('token', token).execute()
-    return jsonify({'message': 'Mis à jour', 'statut': statut}), 200
+    
+    # === AJOUTER LES RAISONS DE REJET/ELIMINATION SI APPLICABLE ===
+    update_data = {"statut": statut, "note": note}
+    
+    # Si le statut est "rejete", récupérer les raisons de l'analyse
+    if statut == 'rejete':
+        candidat = response.data[0]
+        score_breakdown_raw = candidat.get('score_breakdown', '{}')
+        flags_eliminatoires = []
+        
+        try:
+            score_breakdown = json.loads(score_breakdown_raw) if score_breakdown_raw else {}
+            # Récupérer les flags éliminatoires depuis l'analyse
+            flags_eliminatoires = score_breakdown.get('flags_eliminatoires', [])
+            
+            # Si pas de flags dans score_breakdown, vérifier les critères éliminatoires de la grille
+            if not flags_eliminatoires:
+                poste = candidat.get('poste', '')
+                grille = GRILLE.get(poste)
+                if grille and 'eliminatoire' in grille:
+                    # Re-vérifier rapidement les critères éliminatoires
+                    cv_text = ""
+                    lettre_text = ""
+                    attestation_texts = []
+                    
+                    # Télécharger et extraire le CV
+                    cv_fn = candidat.get('cv_filename')
+                    if cv_fn:
+                        cv_bytes = download_file_from_supabase(cv_fn)
+                        if cv_bytes:
+                            cv_text = extract_text_robust_from_bytes(cv_bytes, cv_fn)
+                    
+                    # Télécharger et extraire la lettre
+                    lm_fn = candidat.get('lettre_filename')
+                    if lm_fn:
+                        lm_bytes = download_file_from_supabase(lm_fn)
+                        if lm_bytes:
+                            lettre_text = extract_text_robust_from_bytes(lm_bytes, lm_fn)
+                    
+                    # Télécharger et extraire les attestations
+                    att_raw = candidat.get('attestation_filenames', '[]')
+                    try:
+                        att_fns = json.loads(att_raw) if isinstance(att_raw, str) else (att_raw or [])
+                    except:
+                        att_fns = []
+                    
+                    for att_fn in (att_fns or []):
+                        att_bytes = download_file_from_supabase(att_fn)
+                        if att_bytes:
+                            att_text = extract_text_robust_from_bytes(att_bytes, att_fn)
+                            if att_text:
+                                attestation_texts.append(att_text)
+                    
+                    # Vérifier chaque critère éliminatoire
+                    for crit in grille.get('eliminatoire', []):
+                        ok, _, _ = check_criterion_semantic(crit, cv_text, lettre_text, poste)
+                        if not ok:
+                            flags_eliminatoires.append(f"❌ {crit}")
+        
+        except Exception as e:
+            logger.error(f"Erreur récupération raisons rejet: {e}")
+        
+        # Stocker les raisons dans la note si elle est vide, ou en suffixe
+        if flags_eliminatoires:
+            raisons_text = " | ".join(flags_eliminatoires[:5])  # Max 5 raisons
+            if note:
+                update_data["note"] = f"{note} | REJET: {raisons_text}"
+            else:
+                update_data["note"] = f"REJET: {raisons_text}"
+    
+    supabase.table('candidats').update(update_data).eq('token', token).execute()
+    return jsonify({'message': 'Mis à jour', 'statut': statut, 'raisons_rejet': update_data.get('note', '')}), 200
 
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
