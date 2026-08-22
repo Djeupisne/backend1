@@ -9,7 +9,7 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 
-# === APP (défini avant Gemini pour logger) ===
+# === APP ===
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('pdfminer').setLevel(logging.WARNING)
@@ -104,10 +104,10 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
 
-# === GEMINI (API REST DIRECTE - VERSION V1) ===
-def call_gemini_api(prompt, api_key, model="gemini-1.5-flash"):
-    """Appelle l'API Gemini via REST avec la version v1"""
-    # Utiliser l'API v1 au lieu de v1beta
+# === GEMINI (API REST DIRECTE AVEC MODÈLES COMPATIBLES) ===
+def call_gemini_api(prompt, api_key, model="gemini-pro"):
+    """Appelle l'API Gemini via REST avec les modèles compatibles"""
+    # Utiliser le bon format d'URL pour l'API v1
     url = f"https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={api_key}"
     
     payload = {
@@ -132,30 +132,36 @@ def call_gemini_api(prompt, api_key, model="gemini-1.5-flash"):
         logger.warning(f"Gemini request error: {e}")
         return None
 
-# === CONFIGURATION GEMINI ===
+# === CONFIGURATION GEMINI AVEC MODÈLES COMPATIBLES ===
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-pro")
 
 GEMINI_ACTIVE = False
 if GEMINI_API_KEY:
     try:
-        # Tester avec un appel simple
-        test_prompt = "Test"
-        test_result = call_gemini_api(test_prompt, GEMINI_API_KEY, GEMINI_MODEL)
-        if test_result and "candidates" in test_result:
-            GEMINI_ACTIVE = True
-            logger.info(f"✅ Gemini activé avec succès: {GEMINI_MODEL}")
-        else:
-            # Essayer d'autres modèles
-            for model in ["gemini-1.5-pro", "gemini-1.0-pro"]:
-                test_result = call_gemini_api(test_prompt, GEMINI_API_KEY, model)
-                if test_result and "candidates" in test_result:
-                    GEMINI_ACTIVE = True
-                    GEMINI_MODEL = model
-                    logger.info(f"✅ Gemini activé avec succès: {model}")
-                    break
-            if not GEMINI_ACTIVE:
-                logger.warning("❌ Aucun modèle Gemini disponible")
+        # Liste des modèles compatibles (du plus récent au plus ancien)
+        models_to_try = [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro", 
+            "gemini-pro",
+            "gemini-1.0-pro",
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro",
+            "models/gemini-pro"
+        ]
+        
+        for model in models_to_try:
+            test_result = call_gemini_api("Test", GEMINI_API_KEY, model)
+            if test_result and "candidates" in test_result:
+                GEMINI_ACTIVE = True
+                GEMINI_MODEL = model
+                logger.info(f"✅ Gemini activé avec succès: {model}")
+                break
+            # Petit délai entre les tentatives
+            time.sleep(0.5)
+            
+        if not GEMINI_ACTIVE:
+            logger.warning("❌ Aucun modèle Gemini disponible")
     except Exception as e:
         logger.warning(f"⚠️ Gemini erreur: {e}")
 else:
@@ -443,13 +449,12 @@ GRILLE.update({
     }
 })
 
-# === KEYWORD MAPPING ÉLARGI ===
+# === KEYWORD MAPPING ===
 KEYWORD_MAPPING = {
     "Aucune expérience ou formation dans un domaine bancaire, financier ou comptable": [
         "banque", "bancaire", "finance", "comptabilite", "comptable",
         "audit", "gestion", "economie", "banking", "accounting",
-        "financial", "business", "management", "credit", "risque",
-        "institution financiere", "etablissement bancaire"
+        "financial", "business", "management", "credit", "risque"
     ],
     "Niveau de diplôme inférieur à Bac +3": [
         "bac+3", "bac +3", "licence", "bachelor", "bts", "dut",
@@ -459,13 +464,11 @@ KEYWORD_MAPPING = {
     "Aucune notion du crédit bancaire": [
         "credit", "credit bancaire", "financement", "octroi", "pret",
         "garantie", "remboursement", "portefeuille", "loan",
-        "lending", "borrowing", "credit analysis", "analyse credit",
-        "instruction credit", "dossier credit", "montage credit"
+        "lending", "borrowing", "credit analysis", "analyse credit"
     ],
     "Exposition au cycle de crédit": [
         "cycle credit", "approbation", "mise en place", "suivi echeances",
-        "credit approval", "loan processing", "credit monitoring",
-        "repayment", "deblocage", "documentation credit"
+        "credit approval", "loan processing", "credit monitoring"
     ],
     "Gestion ou participation au suivi des garanties": [
         "garantie", "collateral", "suivi garanties", "enregistrement garantie",
@@ -474,23 +477,20 @@ KEYWORD_MAPPING = {
     ],
     "Production ou contribution à des reportings": [
         "reporting", "tableau de bord", "dashboard", "rapport portefeuille",
-        "kpi", "indicateurs", "portfolio report", "credit report",
-        "production de rapports", "reporting credit"
+        "kpi", "indicateurs", "portfolio report", "credit report"
     ],
     "Expérience avec un système bancaire": [
         "finacle", "t24", "amplitude", "flexcube", "core banking",
-        "systeme bancaire", "banking system", "temenos", "sigma",
-        "banking software", "credit system", "portfolio tool"
+        "systeme bancaire", "banking system", "temenos", "sigma"
     ],
     "Détection ou signalement d'anomalies": [
         "anomalie", "impaye", "depassement", "incident", "alerte",
-        "default", "overdue", "past due", "exception", "signalement",
-        "detection", "remontee", "non-payment"
+        "default", "overdue", "past due", "exception", "signalement"
     ],
     "Aucune expérience dans le secteur bancaire ou financier réglementé": [
         "banque", "bancaire", "etablissement financier", "institution financiere",
         "banque commerciale", "commercial bank", "financial institution",
-        "credit institution", "ecobank", "orabank", "uba", "bank of africa"
+        "ecobank", "orabank", "uba", "bank of africa"
     ],
     "Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)": [
         "master", "bac+5", "bac +5", "mba", "ingenieur", "doctorat",
