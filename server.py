@@ -1926,7 +1926,7 @@ def generate_ranking_for_poste(poste, candidats_data):
         c['ranking_recommendation'] = get_recommandation_from_score(c.get('score', 0), poste)
     return pool
 def generate_excel_report(candidats_data, poste_filter=None):
-    """Génère un rapport Excel professionnel avec analyses claires et compréhensibles"""
+    """Génère un rapport Excel avec des décisions cohérentes basées sur les critères éliminatoires"""
     if not OPENPYXL_AVAILABLE:
         return None
     wb = Workbook()
@@ -1935,7 +1935,6 @@ def generate_excel_report(candidats_data, poste_filter=None):
     
     # === PAGE 1 : VUE D'ENSEMBLE ===
     ws_summary = wb.create_sheet(title="📊 Vue d'ensemble")
-    summary_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     summary_border = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'), top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
     
     ws_summary.merge_cells('A1:E1')
@@ -1953,7 +1952,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
     total = len(candidats_data)
     retenus = sum(1 for c in candidats_data if c.get('statut') in ('retenu', 'Retenu'))
     entretien = sum(1 for c in candidats_data if c.get('statut') in ('entretien', 'Entretien'))
-    rejetes = sum(1 for c in candidats_data if c.get('statut') in ('rejete', 'Rejete', 'exclu', 'Exclu', 'rejete(eliminatoire)', 'rejet_eliminatoire'))
+    rejetes = sum(1 for c in candidats_data if c.get('statut') in ('rejete', 'Rejete', 'exclu', 'Exclu', 'rejete(eliminatoire)'))
     en_attente = total - retenus - entretien - rejetes
     
     ws_summary['A4'] = "📈 STATISTIQUES GLOBALES"
@@ -1996,9 +1995,9 @@ def generate_excel_report(candidats_data, poste_filter=None):
     ws_summary.row_dimensions[9].height = 25
     
     legend_data = [
-        ["🟢 RETENU", "Profil validé - correspond aux critères du poste"],
-        ["🟡 ENTRETIEN", "Profil à convoquer en entretien pour approfondir"],
-        ["🔴 REJETÉ", "Profil ne correspond pas aux critères requis"],
+        ["🟢 RETENU", "Profil validé - tous les critères éliminatoires sont satisfaits"],
+        ["🟡 ENTRETIEN", "Critères éliminatoires satisfaits, profil à approfondir"],
+        ["🔴 REJETÉ", "Un ou plusieurs critères éliminatoires non satisfaits"],
         ["⏳ EN ATTENTE", "Dossier en attente d'évaluation"]
     ]
     for row_idx, (label, desc) in enumerate(legend_data, 10):
@@ -2030,8 +2029,112 @@ def generate_excel_report(candidats_data, poste_filter=None):
     else:
         for poste in postes_to_export:
             candidats_poste = [c for c in candidats_data if c.get('poste') == poste]
-            # Trier par score décroissant
-            candidats_poste.sort(key=lambda x: -int(x.get('score', 0)))
+            
+            # === CORRECTION : Calcul cohérent du score et de la décision ===
+            for c in candidats_poste:
+                sb = c.get('score_breakdown_parsed', {})
+                flags = c.get('flags_eliminatoires_parsed', [])
+                
+                # 1. Vérifier si des critères éliminatoires sont manquants
+                has_elim_failure = sb.get('bloc1_eliminatoire', False) or len(flags) > 0
+                
+                # 2. Récupérer le score brut
+                raw_score = int(c.get('score', 0))
+                score_max = get_score_max_for_poste(poste)
+                
+                # 3. Récupérer les motifs détaillés depuis les flags
+                elim_motifs = []
+                if isinstance(flags, list) and flags:
+                    for f in flags:
+                        clean_f = f.replace('❌', '').replace('⚠️', '').strip()
+                        if clean_f and len(clean_f) > 5:
+                            elim_motifs.append(clean_f)
+                
+                # 4. SI CRITÈRES ÉLIMINATOIRES NON SATISFAITS → SCORE = 0
+                if has_elim_failure:
+                    c['_score_corrige'] = 0
+                    c['_decision_corrigee'] = '🔴 Rejeté'
+                    c['_elim_motifs'] = elim_motifs
+                    c['_motif_corrige'] = "🔴 REJETÉ - Critères éliminatoires non satisfaits :\n"
+                    if elim_motifs:
+                        for m in elim_motifs[:4]:
+                            c['_motif_corrige'] += f"  • {m}\n"
+                        if len(elim_motifs) > 4:
+                            c['_motif_corrige'] += f"  • +{len(elim_motifs)-4} autre(s)\n"
+                    else:
+                        c['_motif_corrige'] += "  • Un ou plusieurs critères éliminatoires non remplis\n"
+                    continue
+                
+                # 5. SI CRITÈRES ÉLIMINATOIRES SATISFAITS → GARDER LE SCORE ET DÉCIDER
+                c['_score_corrige'] = raw_score
+                c['_elim_motifs'] = []
+                
+                # Déterminer la décision basée sur le score
+                if poste in POSTES_AVEC_SCORING_12:
+                    if raw_score >= 10:
+                        c['_decision_corrigee'] = '🟢 Retenu'
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE\n"
+                    elif raw_score >= 7:
+                        c['_decision_corrigee'] = '🟡 Entretien'
+                        c['_motif_corrige'] = "🟡 À CONVOQUER EN ENTRETIEN - Vivier de réserve\n"
+                    else:
+                        c['_decision_corrigee'] = '🔴 Rejeté'
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                elif poste in POSTES_AVEC_SCORING_14:
+                    if raw_score >= 11:
+                        c['_decision_corrigee'] = '🟢 Retenu'
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE\n"
+                    elif raw_score >= 7:
+                        c['_decision_corrigee'] = '🟡 Entretien'
+                        c['_motif_corrige'] = "🟡 POTENTIEL À ÉVALUER EN ENTRETIEN\n"
+                    else:
+                        c['_decision_corrigee'] = '🔴 Rejeté'
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                elif poste in POSTES_AVEC_SCORING_100:
+                    if raw_score >= 80:
+                        c['_decision_corrigee'] = '🟢 Retenu'
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ - Shortlist\n"
+                    elif raw_score >= 70:
+                        c['_decision_corrigee'] = '🟡 Entretien'
+                        c['_motif_corrige'] = "🟡 À CONSIDÉRER\n"
+                    elif raw_score >= 60:
+                        c['_decision_corrigee'] = '🟡 Entretien'
+                        c['_motif_corrige'] = "🟡 FAIBLE - À évaluer avec prudence\n"
+                    else:
+                        c['_decision_corrigee'] = '🔴 Rejeté'
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                else:
+                    if raw_score >= 8:
+                        c['_decision_corrigee'] = '🟢 Retenu'
+                        c['_motif_corrige'] = "🟢 PROFIL RECOMMANDÉ\n"
+                    elif raw_score >= 6:
+                        c['_decision_corrigee'] = '🟡 Entretien'
+                        c['_motif_corrige'] = "🟡 À CONVOQUER EN ENTRETIEN\n"
+                    else:
+                        c['_decision_corrigee'] = '🔴 Rejeté'
+                        c['_motif_corrige'] = "🔴 NON RETENU - Score insuffisant\n"
+                
+                # Ajouter les détails du scoring
+                details = c.get('analyse_details_parsed', {})
+                points_forts = details.get('points_forts', [])
+                points_vigilance = details.get('points_vigilance', [])
+                
+                if points_forts and raw_score >= 7:
+                    for pf in points_forts[:2]:
+                        c['_motif_corrige'] += f"  ✓ {pf}\n"
+                
+                if points_vigilance and raw_score < 10:
+                    for pv in points_vigilance[:2]:
+                        c['_motif_corrige'] += f"  ⚠ {pv}\n"
+                
+                if not points_forts and raw_score >= 7:
+                    c['_motif_corrige'] += "  ✓ Profil correspond aux exigences du poste\n"
+                
+                if not points_vigilance and raw_score < 7:
+                    c['_motif_corrige'] += "  • Profil ne correspond pas aux exigences du poste\n"
+            
+            # Trier par score corrigé décroissant
+            candidats_poste.sort(key=lambda x: -x.get('_score_corrige', 0))
             
             sheet_name = f"{poste[:27]}" if len(poste) > 28 else poste
             sheet_name = sheet_name[:31]
@@ -2042,7 +2145,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
             header_border = Border(left=Side(style='medium', color='1F4E79'), right=Side(style='medium', color='1F4E79'), top=Side(style='medium', color='1F4E79'), bottom=Side(style='medium', color='1F4E79'))
             cell_border = Border(left=Side(style='thin', color='CCCCCC'), right=Side(style='thin', color='CCCCCC'), top=Side(style='thin', color='CCCCCC'), bottom=Side(style='thin', color='CCCCCC'))
             
-            ws.merge_cells('A1:I1')
+            ws.merge_cells('A1:G1')
             title_cell = ws['A1']
             title_cell.value = f"🎯 CANDIDATURES - {poste}"
             title_cell.font = Font(bold=True, size=14, color="FFFFFF")
@@ -2052,23 +2155,19 @@ def generate_excel_report(candidats_data, poste_filter=None):
             
             score_max = get_score_max_for_poste(poste)
             nb_candidats = len(candidats_poste)
-            scores = [int(c.get('score', 0)) for c in candidats_poste]
+            scores = [c.get('_score_corrige', 0) for c in candidats_poste]
             meilleur_score = max(scores) if scores else 0
             moyenne_score = sum(scores) / nb_candidats if nb_candidats > 0 else 0
             
-            ws.merge_cells('A2:I2')
+            ws.merge_cells('A2:G2')
             subtitle_cell = ws['A2']
             subtitle_cell.value = f"📊 {nb_candidats} candidat(s) | Score max: {meilleur_score}/{score_max} | Moyenne: {moyenne_score:.1f}/{score_max}"
             subtitle_cell.font = Font(italic=True, size=10, color="333333")
             subtitle_cell.alignment = Alignment(horizontal='center')
             ws.row_dimensions[2].height = 25
             
-            # EN-TÊTES SIMPLIFIÉES
-            headers = [
-                'Rang', 'N° Dossier', 'Candidat', 'Email', 
-                f'Score\n/{score_max}', 'Décision', 'Motif détaillé'
-            ]
-            
+            # EN-TÊTES
+            headers = ['Rang', 'N° Dossier', 'Candidat', 'Email', f'Score\n/{score_max}', 'Décision', 'Motif détaillé']
             for col, h in enumerate(headers, 1):
                 cell = ws.cell(row=3, column=col, value=h)
                 cell.font = header_font
@@ -2077,217 +2176,46 @@ def generate_excel_report(candidats_data, poste_filter=None):
                 cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
             ws.row_dimensions[3].height = 40
             
-            # LARGEURS DES COLONNES OPTIMISÉES
             col_widths = [6, 14, 30, 35, 12, 18, 60]
             for col, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(col)].width = w
             
             for row_i, cand in enumerate(candidats_poste, 4):
-                sb = cand.get('score_breakdown_parsed', {})
-                elim = sb.get('bloc1_eliminatoire', False)
-                sous_scores = sb.get('sous_scores', {})
-                flags = cand.get('flags_eliminatoires_parsed', [])
-                
-                score_candidat = int(cand.get('score', 0))
+                score = cand.get('_score_corrige', 0)
+                decision = cand.get('_decision_corrigee', '⏳ En Attente')
+                motif = cand.get('_motif_corrige', 'Analyse non disponible')
                 nom_complet = f"{cand.get('prenom', '')} {cand.get('nom', '')}".strip() or '–'
                 
-                # === CONSTRUCTION DU MOTIF DÉTAILLÉ ===
-                motif_parts = []
-                
-                # 1. Vérifier si éliminatoire
-                if elim:
-                    motif_parts.append("🔴 ÉLIMINATOIRE - Critères non satisfaits :")
-                    if isinstance(flags, list) and flags:
-                        for f in flags[:3]:
-                            clean_f = f.replace('❌', '').replace('⚠️', '').strip()
-                            if clean_f and len(clean_f) > 5:
-                                motif_parts.append(f"  • {clean_f}")
-                        if len(flags) > 3:
-                            motif_parts.append(f"  • +{len(flags)-3} autre(s)")
-                    else:
-                        motif_parts.append("  • Un ou plusieurs critères éliminatoires non remplis")
-                else:
-                    # 2. Analyse détaillée selon le score
-                    details = cand.get('analyse_details_parsed', {})
-                    points_forts = details.get('points_forts', [])
-                    points_vigilance = details.get('points_vigilance', [])
-                    synthese = details.get('synthese_recruteur', '')
-                    
-                    # Récupérer les sous-scores pour une analyse fine
-                    if poste == "Chef de Section Compensation":
-                        adeq = sous_scores.get("Adéquation de l'expérience (compensation interbancaire, back-office bancaire)", 0)
-                        expo = sous_scores.get("Exposition aux règles BEAC / GIMAC et aux systèmes de compensation (SYSTAC, SYGMA, SWIFT)", 0)
-                        enc = sous_scores.get("Capacité d'encadrement et de management d'équipe opérationnelle", 0)
-                        coh = sous_scores.get("Cohérence et progression du parcours professionnel", 0)
-                        
-                        if score_candidat >= 10:
-                            motif_parts.append("🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE")
-                            if adeq >= 2.5:
-                                motif_parts.append("  ✓ Bonne adéquation en compensation interbancaire")
-                            if expo >= 2.5:
-                                motif_parts.append("  ✓ Maîtrise des règles BEAC/GIMAC")
-                            if enc >= 1.5:
-                                motif_parts.append("  ✓ Capacité managériale démontrée")
-                            if adeq < 2:
-                                motif_parts.append("  ⚠ Adéquation à renforcer")
-                        elif score_candidat >= 7:
-                            motif_parts.append("🟡 À CONVOQUER EN ENTRETIEN - Vivier de réserve")
-                            if enc >= 1.5:
-                                motif_parts.append("  ✓ Capacité managériale")
-                            if expo >= 2:
-                                motif_parts.append("  ✓ Exposition BEAC/GIMAC")
-                            if adeq < 2:
-                                motif_parts.append("  ⚠ Expérience en compensation à vérifier")
-                            if coh < 1.5:
-                                motif_parts.append("  ⚠ Cohérence du parcours à approfondir")
-                        else:
-                            motif_parts.append("🔴 NON RETENU - Profil ne correspond pas")
-                            if adeq < 1.5:
-                                motif_parts.append("  • Expérience en compensation insuffisante")
-                            if expo < 1.5:
-                                motif_parts.append("  • Manque d'expertise BEAC/GIMAC")
-                            if enc < 0.5:
-                                motif_parts.append("  • Absence de management démontré")
-                                
-                    elif poste == "Chargé(e) d'Administration de Crédit":
-                        adeq = sous_scores.get("Adéquation de l'expérience (administration de crédit, gestion des risques, analyse crédit)", 0)
-                        ifrs = sous_scores.get("Exposition aux normes IFRS 9 et à la gestion du portefeuille de crédit", 0)
-                        rig = sous_scores.get("Rigueur opérationnelle et maîtrise des outils (Excel, système bancaire, classement)", 0)
-                        coh = sous_scores.get("Cohérence et progression du parcours professionnel", 0)
-                        
-                        if score_candidat >= 10:
-                            motif_parts.append("🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE")
-                            if adeq >= 2.5:
-                                motif_parts.append("  ✓ Bonne expérience en administration de crédit")
-                            if ifrs >= 2.5:
-                                motif_parts.append("  ✓ Maîtrise IFRS 9 et gestion de portefeuille")
-                            if rig >= 1.5:
-                                motif_parts.append("  ✓ Rigueur opérationnelle et outils maîtrisés")
-                        elif score_candidat >= 7:
-                            motif_parts.append("🟡 À CONVOQUER EN ENTRETIEN - Vivier de réserve")
-                            if adeq >= 2:
-                                motif_parts.append("  ✓ Expérience crédit intéressante")
-                            if ifrs >= 2:
-                                motif_parts.append("  ✓ Connaissance IFRS 9")
-                            if adeq < 2:
-                                motif_parts.append("  ⚠ Expérience crédit à approfondir")
-                            if ifrs < 1.5:
-                                motif_parts.append("  ⚠ IFRS 9 à renforcer")
-                        else:
-                            motif_parts.append("🔴 NON RETENU - Profil ne correspond pas")
-                            if adeq < 1.5:
-                                motif_parts.append("  • Expérience en administration crédit insuffisante")
-                            if ifrs < 1:
-                                motif_parts.append("  • Absence de maîtrise IFRS 9")
-                            if rig < 0.5:
-                                motif_parts.append("  • Manque de rigueur opérationnelle")
-                    
-                    elif poste == "Chef de Division Local Corporate":
-                        adeq = sous_scores.get("Adéquation de l'expérience en local/corporate Banking avec gestion d'un portefeuille entreprises et objectifs atteints", 0)
-                        mgmt = sous_scores.get("Capacité managériale démontrée avec encadrement, développement d'équipe et pilotage d'une P&L", 0)
-                        risque = sous_scores.get("Maîtrise du risque de crédit et de la qualité du portefeuille avec gestion du NPL, du CIR et des provisions", 0)
-                        cs = sous_scores.get("Exposition au cross-selling, au Cash Management ou aux solutions TSG / Trade Finance", 0)
-                        
-                        if score_candidat >= 11:
-                            motif_parts.append("🟢 PROFIL RECOMMANDÉ POUR ENTRETIEN PRIORITAIRE")
-                            if adeq >= 2.5:
-                                motif_parts.append("  ✓ Forte expérience Corporate")
-                            if mgmt >= 2.5:
-                                motif_parts.append("  ✓ Capacité managériale solide")
-                            if risque >= 1.5:
-                                motif_parts.append("  ✓ Maîtrise du risque crédit")
-                            if cs >= 1.5:
-                                motif_parts.append("  ✓ Orientation commerciale et cross-selling")
-                        elif score_candidat >= 7:
-                            motif_parts.append("🟡 POTENTIEL À ÉVALUER EN ENTRETIEN")
-                            if adeq >= 2:
-                                motif_parts.append("  ✓ Expérience Corporate intéressante")
-                            if mgmt >= 2:
-                                motif_parts.append("  ✓ Management d'équipe")
-                            if adeq < 2:
-                                motif_parts.append("  ⚠ Expérience Corporate à approfondir")
-                            if mgmt < 1.5:
-                                motif_parts.append("  ⚠ Management à évaluer")
-                        else:
-                            motif_parts.append("🔴 NON RETENU - Profil ne correspond pas")
-                            if adeq < 1.5:
-                                motif_parts.append("  • Expérience Corporate insuffisante")
-                            if mgmt < 1:
-                                motif_parts.append("  • Manque d'expérience managériale")
-                            if risque < 0.5:
-                                motif_parts.append("  • Absence de gestion du risque crédit")
-                    
-                    else:
-                        # Postes scoring /100 ou autres
-                        if score_candidat >= 80:
-                            motif_parts.append("🟢 PROFIL RECOMMANDÉ - Shortlist")
-                            if points_forts:
-                                for pf in points_forts[:3]:
-                                    motif_parts.append(f"  ✓ {pf}")
-                        elif score_candidat >= 70:
-                            motif_parts.append("🟡 À CONSIDÉRER")
-                            if points_forts:
-                                for pf in points_forts[:2]:
-                                    motif_parts.append(f"  ✓ {pf}")
-                            if points_vigilance:
-                                for pv in points_vigilance[:2]:
-                                    motif_parts.append(f"  ⚠ {pv}")
-                        elif score_candidat >= 60:
-                            motif_parts.append("🟡 FAIBLE - À évaluer avec prudence")
-                            if points_vigilance:
-                                for pv in points_vigilance[:3]:
-                                    motif_parts.append(f"  ⚠ {pv}")
-                        else:
-                            motif_parts.append("🔴 NON RETENU")
-                            if points_vigilance:
-                                for pv in points_vigilance[:3]:
-                                    motif_parts.append(f"  • {pv}")
-                            else:
-                                motif_parts.append("  • Score insuffisant par rapport aux exigences du poste")
-                
-                # Ajouter la synthèse si disponible
-                if synthese and len(synthese) > 5 and not elim:
-                    motif_parts.append("")
-                    motif_parts.append(f"📝 {synthese[:120]}")
-                
-                motif_text = "\n".join(motif_parts) if motif_parts else "Analyse non disponible"
-                
-                # === DÉCISION UNIFIÉE ===
-                if elim:
-                    decision = "🔴 Rejeté"
-                    rec_color = "FF0000"
-                elif score_candidat >= get_score_max_for_poste(poste) * 0.8:
-                    decision = "🟢 Retenu"
+                # Couleur selon décision
+                if '🟢' in decision:
                     rec_color = "00B050"
-                elif score_candidat >= get_score_max_for_poste(poste) * 0.5:
-                    decision = "🟡 Entretien"
+                elif '🟡' in decision:
                     rec_color = "FFC000"
                 else:
-                    decision = "🔴 Rejeté"
                     rec_color = "FF0000"
                 
                 row_data = [
-                    row_i - 3,  # Rang
+                    row_i - 3,
                     cand.get('numero_dossier', '') or '–',
                     nom_complet,
                     cand.get('email', '') or '–',
-                    f"{score_candidat}/{score_max}",
+                    f"{score}/{score_max}",
                     decision,
-                    motif_text
+                    motif
                 ]
                 
                 for col, val in enumerate(row_data, 1):
                     cell = ws.cell(row=row_i, column=col, value=val if val is not None else '')
                     cell.border = cell_border
                     
-                    if col == 5:  # Score
+                    if col == 5:
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                         cell.font = Font(bold=True, size=11)
-                    elif col == 6:  # Décision
+                    elif col == 6:
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                         cell.fill = PatternFill(start_color=rec_color, end_color=rec_color, fill_type="solid")
                         cell.font = Font(color="FFFFFF" if rec_color != "FFC000" else "000000", bold=True, size=10)
-                    elif col == 7:  # Motif
+                    elif col == 7:
                         cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
                         cell.font = Font(size=9)
                     else:
@@ -2297,8 +2225,7 @@ def generate_excel_report(candidats_data, poste_filter=None):
                         if cell.fill.start_color.rgb == "00000000" or not cell.fill:
                             cell.fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")
                 
-                # Ajuster la hauteur selon le nombre de lignes dans le motif
-                motif_lines = len(motif_text.split('\n')) if motif_text else 1
+                motif_lines = len(motif.split('\n')) if motif else 1
                 ws.row_dimensions[row_i].height = max(40, min(120, motif_lines * 15))
     
     if 'Sheet' in wb.sheetnames:
