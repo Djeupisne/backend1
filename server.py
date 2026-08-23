@@ -145,7 +145,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v5.4-final',
+        'version': 'v5.5-final',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -153,7 +153,8 @@ def health_check():
             'openpyxl_available': OPENPYXL_AVAILABLE,
             'ia_available': IA_ANALYSE_ACTIVE,
             'scoring_strict': True,
-            'manual_status_priority': True
+            'manual_status_priority': True,
+            'auto_width_excel': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -1798,7 +1799,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
                     cell.fill = PatternFill(start_color=rec_color, end_color=rec_color, fill_type="solid")
                     cell.font = Font(color="FFFFFF" if rec_color != "FFC000" else "000000", bold=True, size=10)
                 elif col == 7:
-                    cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+                    cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
                     cell.font = Font(size=9)
                 else:
                     cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
@@ -1807,6 +1808,22 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
                         cell.fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")
             motif_lines = len(motif.split('\n')) if motif else 1
             ws.row_dimensions[row_i].height = max(40, min(150, motif_lines * 15))
+        for col in range(1, 8):
+            column_letter = get_column_letter(col)
+            max_length = 0
+            for row in range(1, ws.max_row + 1):
+                cell_value = ws.cell(row=row, column=col).value
+                if cell_value:
+                    length = len(str(cell_value))
+                    if length > max_length:
+                        max_length = length
+            adjusted_width = min(max_length + 2, 80)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        for row in range(4, ws.max_row + 1):
+            cell = ws.cell(row=row, column=7)
+            if cell.value:
+                line_count = len(str(cell.value).split('\n'))
+                ws.row_dimensions[row].height = max(40, min(150, line_count * 15))
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -1840,7 +1857,7 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
         moyenne = sum(scores) / len(scores) if scores else 0
         els.append(Paragraph(f"{len(candidats_poste)} candidat(s) | Score max: {meilleur}/{score_max} | Moyenne: {moyenne:.1f}/{score_max}", ParagraphStyle('Stats', parent=sty['Normal'], fontSize=9, textColor=colors.HexColor('#666666'), spaceAfter=10)))
         headers = ['Rang', 'N° Dossier', 'Nom', 'Prenom', 'Telephone', 'Email', 'Statut', f'Score /{score_max}', 'Recommandation', 'Analyse']
-        col_widths = [0.8*cm, 1.8*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3.5*cm, 2*cm, 1.8*cm, 2.5*cm, 5*cm]
+        col_widths = [0.8*cm, 1.8*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3.5*cm, 2*cm, 1.8*cm, 2.5*cm, 6*cm]
         data = [headers]
         for idx, c in enumerate(candidats_poste, 1):
             score = int(c.get('score', 0))
@@ -1864,7 +1881,15 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
                 statut_display = "Entretien"
             else:
                 statut_display = "En attente"
-            data.append([str(idx), c.get('numero_dossier', '') or '–', c.get('nom', '') or '–', c.get('prenom', '') or '–', c.get('telephone', '') or '–', c.get('email', '') or '–', statut_display, f"{score}/{score_max_local}", decision, motif[:200] + "..." if len(motif) > 200 else motif])
+            analyse_paragraph = Paragraph(motif, ParagraphStyle(
+                'AnalyseStyle',
+                parent=sty['Normal'],
+                fontSize=7,
+                alignment=TA_LEFT,
+                wordWrap='CJK',
+                leading=10
+            ))
+            data.append([str(idx), c.get('numero_dossier', '') or '–', c.get('nom', '') or '–', c.get('prenom', '') or '–', c.get('telephone', '') or '–', c.get('email', '') or '–', statut_display, f"{score}/{score_max_local}", decision, analyse_paragraph])
         tbl = Table(data, colWidths=col_widths)
         tbl_style = [('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, 0), 9), ('FONTSIZE', (0, 1), (-1, -1), 7), ('BOTTOMPADDING', (0, 0), (-1, 0), 8), ('TOPPADDING', (0, 0), (-1, 0), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E79')), ('TEXTCOLOR', (0, 0), (-1, 0), colors.white), ('ALIGNMENT', (9, 1), (9, -1), 'LEFT'), ('VALIGN', (9, 1), (9, -1), 'TOP')]
         for row_idx in range(1, len(data)):
@@ -1929,6 +1954,15 @@ def generate_word_report(candidats_data, poste_filter=None):
     if candidats_data:
         table_all = doc.add_table(rows=1, cols=9)
         table_all.style = 'Table Grid'
+        table_all.columns[0].width = Inches(0.5)
+        table_all.columns[1].width = Inches(1.0)
+        table_all.columns[2].width = Inches(1.5)
+        table_all.columns[3].width = Inches(1.5)
+        table_all.columns[4].width = Inches(2.5)
+        table_all.columns[5].width = Inches(2.0)
+        table_all.columns[6].width = Inches(1.2)
+        table_all.columns[7].width = Inches(1.0)
+        table_all.columns[8].width = Inches(2.5)
         hdr_cells_all = table_all.rows[0].cells
         for i, h in enumerate(['Rang', 'Dossier', 'Nom', 'Prenom', 'Email', 'Poste', 'Statut', 'Score', 'Recommandation']):
             hdr_cells_all[i].text = h
@@ -1956,6 +1990,9 @@ def generate_word_report(candidats_data, poste_filter=None):
             row_cells[6].text = get_display_status(c)
             row_cells[7].text = f"{score}/{score_max}"
             row_cells[8].text = recommandation
+            for cell in row_cells:
+                cell.paragraphs[0].paragraph_format.space_after = Pt(2)
+                cell.paragraphs[0].paragraph_format.space_before = Pt(2)
     doc.add_paragraph()
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2839,18 +2876,20 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.4-final",
+        "version": "v5.5-final",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
         "scoring_strict": True,
         "manual_status_priority": True,
+        "auto_width_excel": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.4-final demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.5-final demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
+    logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
     app.run(host="0.0.0.0", port=port, debug=False)
