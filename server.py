@@ -145,7 +145,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v5.3-final',
+        'version': 'v5.4-final',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -1756,32 +1756,36 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             cell.fill = header_fill
             cell.border = header_border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        ws.row_dimensions[3].height = 40
-        col_widths = [6, 14, 30, 35, 12, 18, 70]
+        ws.row_dimensions[3].height = 40        col_widths = [6, 14, 30, 35, 12, 18, 70]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
         cell_border = Border(left=Side(style='thin', color='CCCCCC'), right=Side(style='thin', color='CCCCCC'), top=Side(style='thin', color='CCCCCC'), bottom=Side(style='thin', color='CCCCCC'))
         for row_i, c in enumerate(candidats_poste, 4):
             score = int(c.get('score', 0))
             score_max_local = get_score_max_for_poste(poste)
-            decision = get_recommandation_from_score(score, poste)
-            motif = generate_detailed_reason(c, poste, score, score_max_local)
-            nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
-            row_data = [row_i - 3, c.get('numero_dossier', '') or '–', nom_complet, c.get('email', '') or '–', f"{score}/{score_max_local}", decision, motif]
+            decision_final = ""
+            rec_color = ""
             statut = c.get('statut', 'en_attente')
-            if statut == "retenu":
+            if statut == "rejete":
+                decision_final = "Rejeté"
+                rec_color = "FF0000"
+            elif statut == "retenu":
+                decision_final = "Retenu"
                 rec_color = "00B050"
             elif statut == "entretien":
+                decision_final = "Entretien"
                 rec_color = "FFC000"
-            elif statut == "rejete":
-                rec_color = "FF0000"
             else:
-                if "Entretien prioritaire" in decision or "Shortlist" in decision:
+                decision_final = get_recommandation_from_score(score, poste)
+                if "Entretien prioritaire" in decision_final or "Shortlist" in decision_final:
                     rec_color = "00B050"
-                elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
+                elif "Potentiel" in decision_final or "considérer" in decision_final or "Faible" in decision_final:
                     rec_color = "FFC000"
                 else:
                     rec_color = "FF0000"
+            motif = generate_detailed_reason(c, poste, score, score_max_local)
+            nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
+            row_data = [row_i - 3, c.get('numero_dossier', '') or '–', nom_complet, c.get('email', '') or '–', f"{score}/{score_max_local}", decision_final, motif]
             for col, val in enumerate(row_data, 1):
                 cell = ws.cell(row=row_i, column=col, value=val if val is not None else '')
                 cell.border = cell_border
@@ -1840,14 +1844,22 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
         for idx, c in enumerate(candidats_poste, 1):
             score = int(c.get('score', 0))
             score_max_local = get_score_max_for_poste(poste)
-            decision = get_recommandation_from_score(score, poste)
-            motif = generate_detailed_reason(c, poste, score, score_max_local)
-            statut = get_display_status(c)
+            statut = c.get('statut', 'en_attente')
             if statut == "rejete":
-                statut_display = "Rejete"
+                decision = "Rejeté"
             elif statut == "retenu":
-                statut_display = "Retenu"
+                decision = "Retenu"
             elif statut == "entretien":
+                decision = "Entretien"
+            else:
+                decision = get_recommandation_from_score(score, poste)
+            motif = generate_detailed_reason(c, poste, score, score_max_local)
+            statut_display = get_display_status(c)
+            if statut_display == "rejete":
+                statut_display = "Rejete"
+            elif statut_display == "retenu":
+                statut_display = "Retenu"
+            elif statut_display == "entretien":
                 statut_display = "Entretien"
             else:
                 statut_display = "En attente"
@@ -1857,12 +1869,12 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
         for row_idx in range(1, len(data)):
             if row_idx % 2 == 0:
                 tbl_style.append(('BACKGROUND', (0, row_idx), (8, row_idx), colors.Color(0.97, 0.97, 0.97)))
-            statut_val = data[row_idx][6]
-            if statut_val == "Retenu":
+            decision_val = data[row_idx][8]
+            if decision_val == "Retenu":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(0.8, 1, 0.8)))
-            elif statut_val == "Entretien":
+            elif decision_val == "Entretien":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.95, 0.6)))
-            elif statut_val == "Rejete":
+            elif decision_val == "Rejeté":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.85, 0.85)))
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
@@ -1922,6 +1934,17 @@ def generate_word_report(candidats_data, poste_filter=None):
             hdr_cells_all[i].paragraphs[0].runs[0].bold = True
         sorted_data = sorted(candidats_data, key=lambda x: -int(x.get('score', 0)))
         for idx, c in enumerate(sorted_data, 1):
+            score = int(c.get('score', 0))
+            score_max = get_score_max_for_poste(c.get('poste', ''))
+            statut = c.get('statut', 'en_attente')
+            if statut == "rejete":
+                recommandation = "Rejeté"
+            elif statut == "retenu":
+                recommandation = "Retenu"
+            elif statut == "entretien":
+                recommandation = "Entretien"
+            else:
+                recommandation = get_recommandation_from_score(score, c.get('poste', ''))
             row_cells = table_all.add_row().cells
             row_cells[0].text = str(idx)
             row_cells[1].text = str(c.get('numero_dossier', '') or '–')
@@ -1930,9 +1953,8 @@ def generate_word_report(candidats_data, poste_filter=None):
             row_cells[4].text = c.get('email', '') or '–'
             row_cells[5].text = c.get('poste', '') or '–'
             row_cells[6].text = get_display_status(c)
-            score_max = get_score_max_for_poste(c.get('poste', ''))
-            row_cells[7].text = f"{c.get('score', 0)}/{score_max}"
-            row_cells[8].text = get_recommandation_from_score(int(c.get('score', 0)), c.get('poste', ''))
+            row_cells[7].text = f"{score}/{score_max}"
+            row_cells[8].text = recommandation
     doc.add_paragraph()
     footer = doc.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2305,7 +2327,19 @@ def update_candidat(token):
     note = data.get('note', '')
     if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
         return jsonify({'error': 'Statut invalide'}), 400
-    supabase.table('candidats').update({"statut": statut, "note": note, "decision_date": datetime.datetime.now().isoformat(), "decided_by": get_jwt_identity()}).eq('token', token).execute()
+    update_data = {
+        "statut": statut,
+        "note": note,
+        "decision_date": datetime.datetime.now().isoformat(),
+        "decided_by": get_jwt_identity()
+    }
+    if statut == "rejete":
+        update_data["decision"] = "Rejet - Décision du recruteur"
+    elif statut == "retenu":
+        update_data["decision"] = "Retenu - Décision du recruteur"
+    elif statut == "entretien":
+        update_data["decision"] = "Entretien - Décision du recruteur"
+    supabase.table('candidats').update(update_data).eq('token', token).execute()
     return jsonify({'message': 'Mis a jour avec succes', 'statut': statut}), 200
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
@@ -2804,7 +2838,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.3-final",
+        "version": "v5.4-final",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -2814,7 +2848,7 @@ def health_version():
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.3-final demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.4-final demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
