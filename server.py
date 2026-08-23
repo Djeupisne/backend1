@@ -1756,7 +1756,8 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             cell.fill = header_fill
             cell.border = header_border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        ws.row_dimensions[3].height = 40        col_widths = [6, 14, 30, 35, 12, 18, 70]
+        ws.row_dimensions[3].height = 40
+        col_widths = [6, 14, 30, 35, 12, 18, 70]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
         cell_border = Border(left=Side(style='thin', color='CCCCCC'), right=Side(style='thin', color='CCCCCC'), top=Side(style='thin', color='CCCCCC'), bottom=Side(style='thin', color='CCCCCC'))
