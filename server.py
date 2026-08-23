@@ -145,14 +145,15 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v5.2-final',
+        'version': 'v5.3-final',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
             'reportlab_available': REPORTLAB_AVAILABLE,
             'openpyxl_available': OPENPYXL_AVAILABLE,
             'ia_available': IA_ANALYSE_ACTIVE,
-            'scoring_strict': True
+            'scoring_strict': True,
+            'manual_status_priority': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -1581,7 +1582,34 @@ Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
         return None
+def get_display_status(c):
+    statut = c.get('statut', 'en_attente')
+    if statut == "rejete":
+        return "rejete"
+    if statut == "retenu":
+        return "retenu"
+    if statut == "entretien":
+        return "entretien"
+    decision = c.get('decision', '')
+    if decision:
+        if "Entretien prioritaire" in decision or "Shortlist" in decision:
+            return "retenu"
+        elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
+            return "entretien"
+        else:
+            return "rejete"
+    return 'en_attente'
 def generate_detailed_reason(candidat, poste, score, score_max):
+    statut = candidat.get('statut', 'en_attente')
+    if statut == "rejete":
+        note = candidat.get('note', 'Décision manuelle du recruteur')
+        return f"REJETE PAR LE RECRUTEUR - {note}"
+    if statut == "retenu":
+        note = candidat.get('note', 'Décision manuelle du recruteur')
+        return f"RETENU PAR LE RECRUTEUR - {note}"
+    if statut == "entretien":
+        note = candidat.get('note', 'Décision manuelle du recruteur')
+        return f"ENTRETIEN DECIDE PAR LE RECRUTEUR - {note}"
     details = candidat.get('analyse_details_parsed', {})
     flags = candidat.get('flags_eliminatoires_parsed', [])
     strengths = details.get('points_forts', [])
@@ -1659,16 +1687,6 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     ws_summary['A2'] = f"Genere le {datetime.datetime.now().strftime('%d/%m/%Y a %H:%M')}"
     ws_summary['A2'].font = Font(italic=True, size=10, color="666666")
     total = len(candidats_data)
-    def get_display_status(c):
-        decision = c.get('decision', '')
-        if decision:
-            if "Entretien prioritaire" in decision or "Shortlist" in decision:
-                return "retenu"
-            elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
-                return "entretien"
-            else:
-                return "rejete"
-        return c.get('statut', 'en_attente')
     retenus = sum(1 for c in candidats_data if get_display_status(c) == 'retenu')
     entretien = sum(1 for c in candidats_data if get_display_status(c) == 'entretien')
     rejetes = sum(1 for c in candidats_data if get_display_status(c) == 'rejete')
@@ -1738,8 +1756,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             cell.fill = header_fill
             cell.border = header_border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        ws.row_dimensions[3].height = 40
-        col_widths = [6, 14, 30, 35, 12, 18, 70]
+        ws.row_dimensions[3].height = 40        col_widths = [6, 14, 30, 35, 12, 18, 70]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
         cell_border = Border(left=Side(style='thin', color='CCCCCC'), right=Side(style='thin', color='CCCCCC'), top=Side(style='thin', color='CCCCCC'), bottom=Side(style='thin', color='CCCCCC'))
@@ -1750,12 +1767,20 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             motif = generate_detailed_reason(c, poste, score, score_max_local)
             nom_complet = f"{c.get('prenom', '')} {c.get('nom', '')}".strip() or '–'
             row_data = [row_i - 3, c.get('numero_dossier', '') or '–', nom_complet, c.get('email', '') or '–', f"{score}/{score_max_local}", decision, motif]
-            if "Entretien prioritaire" in decision or "Shortlist" in decision:
+            statut = c.get('statut', 'en_attente')
+            if statut == "retenu":
                 rec_color = "00B050"
-            elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
+            elif statut == "entretien":
                 rec_color = "FFC000"
-            else:
+            elif statut == "rejete":
                 rec_color = "FF0000"
+            else:
+                if "Entretien prioritaire" in decision or "Shortlist" in decision:
+                    rec_color = "00B050"
+                elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
+                    rec_color = "FFC000"
+                else:
+                    rec_color = "FF0000"
             for col, val in enumerate(row_data, 1):
                 cell = ws.cell(row=row_i, column=col, value=val if val is not None else '')
                 cell.border = cell_border
@@ -1816,29 +1841,27 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
             score_max_local = get_score_max_for_poste(poste)
             decision = get_recommandation_from_score(score, poste)
             motif = generate_detailed_reason(c, poste, score, score_max_local)
-            def get_display_status(cand):
-                dec = cand.get('decision', '')
-                if dec:
-                    if "Entretien prioritaire" in dec or "Shortlist" in dec:
-                        return "Retenu"
-                    elif "Potentiel" in dec or "considérer" in dec or "Faible" in dec:
-                        return "Entretien"
-                    else:
-                        return "Rejete"
-                return cand.get('statut', 'En attente').capitalize()
             statut = get_display_status(c)
-            data.append([str(idx), c.get('numero_dossier', '') or '–', c.get('nom', '') or '–', c.get('prenom', '') or '–', c.get('telephone', '') or '–', c.get('email', '') or '–', statut, f"{score}/{score_max_local}", decision, motif[:200] + "..." if len(motif) > 200 else motif])
+            if statut == "rejete":
+                statut_display = "Rejete"
+            elif statut == "retenu":
+                statut_display = "Retenu"
+            elif statut == "entretien":
+                statut_display = "Entretien"
+            else:
+                statut_display = "En attente"
+            data.append([str(idx), c.get('numero_dossier', '') or '–', c.get('nom', '') or '–', c.get('prenom', '') or '–', c.get('telephone', '') or '–', c.get('email', '') or '–', statut_display, f"{score}/{score_max_local}", decision, motif[:200] + "..." if len(motif) > 200 else motif])
         tbl = Table(data, colWidths=col_widths)
         tbl_style = [('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, 0), 9), ('FONTSIZE', (0, 1), (-1, -1), 7), ('BOTTOMPADDING', (0, 0), (-1, 0), 8), ('TOPPADDING', (0, 0), (-1, 0), 8), ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E79')), ('TEXTCOLOR', (0, 0), (-1, 0), colors.white), ('ALIGNMENT', (9, 1), (9, -1), 'LEFT'), ('VALIGN', (9, 1), (9, -1), 'TOP')]
         for row_idx in range(1, len(data)):
             if row_idx % 2 == 0:
                 tbl_style.append(('BACKGROUND', (0, row_idx), (8, row_idx), colors.Color(0.97, 0.97, 0.97)))
-            decision_cell = data[row_idx][8]
-            if "Entretien prioritaire" in decision_cell or "Shortlist" in decision_cell:
+            statut_val = data[row_idx][6]
+            if statut_val == "Retenu":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(0.8, 1, 0.8)))
-            elif "Potentiel" in decision_cell or "considérer" in decision_cell or "Faible" in decision_cell:
+            elif statut_val == "Entretien":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.95, 0.6)))
-            else:
+            elif statut_val == "Rejete":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.85, 0.85)))
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
@@ -1864,7 +1887,8 @@ def generate_csv_report(candidats_data, poste_filter=None):
         poste = c.get('poste', '')
         decision = get_recommandation_from_score(score, poste)
         motif = generate_detailed_reason(c, poste, score, get_score_max_for_poste(poste))
-        w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), str(c.get('statut', '') or ''), decision, motif.replace('\n', ' | ')])
+        statut = get_display_status(c)
+        w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), statut, decision, motif.replace('\n', ' | ')])
     out.seek(0)
     return out.getvalue()
 def generate_word_report(candidats_data, poste_filter=None):
@@ -1881,16 +1905,6 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.add_paragraph()
     doc.add_heading('1. Statistiques Generales', level=1)
     total = len(candidats_data)
-    def get_display_status(c):
-        decision = c.get('decision', '')
-        if decision:
-            if "Entretien prioritaire" in decision or "Shortlist" in decision:
-                return "retenu"
-            elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
-                return "entretien"
-            else:
-                return "rejete"
-        return c.get('statut', 'en_attente')
     retenus = sum(1 for c in candidats_data if get_display_status(c) == 'retenu')
     exclus = sum(1 for c in candidats_data if get_display_status(c) == 'rejete')
     en_attente = sum(1 for c in candidats_data if get_display_status(c) == 'en_attente')
@@ -2191,18 +2205,11 @@ def get_stats():
     stats = {"total": len(keys), "en_attente": 0, "retenu": 0, "rejete": 0, "entretien": 0, "by_poste": []}
     counts = {}
     for c in keys:
-        decision = c.get('decision', '')
-        if decision:
-            if "Entretien prioritaire" in decision or "Shortlist" in decision:
-                s = "retenu"
-            elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
-                s = "entretien"
-            else:
-                s = "rejete"
+        statut = c.get('statut', 'en_attente')
+        if statut in stats:
+            stats[statut] += 1
         else:
-            s = c.get('statut', 'en_attente')
-        if s in stats:
-            stats[s] += 1
+            stats['en_attente'] += 1
         p = c.get('poste', 'Inconnu')
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
@@ -2244,17 +2251,8 @@ def list_candidats():
         if poste_filter and c.get('poste') != poste_filter:
             continue
         if statut_filter:
-            decision = c.get('decision', '')
-            if decision:
-                if "Entretien prioritaire" in decision or "Shortlist" in decision:
-                    s = "retenu"
-                elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
-                    s = "entretien"
-                else:
-                    s = "rejete"
-            else:
-                s = c.get('statut', 'en_attente')
-            if s != statut_filter:
+            statut = c.get('statut', 'en_attente')
+            if statut != statut_filter:
                 continue
         if min_score is not None and int(c.get('score', 0)) < min_score:
             continue
@@ -2603,17 +2601,8 @@ def export_candidates(fmt):
             if poste_filter and c.get('poste') != poste_filter:
                 continue
             if statut_filter:
-                decision = c.get('decision', '')
-                if decision:
-                    if "Entretien prioritaire" in decision or "Shortlist" in decision:
-                        s = "retenu"
-                    elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
-                        s = "entretien"
-                    else:
-                        s = "rejete"
-                else:
-                    s = c.get('statut', 'en_attente')
-                if s != statut_filter:
+                statut = c.get('statut', 'en_attente')
+                if statut != statut_filter:
                     continue
             for field in ['score_breakdown', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details']:
                 if c.get(field):
@@ -2814,17 +2803,18 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.2-final",
+        "version": "v5.3-final",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
         "scoring_strict": True,
+        "manual_status_priority": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.2-final demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.3-final demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
-    logger.info(f"Verification CV: Active (CV obligatoire, CV different de la lettre)")
+    logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
     app.run(host="0.0.0.0", port=port, debug=False)
