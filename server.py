@@ -6,55 +6,46 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from werkzeug.utils import secure_filename
 from supabase import create_client, Client
 import logging
-
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('pdfminer').setLevel(logging.WARNING)
 logging.getLogger('pdfplumber').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
-
 try:
     import pdfplumber
     PDFPLUMBER_AVAILABLE = True
 except ImportError:
     PDFPLUMBER_AVAILABLE = False
-
 try:
     import PyPDF2
     PYPDF2_AVAILABLE = True
 except ImportError:
     PYPDF2_AVAILABLE = False
-
 try:
     from docx import Document
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 try:
     import chardet
     CHARDET_AVAILABLE = True
 except ImportError:
     CHARDET_AVAILABLE = False
-
 try:
     from langdetect import detect, DetectorFactory
     DetectorFactory.seed = 0
     LANGDETECT_AVAILABLE = True
 except ImportError:
     LANGDETECT_AVAILABLE = False
-
 try:
     from rapidfuzz import fuzz
     RAPIDFUZZ_AVAILABLE = True
 except ImportError:
     RAPIDFUZZ_AVAILABLE = False
-
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -65,7 +56,6 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
-
 try:
     import openpyxl
     from openpyxl import Workbook
@@ -74,7 +64,6 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
-
 try:
     from docx import Document as DocxDocument
     from docx.shared import Inches, Pt
@@ -82,7 +71,6 @@ try:
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 try:
     from pdf2image import convert_from_path
     import pytesseract
@@ -90,19 +78,16 @@ try:
     OCR_AVAILABLE = True
 except ImportError:
     OCR_AVAILABLE = False
-
 try:
     import spacy
     SPACY_AVAILABLE = True
 except ImportError:
     SPACY_AVAILABLE = False
-
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
-
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
@@ -110,7 +95,6 @@ _claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_AC
 _ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
 _Nlp_fr = None
 _Nlp_en = None
-
 def _get_spacy_model(lang='fr'):
     global _Nlp_fr, _Nlp_en
     if not SPACY_AVAILABLE:
@@ -132,16 +116,13 @@ def _get_spacy_model(lang='fr'):
             except OSError:
                 return None
         return _Nlp_en
-
 app = Flask(__name__)
-
 ALLOWED_ORIGINS = [
     "https://recrutment.onrender.com",
     "https://backend1-fiq5.onrender.com",
     "http://localhost:5000",
     "http://localhost:3000"
 ]
-
 CORS(app, resources={
     r"/api/*": {
         "origins": ALLOWED_ORIGINS,
@@ -151,7 +132,6 @@ CORS(app, resources={
         "max_age": 600
     }
 })
-
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
@@ -160,7 +140,6 @@ def after_request(response):
     if request.method == 'OPTIONS':
         response.status_code = 204
     return response
-
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
     return jsonify({
@@ -176,29 +155,23 @@ def health_check():
             'scoring_strict': True
         }
     }), 200
-
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
-
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
 app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupisne@gmail.com>')
 app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
-
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     if not supabase:
         return None
@@ -212,7 +185,6 @@ def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     except Exception as e:
         logger.error(f"Upload error: {e}")
         return None
-
 def download_file_from_supabase(blob_name):
     if not supabase:
         return None
@@ -222,7 +194,6 @@ def download_file_from_supabase(blob_name):
     except Exception as e:
         logger.error(f"Download error: {e}")
         return None
-
 def get_signed_url(blob_name, expiration_minutes=60):
     if not supabase:
         return None
@@ -234,7 +205,6 @@ def get_signed_url(blob_name, expiration_minutes=60):
     except Exception as e:
         logger.error(f"Signed URL error: {e}")
         return None
-
 def send_email(to_email, subject, body):
     import requests
     import re as _re
@@ -260,10 +230,8 @@ def send_email(to_email, subject, body):
         return response.status_code == 201
     except Exception:
         return False
-
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
-
 def normalize_spaces(text):
     if not text:
         return ""
@@ -277,7 +245,6 @@ def normalize_spaces(text):
     for wrong, correct in typo_corrections.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
     return text.strip()
-
 def normalize_unicode(text):
     if not text:
         return ""
@@ -285,7 +252,6 @@ def normalize_unicode(text):
     text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
     text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
     return text.strip()
-
 def normalize_for_matching(text):
     if not text:
         return "", []
@@ -295,7 +261,6 @@ def normalize_for_matching(text):
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
     return cleaned, tokens
-
 def contains_negative_context(text, keyword):
     if not text or not keyword:
         return False
@@ -322,7 +287,6 @@ def contains_negative_context(text, keyword):
             if re.search(pattern, context, re.IGNORECASE):
                 return True
     return False
-
 def extract_text_from_pdf_via_ocr(file_bytes):
     if not OCR_AVAILABLE:
         return ""
@@ -343,11 +307,9 @@ def extract_text_from_pdf_via_ocr(file_bytes):
         return ""
     except Exception:
         return ""
-
 MAX_PDF_PAGES = 15
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
-MAX_TEXT_SIZE = 15000  # Taille max de texte extrait pour éviter les timeouts
-
+MAX_TEXT_SIZE = 15000
 def extract_text_from_pdf_robust(file_bytes, filename):
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
         logger.warning(f"PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 10 MB): {filename}")
@@ -402,7 +364,6 @@ def extract_text_from_pdf_robust(file_bytes, filename):
         if ocr_text and len(ocr_text.strip()) > 100:
             return ocr_text
     return ""
-
 def extract_text_from_docx_robust(file_bytes):
     if not DOCX_AVAILABLE:
         return ""
@@ -448,7 +409,6 @@ def extract_text_from_docx_robust(file_bytes):
     except Exception:
         pass
     return ""
-
 def extract_text_from_txt(file_bytes):
     if CHARDET_AVAILABLE:
         try:
@@ -469,7 +429,6 @@ def extract_text_from_txt(file_bytes):
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
-
 def extract_text_robust_from_bytes(file_bytes, filename):
     if not file_bytes:
         return ""
@@ -488,7 +447,6 @@ def extract_text_robust_from_bytes(file_bytes, filename):
     except Exception:
         pass
     return ""
-
 def init_recruteur():
     try:
         if supabase:
@@ -501,9 +459,7 @@ def init_recruteur():
                 }).execute()
     except Exception as e:
         logger.warning(f"Erreur initialisation recruteur : {e}")
-
 init_recruteur()
-
 POSTES = [
     "Responsable Administration de Crédit",
     "Analyste Crédit CCB",
@@ -521,14 +477,10 @@ POSTES = [
     "Chargé(e) d'Administration de Crédit",
     "Chef de Division Local Corporate"
 ]
-
 POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
-
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
-
-# ===== GRILLES D'ÉVALUATION =====
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": [
@@ -888,11 +840,9 @@ GRILLE = {
         ]
     }
 }
-
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]
 POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate"]
-
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
         return 12
@@ -901,7 +851,6 @@ def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_100:
         return 100
     return 10
-
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
@@ -933,7 +882,6 @@ def get_recommandation_from_score(score, poste=None):
         return "Potentiel à évaluer en entretien"
     else:
         return "Rejet"
-
 def get_statut_from_decision(decision):
     if not decision:
         return 'en_attente'
@@ -943,7 +891,6 @@ def get_statut_from_decision(decision):
         return "entretien"
     else:
         return "rejete"
-
 def split_into_jobs(raw_text):
     separators = re.compile(
         r"(?:^|\n)(?=\s*(?:(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(?:20\d{2}|19\d{2})|\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|(?:depuis|de |from |since |desde |a partir de |starting |beginning)))",
@@ -951,13 +898,10 @@ def split_into_jobs(raw_text):
     )
     blocks = separators.split(raw_text)
     return [b.strip() for b in blocks if b.strip()]
-
 STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b', r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b', r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b', r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b']
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
-
 def is_stage_block(block_text):
     return bool(STAGE_PATTERN.search(block_text))
-
 def extract_duration_years_from_block(block_text):
     years = 0.0
     text = block_text.lower()
@@ -1001,7 +945,6 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(float(delta), 1)
     return 0.0
-
 def detect_institution_type(text):
     text_lower = text.lower()
     commercial_banks = ['ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 'société générale', 'standard chartered', 'nsia banque', 'commercial bank', 'banque commerciale', 'investment bank', 'banque d affaires', 'credit institution', 'financial institution', 'banque', 'express union', 'coris bank']
@@ -1009,88 +952,54 @@ def detect_institution_type(text):
     if commercial_pattern.search(text_lower):
         return 'commercial_bank'
     return 'unknown'
-
-# ===== FONCTION DE SCORING STRICTE POUR CHARGÉ ADMIN CRÉDIT =====
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
-    """
-    Calcul strict du score pour Chargé(e) d'Administration de Crédit
-    Version v5.1 - Rejet immédiat si un critère éliminatoire n'est pas rempli
-    """
     poste = "Chargé(e) d'Administration de Crédit"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
-    
-    # ===== 1. VÉRIFICATION STRICTE DES CRITÈRES ÉLIMINATOIRES =====
     flags_elim = []
-    
-    # Critère 1: Niveau de diplôme Bac+3 minimum
     diplome_ok = False
-    diplome_patterns = [
-        r'licence', r'bachelor', r'bac\+3', r'bac 3', r'baccalauréat.*université',
-        r'master', r'mba', r'ingénieur', r'bac\+4', r'bac 4', r'bac\+5', r'bac 5',
-        r'maîtrise', r'doctorat', r'phd', r'école de commerce', r'école supérieure'
-    ]
+    diplome_patterns = [r'licence', r'bachelor', r'bac\+3', r'bac 3', r'baccalauréat.*université', r'master', r'mba', r'ingénieur', r'bac\+4', r'bac 4', r'bac\+5', r'bac 5', r'maîtrise', r'doctorat', r'phd', r'école de commerce', r'école supérieure']
     for pattern in diplome_patterns:
         if re.search(pattern, cv_text.lower()):
             diplome_ok = True
             break
     if not diplome_ok:
         flags_elim.append("Niveau de diplôme inférieur à Bac+3")
-    
-    # Critère 2: Minimum 1 an d'expérience bancaire (HORS STAGE)
-    # Règle STRICTE : 1 an minimum, les stages NE COMPTENT PAS
-    banking_keywords = ['express union', 'coris bank', 'ecobank', 'orabank', 'uba', 'bicec', 
-                        'banque', 'bancaire', 'établissement financier', 'institution financière']
+    banking_keywords = ['express union', 'coris bank', 'ecobank', 'orabank', 'uba', 'bicec', 'banque', 'bancaire', 'établissement financier', 'institution financière']
     blocks = split_into_jobs(cv_text)
     total_banking_years = 0.0
-    
     for block in blocks:
-        # IGNORER LES STAGES - NE COMPTENT PAS
         if is_stage_block(block):
             continue
-        
         is_banking = False
         for kw in banking_keywords:
             if kw in block.lower():
                 is_banking = True
                 break
-        
         if is_banking:
             duration = extract_duration_years_from_block(block)
             if duration > 0:
                 total_banking_years += duration
-    
-    # Règle STRICTE : 1 an minimum pour ne pas être rejeté
     exp_bancaire_ok = total_banking_years >= 1.0
-    
     if not exp_bancaire_ok:
         flags_elim.append(f"Moins de 1 an d'expérience bancaire ({total_banking_years:.1f} ans) - les stages ne sont pas comptabilisés")
-    
-    # Critère 3: Exposition au cycle de vie du crédit
     credit_cycle_ok = False
-    credit_cycle_keywords = ['crédit', 'credit', 'dossier de crédit', 'analyse de crédit', 'instruction crédit', 
-                            'octroi', 'mise en place', 'suivi crédit', 'garantie', 'échéance', 'portefeuille',
-                            'administration de crédit', 'back-office crédit', 'credit administration']
+    credit_cycle_keywords = ['crédit', 'credit', 'dossier de crédit', 'analyse de crédit', 'instruction crédit', 'octroi', 'mise en place', 'suivi crédit', 'garantie', 'échéance', 'portefeuille', 'administration de crédit', 'back-office crédit', 'credit administration']
     for kw in credit_cycle_keywords:
         if kw in cv_text.lower():
             credit_cycle_ok = True
             break
     if not credit_cycle_ok:
         flags_elim.append("Aucune exposition au cycle de vie du crédit bancaire")
-    
-    # Critère 4: Expérience de production de reportings
     reporting_ok = False
-    reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'statistiques', 
-                         'indicateur', 'kpi', 'report', 'suivi', 'monitoring']
+    reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'statistiques', 'indicateur', 'kpi', 'report', 'suivi', 'monitoring']
     for kw in reporting_keywords:
         if kw in cv_text.lower():
             reporting_ok = True
             break
     if not reporting_ok:
         flags_elim.append("Aucune expérience de production de reportings")
-    
-    # Critère 5: Outils bureautiques
     tools_ok = False
     tools_keywords = ['excel', 'word', 'powerpoint', 'outlook', 'office', 'bureautique', 'tableur']
     for kw in tools_keywords:
@@ -1099,8 +1008,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             break
     if not tools_ok:
         flags_elim.append("Incapacité à utiliser des outils bureautiques courants")
-    
-    # ===== 2. REJET IMMÉDIAT SI UN CRITÈRE ÉLIMINATOIRE N'EST PAS SATISFAIT =====
     if flags_elim:
         return {
             'score': 0,
@@ -1120,10 +1027,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             'points_vigilance': flags_elim,
             'synthese': f"Rejet immédiat : {', '.join(flags_elim[:3])}"
         }
-    
-    # ===== 3. CALCUL DES SOUS-SCORES (seulement si tous les critères éliminatoires sont OK) =====
-    
-    # 3.1 Adéquation formation/expérience au crédit (0-3)
     adequation = 0
     if re.search(r'(économie|gestion|finance|comptabilité|banque|commerce)', cv_text.lower()):
         adequation += 1
@@ -1140,8 +1043,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if re.search(r'(certification|certificat).*(bancaire|crédit|finance)', cv_text.lower()):
         adequation += 0.5
     adequation = min(3, int(adequation))
-    
-    # 3.2 Exposition IFRS 9 / gestion portefeuille (0-3)
     ifrs_score = 0
     if re.search(r'ifrs|provisionnement|stage\s*[123]|ecl', cv_text.lower()):
         ifrs_score += 2
@@ -1150,8 +1051,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if re.search(r'portefeuille|encours|impayés|dépassements', cv_text.lower()):
         ifrs_score += 0.5
     ifrs_score = min(3, int(ifrs_score))
-    
-    # 3.3 Maîtrise outils bancaires (0-2)
     tools_score = 0
     banking_tools = ['amplitude', 'finacle', 't24', 'temenos', 'flexcube', 'sopra', 'système de gestion', 'ged']
     for tool in banking_tools:
@@ -1161,8 +1060,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if re.search(r'excel|vba|power query', cv_text.lower()):
         tools_score += 1
     tools_score = min(2, tools_score)
-    
-    # 3.4 Cohérence et sérieux du parcours (0-2)
     coherence = 0
     long_experience = False
     for block in blocks:
@@ -1177,8 +1074,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if re.search(r'(banque|finance|économie|gestion)', cv_text.lower()):
         coherence += 1
     coherence = min(2, coherence)
-    
-    # 3.5 Qualité CV + Lettre (0-2)
     qualite = 0
     if re.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*cas|\d+\s*rapports', cv_text.lower()):
         qualite += 1
@@ -1188,20 +1083,16 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         elif 'chargé' in lettre_text.lower() and 'crédit' in lettre_text.lower():
             qualite += 0.5
     qualite = min(2, int(qualite))
-    
     total_score = adequation + ifrs_score + tools_score + coherence + qualite
     total_score = min(12, total_score)
-    
     if total_score >= 10:
         decision = "Entretien prioritaire"
     elif total_score >= 7:
         decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
-    
     points_forts = []
     points_vigilance = []
-    
     if adequation >= 2:
         points_forts.append(f"Expérience crédit de {credit_years:.1f} ans")
     if ifrs_score >= 2:
@@ -1212,7 +1103,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         points_forts.append("Parcours cohérent et stable")
     if qualite >= 2:
         points_forts.append("CV détaillé avec résultats chiffrés")
-    
     if adequation < 2:
         points_vigilance.append("Expérience crédit limitée")
     if ifrs_score < 2:
@@ -1221,7 +1111,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         points_vigilance.append("Parcours à stabiliser")
     if qualite < 2:
         points_vigilance.append("CV/lettre à enrichir")
-    
     sous_scores = {
         "Adéquation formation/expérience au crédit": adequation,
         "Exposition IFRS 9 / gestion portefeuille": ifrs_score,
@@ -1229,9 +1118,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         "Cohérence et sérieux du parcours": coherence,
         "Qualité CV + Lettre de motivation": qualite
     }
-    
     synthese = _generate_synthese_rac(cv_text, lettre_text, total_score, points_forts, points_vigilance)
-    
     return {
         'score': total_score,
         'score_max': 12,
@@ -1244,14 +1131,12 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         'points_vigilance': points_vigilance,
         'synthese': synthese
     }
-
 def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vigilance):
     synthese = ""
     has_experience = bool(re.search(r'Express Union|Coris Bank|Ecobank|banque|bancaire|\d+\s*ans', cv_text.lower()))
     has_certification = bool(re.search(r'certification|certificat', cv_text.lower()))
     has_results = bool(re.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*rapports', cv_text.lower()))
     lettre_personnalisee = bool(lettre_text and 'ecobank' in lettre_text.lower())
-    
     if score >= 10:
         synthese = "Candidat très solide pour le poste. "
         if has_experience:
@@ -1280,21 +1165,17 @@ def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vig
             synthese += "Certifications professionnelles manquantes. "
         synthese += "Recommandation : ne pas retenir."
     return synthese
-
-# ===== AUTRES FONCTIONS DE SCORING =====
 def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Section Compensation"
     grille = GRILLE.get(poste, {})
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
-    
     flags = []
     for crit in grille.get('eliminatoire', []):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         if not ok:
             flags.append(crit)
-    
     if flags:
         return {
             'score': 0,
@@ -1314,31 +1195,24 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
             'points_vigilance': flags,
             'synthese': f"Rejet immédiat : {', '.join(flags[:2])}"
         }
-    
     from rapidfuzz import fuzz
     def check_crit(crit):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         return ok
-    
     signaux_exp = ["Supervision quotidienne des opérations de compensation interbancaire", "Dénouement de positions nettes en fin de journée", "Gestion de suspens, rejets et réclamations interbancaires", "Utilisation de systèmes bancaires de compensation"]
     n_exp = sum(1 for c in signaux_exp if check_crit(c))
     adequation = min(3, n_exp)
-    
     signaux_beac = ["BEAC / GIMAC / compensation interbancaire", "Règlement de positions nettes dans les délais réglementaires", "Expérience dans une banque de la zone CEMAC / UEMOA"]
     n_beac = sum(1 for c in signaux_beac if check_crit(c))
     exposition_beac = min(3, n_beac)
-    
     encadrement_ok = check_crit("Encadrement et coordination d'une équipe opérationnelle")
     resultats_mesurables = check_crit("Gestion d'une équipe avec résultats mesurables")
     encadrement = (1 if encadrement_ok else 0) + (1 if resultats_mesurables else 0)
-    
     n_points_attention = sum(1 for c in grille.get('points_attention', []) if check_crit(c))
     coherence = 2 if n_points_attention == 0 else (1 if n_points_attention <= 2 else 0)
-    
     word_count = len(cv_text.split())
     has_quantified = bool(re.search(r'\d+\s*(%|pourcent|jours|heures|incidents|clients|operations|agences|collaborateurs)', cv_text.lower()))
     qualite_cv = 1 if (word_count >= 150 and has_quantified) else 0
-    
     lettre_clean = (lettre_text or '').strip()
     if lettre_clean:
         poste_kw = ['compensation', 'beac', 'gimac', 'interbancaire', 'back-office']
@@ -1346,7 +1220,6 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         lettre_score = 1 if (len(lettre_clean.split()) >= 80 and mentions_poste) else 0
     else:
         lettre_score = 0
-    
     sous_scores = {
         "Adéquation de l'expérience (compensation interbancaire)": adequation,
         "Exposition BEAC / GIMAC / SYSTAC": exposition_beac,
@@ -1356,14 +1229,12 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     }
     total_score = sum(sous_scores.values())
     total_score = min(12, total_score)
-    
     if total_score >= 10:
         decision = "Entretien prioritaire"
     elif total_score >= 7:
         decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
-    
     return {
         'score': total_score,
         'score_max': 12,
@@ -1376,20 +1247,17 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""],
         'synthese': f"Candidat avec un score de {total_score}/12"
     }
-
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
     grille = GRILLE.get(poste, {})
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
-    
     flags = []
     for crit in grille.get('eliminatoire', []):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         if not ok:
             flags.append(crit)
-    
     if flags:
         return {
             'score': 0,
@@ -1411,35 +1279,27 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             'points_vigilance': flags,
             'synthese': f"Rejet immédiat : {', '.join(flags[:2])}"
         }
-    
     from rapidfuzz import fuzz
     def check_crit(crit):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         return ok
-    
     signaux_corp = ["Gestion de portefeuille Corporate", "Analyse crédit Corporate", "Relation clientèle Corporate"]
     n_corp = sum(1 for c in signaux_corp if check_crit(c))
     exp_corporate = min(3, n_corp)
-    
     signaux_mgmt = ["Encadrement et management d'équipe", "Supervision de collaborateurs", "Animation d'équipe"]
     n_mgmt = sum(1 for c in signaux_mgmt if check_crit(c))
     management = min(3, n_mgmt)
-    
     signaux_risque = ["Gestion du risque crédit", "Qualité du portefeuille", "Suivi des garanties"]
     n_risque = sum(1 for c in signaux_risque if check_crit(c))
     risque = min(2, n_risque)
-    
     signaux_cs = ["Développement commercial", "Cross-selling", "Vente additionnelle"]
     n_cs = sum(1 for c in signaux_cs if check_crit(c))
     crossselling = min(2, n_cs)
-    
     n_points_attention = sum(1 for c in grille.get('points_attention', []) if check_crit(c))
     progression = 2 if n_points_attention == 0 else (1 if n_points_attention <= 2 else 0)
-    
     word_count = len(cv_text.split())
     has_quantified = bool(re.search(r'\d+\s*(%|pourcent|portefeuille|encours|millions|milliards|collaborateurs|equipe|clients)', cv_text.lower()))
     qualite_cv = 1 if (word_count >= 150 and has_quantified) else 0
-    
     lettre_clean = (lettre_text or '').strip()
     certification_score = 0
     if lettre_clean:
@@ -1447,11 +1307,9 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         mentions_poste = any(kw in lettre_clean.lower() for kw in poste_keywords)
         is_generic = len(lettre_clean.split()) < 50 or not mentions_poste
         certification_score = 0 if is_generic else 1
-    
     has_certif = check_crit("Certification bancaire ou formation spécialisée")
     if has_certif:
         certification_score = 1
-    
     sous_scores = {
         "Expérience Corporate": exp_corporate,
         "Management d'équipe": management,
@@ -1463,14 +1321,12 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     }
     total_score = sum(sous_scores.values())
     total_score = min(14, total_score)
-    
     if total_score >= 11:
         decision = "Entretien prioritaire"
     elif total_score >= 7:
         decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
-    
     points_forts = []
     if exp_corporate >= 2:
         points_forts.append("Expérience Corporate significative")
@@ -1480,7 +1336,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_forts.append("Maîtrise du risque crédit")
     if progression >= 2:
         points_forts.append("Parcours cohérent")
-    
     points_vigilance = []
     if exp_corporate < 2:
         points_vigilance.append("Expérience Corporate à renforcer")
@@ -1488,7 +1343,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_vigilance.append("Management à consolider")
     if risque < 1:
         points_vigilance.append("Risque crédit à approfondir")
-    
     synthese = f"Candidat avec un score de {total_score}/14. "
     if total_score >= 11:
         synthese += "Profil très solide pour le poste de Chef de Division Corporate. À recommander."
@@ -1496,7 +1350,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         synthese += "Profil intéressant avec du potentiel. À convoquer en entretien."
     else:
         synthese += "Profil insuffisant pour le poste."
-    
     return {
         'score': total_score,
         'score_max': 14,
@@ -1509,7 +1362,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'points_vigilance': points_vigilance,
         'synthese': synthese
     }
-
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
         return {'score': 0, 'checklist': {}, 'flags_eliminatoires': ['CV non analysable'], 'signaux_detectes': [], 'details': {'error': 'CV vide'}, 'score_breakdown': {'bloc1_eliminatoire': True, 'score_final': 0, 'note': 'CV non analysable'}}
@@ -1561,7 +1413,6 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
     nb_elim_manquants = len(flags_elim)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'score_final': score_final, 'note': f"Score: {score_final}/10"}}
-
 KEYWORD_MAPPING = {
     "Expérience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
     "Minimum 3 ans en crédit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
@@ -1572,7 +1423,6 @@ KEYWORD_MAPPING = {
 }
 EXP_MIN_YEARS_MAP = {"EXP_CREDIT_3ANS": 3.0, "EXP_BANK_1ANS": 1.0, "EXP_BACKOFFICE_3ANS": 3.0}
 DOMAIN_KEYWORDS_MAP = {"EXP_CREDIT_3ANS": ["credit", "risque", "banque", "bancaire", "institution financiere", "analyste", "charge", "gestionnaire", "loan", "credit analysis"], "EXP_BANK_1ANS": ["credit", "banque", "bancaire", "administration credit", "back office", "back-office", "risque", "risk", "analyse credit", "credit analysis", "loan", "institution financiere", "financial institution", "banking", "credit officer", "credit analyst", "credit administrator", "charge de credit", "gestionnaire credit", "analyste credit", "operations bancaires", "banking operations", "portfolio", "portefeuille", "garantie", "collateral"], "EXP_BACKOFFICE_3ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire", "banque", "bancaire", "middle office", "moyens de paiement", "traitement des operations", "chambre de compensation"]}
-
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1610,7 +1460,6 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
     return best_score >= 0.60, round(best_score, 2), found_kws
-
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
@@ -1636,7 +1485,6 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
         if duration > 0:
             total_years += duration
     return total_years >= min_years
-
 def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     if not IA_ANALYSE_ACTIVE or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
         return None
@@ -1733,7 +1581,6 @@ Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
         return None
-
 def generate_detailed_reason(candidat, poste, score, score_max):
     details = candidat.get('analyse_details_parsed', {})
     flags = candidat.get('flags_eliminatoires_parsed', [])
@@ -1741,7 +1588,6 @@ def generate_detailed_reason(candidat, poste, score, score_max):
     weaknesses = details.get('points_vigilance', [])
     sous_scores = candidat.get('score_breakdown_parsed', {}).get('sous_scores', {})
     decision = get_recommandation_from_score(score, poste)
-    
     if flags:
         lines = ["REJETE - Critères éliminatoires non satisfaits :"]
         for flag in flags[:3]:
@@ -1751,7 +1597,6 @@ def generate_detailed_reason(candidat, poste, score, score_max):
         if len(flags) > 3:
             lines.append(f"  - +{len(flags)-3} autre(s)")
         return "\n".join(lines)
-    
     if "Entretien prioritaire" in decision or "Shortlist" in decision:
         lines = ["PROFIL RECOMMANDE - Points forts :"]
         if strengths:
@@ -1767,7 +1612,6 @@ def generate_detailed_reason(candidat, poste, score, score_max):
         if synthese:
             lines.append(f"\n{synthese}")
         return "\n".join(lines)
-    
     elif "Potentiel" in decision:
         lines = ["POTENTIEL A EVALUER - Points d'interet :"]
         if strengths:
@@ -1783,7 +1627,6 @@ def generate_detailed_reason(candidat, poste, score, score_max):
         if "IFRS" in str(weaknesses) or "garanties" in str(weaknesses):
             lines.append("Verifier les connaissances en IFRS 9 et garanties")
         return "\n".join(lines)
-    
     else:
         lines = ["NON RETENU - Raisons :"]
         if weaknesses:
@@ -1798,7 +1641,6 @@ def generate_detailed_reason(candidat, poste, score, score_max):
         if score > 0:
             lines.append(f"\nScore : {score}/{score_max}")
         return "\n".join(lines)
-
 def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     if not OPENPYXL_AVAILABLE:
         return None
@@ -1938,7 +1780,6 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     wb.save(buf)
     buf.seek(0)
     return buf
-
 def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
     if not REPORTLAB_AVAILABLE:
         return None
@@ -2008,7 +1849,6 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
     doc.build(els)
     buf.seek(0)
     return buf
-
 def generate_csv_report(candidats_data, poste_filter=None):
     out = io.StringIO()
     w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL, quotechar='"')
@@ -2027,7 +1867,6 @@ def generate_csv_report(candidats_data, poste_filter=None):
         w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), str(c.get('statut', '') or ''), decision, motif.replace('\n', ' | ')])
     out.seek(0)
     return out.getvalue()
-
 def generate_word_report(candidats_data, poste_filter=None):
     if not DOCX_AVAILABLE:
         return None
@@ -2087,15 +1926,8 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.save(buf)
     buf.seek(0)
     return buf
-
-# ===== FONCTION D'ANALYSE PRINCIPALE AVEC FORCE UPDATE =====
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
-    """
-    Analyse un candidat avec la logique de scoring spécifique.
-    Force la mise à jour du score et du statut en base.
-    """
     try:
-        # Vérifier si le poste est actif ou si on force
         if not force and not is_poste_actif(poste):
             logger.info(f"Analyse ignoree pour {token} — poste cloture : {poste}")
             if supabase:
@@ -2105,27 +1937,21 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "analyse_skip_reason": f"Poste cloture : {poste}"
                 }).eq('token', token).execute()
             return
-        
-        # Traiter les attestations
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
-        
-        # Extraire les textes
         cv_text = ""
         if cv_filename:
             cv_bytes = download_file_from_supabase(cv_filename)
             if cv_bytes:
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
-        
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase(lettre_filename)
             if lm_bytes:
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
-        
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -2134,10 +1960,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     t = extract_text_robust_from_bytes(att_bytes, fn)
                     if t:
                         att_texts.append(t)
-        
-        # === APPLIQUER LE SCORING SPÉCIFIQUE ===
         logger.info(f"🔍 Analyse pour {token} - poste: {poste}")
-        
         if poste == "Chargé(e) d'Administration de Crédit":
             result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
             logger.info(f"📊 Score calculé: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
@@ -2146,29 +1969,20 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         elif poste == "Chef de Division Local Corporate":
             result = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
         else:
-            # Fallback
             result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
             if result is None:
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
-        
-        # === CONSTRUCTION DU RÉSULTAT ===
         score = result.get('score', 0)
         score_max = result.get('score_max', get_score_max_for_poste(poste))
         decision = result.get('decision') or get_recommandation_from_score(score, poste)
         statut = get_statut_from_decision(decision)
-        
-        # S'assurer que le score ne dépasse pas le max
         if score > score_max:
             score = score_max
-        
-        # Construire les détails
         details = result.get('details', {})
         details['points_forts'] = result.get('points_forts', [])
         details['points_vigilance'] = result.get('points_vigilance', [])
         details['synthese_recruteur'] = result.get('synthese', '')
         details['moteur'] = 'scoring_specifique_v2'
-        
-        # Construire le score_breakdown
         score_breakdown = {
             'score_final': score,
             'score_max': score_max,
@@ -2176,8 +1990,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             'moteur_analyse': 'scoring_specifique_v2',
             'sous_scores': result.get('sous_scores', {})
         }
-        
-        # === FORCER LA MISE À JOUR EN BASE ===
         if supabase:
             update_data = {
                 "score": str(score),
@@ -2186,29 +1998,20 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "analyse_status": "completed",
                 "analyse_auto_date": datetime.datetime.now().isoformat()
             }
-            
-            # Ajouter les champs JSON si disponibles
             if result.get('checklist'):
                 update_data["checklist"] = json.dumps(result.get('checklist', {}), ensure_ascii=False)
             if result.get('flags_eliminatoires'):
                 update_data["flags_eliminatoires"] = json.dumps(result.get('flags_eliminatoires', []), ensure_ascii=False)
             if result.get('signaux_detectes'):
                 update_data["signaux_detectes"] = json.dumps(result.get('signaux_detectes', []), ensure_ascii=False)
-            
             update_data["analyse_details"] = json.dumps(details, ensure_ascii=False)
             update_data["score_breakdown"] = json.dumps(score_breakdown, ensure_ascii=False)
-            
-            # Exécuter la mise à jour
             supabase.table('candidats').update(update_data).eq('token', token).execute()
-            
             logger.info(f"✅ [{decision}] Score {token}: {score}/{score_max} → statut: {statut}")
         else:
             logger.warning(f"⚠️ Supabase non disponible - mise à jour impossible pour {token}")
-        
-        # Nettoyage mémoire
         del cv_text, lm_text, att_texts, result
         gc.collect()
-        
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2222,23 +2025,18 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 }).eq('token', token).execute()
             except:
                 pass
-
-# ===== ROUTES API =====
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
     return jsonify({"postes": POSTES, "postes_actifs": POSTES_ACTIFS, "postes_clotures": POSTES_CLOTURES}), 200
-
 @app.route('/api/postes/actifs', methods=['GET'])
 def get_postes_actifs():
     return jsonify(POSTES_ACTIFS), 200
-
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
-
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
@@ -2260,7 +2058,6 @@ def login():
         except Exception as e:
             logger.error(f"Erreur login: {e}")
     return jsonify({'error': 'Identifiants incorrects'}), 401
-
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -2334,7 +2131,6 @@ def postuler():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
     if supabase:
@@ -2344,7 +2140,6 @@ def get_statut(token):
             hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown'}
             return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
     return jsonify({'error': 'Candidature introuvable'}), 404
-
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
@@ -2371,7 +2166,6 @@ def get_stats():
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
-
 @app.route('/api/recruteur/postes/stats', methods=['GET'])
 @jwt_required()
 def get_postes_stats():
@@ -2392,7 +2186,6 @@ def get_postes_stats():
             clotures_count += 1
             par_poste_cloture[poste] = par_poste_cloture.get(poste, 0) + 1
     return jsonify({'total': len(keys), 'postes_actifs': {'count': actifs_count, 'liste': POSTES_ACTIFS, 'par_poste': par_poste_actif, 'eligible_reanalyse': True}, 'postes_clotures': {'count': clotures_count, 'liste': POSTES_CLOTURES, 'par_poste': par_poste_cloture, 'eligible_reanalyse': False}}), 200
-
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
@@ -2437,7 +2230,6 @@ def list_candidats():
         result.append(c)
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
-
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
@@ -2460,7 +2252,6 @@ def get_candidat_detail(token):
             except Exception:
                 pass
     return jsonify(data), 200
-
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
@@ -2476,7 +2267,6 @@ def update_candidat(token):
         return jsonify({'error': 'Statut invalide'}), 400
     supabase.table('candidats').update({"statut": statut, "note": note, "decision_date": datetime.datetime.now().isoformat(), "decided_by": get_jwt_identity()}).eq('token', token).execute()
     return jsonify({'message': 'Mis a jour avec succes', 'statut': statut}), 200
-
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
@@ -2498,7 +2288,6 @@ def trigger_analyze(token):
     supabase.table('candidats').update({"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()}).eq('token', token).execute()
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, force), daemon=True).start()
     return jsonify({'message': 'Analyse re-declenchee', 'token': token}), 202
-
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
 def get_reanalyze_status():
@@ -2522,7 +2311,6 @@ def get_reanalyze_status():
     except Exception as e:
         logger.error(f"Erreur reanalyze-status: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-one/<token>', methods=['POST'])
 @jwt_required()
 def reanalyze_one_candidate(token):
@@ -2547,7 +2335,6 @@ def reanalyze_one_candidate(token):
     except Exception as e:
         logger.error(f"Erreur reanalyze-one: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
@@ -2604,7 +2391,6 @@ def reanalyze_all_candidates():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
@@ -2662,7 +2448,6 @@ def reanalyze_by_poste(poste):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-fast', methods=['POST'])
 @jwt_required()
 def reanalyze_fast():
@@ -2749,7 +2534,6 @@ def reanalyze_fast():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/cleanup-closed', methods=['POST'])
 @jwt_required()
 def cleanup_closed_statuses():
@@ -2762,7 +2546,6 @@ def cleanup_closed_statuses():
             supabase.table('candidats').update({"analyse_status": "completed"}).eq('token', row['token']).execute()
             fixed += 1
     return jsonify({'message': f'{fixed} dossier(s) de postes clotures stabilises (scores conserves)', 'fixed': fixed, 'postes_concernes': POSTES_CLOTURES}), 200
-
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -2826,7 +2609,6 @@ def export_candidates(fmt):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip():
@@ -2933,7 +2715,6 @@ def export_dossiers_zip():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -2959,7 +2740,6 @@ def email_preview(token):
         sujet = f"Reponse a votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'interet que vous portez a notre institution.\nApres examen attentif de votre dossier pour le poste de {poste}, nous avons le regret de vous informer que votre candidature n'a pas ete retenue.\nNous vous encourageons a postuler a nouveau." + sign
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
-
 @app.route('/api/recruteur/uploads/<path:filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename.replace('/', '_'))
@@ -2969,7 +2749,6 @@ def serve_upload(filename):
     if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
     return redirect(url)
-
 @app.route('/api/recruteur/debug/analyse-ia', methods=['POST'])
 @jwt_required()
 def debug_analyse_ia():
@@ -2981,7 +2760,6 @@ def debug_analyse_ia():
         return jsonify({'error': 'cv_text requis et poste doit exister dans GRILLE'}), 400
     result = analyze_cv_against_grille(cv_text, lettre_text, [], poste)
     return jsonify(result), 200
-
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     try:
@@ -2992,7 +2770,6 @@ def test_email():
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
@@ -3003,7 +2780,6 @@ def health_version():
         "scoring_strict": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
-
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     logger.info(f"RecrutBank API v5.1-final demarree sur le port {port}")
