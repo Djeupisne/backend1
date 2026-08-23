@@ -166,13 +166,14 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v5.0-enhanced',
+        'version': 'v5.1-final',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
             'reportlab_available': REPORTLAB_AVAILABLE,
             'openpyxl_available': OPENPYXL_AVAILABLE,
-            'ia_available': IA_ANALYSE_ACTIVE
+            'ia_available': IA_ANALYSE_ACTIVE,
+            'scoring_strict': True
         }
     }), 200
 
@@ -345,6 +346,7 @@ def extract_text_from_pdf_via_ocr(file_bytes):
 
 MAX_PDF_PAGES = 15
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
+MAX_TEXT_SIZE = 15000  # Taille max de texte extrait pour éviter les timeouts
 
 def extract_text_from_pdf_robust(file_bytes, filename):
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
@@ -354,9 +356,10 @@ def extract_text_from_pdf_robust(file_bytes, filename):
     if PDFPLUMBER_AVAILABLE:
         try:
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                total_pages = len(pdf.pages)
+                pages_to_read = min(MAX_PDF_PAGES, total_pages)
                 for i, page in enumerate(pdf.pages):
-                    if i >= MAX_PDF_PAGES:
-                        logger.info(f"PDF tronqué à {MAX_PDF_PAGES} pages: {filename}")
+                    if i >= pages_to_read:
                         break
                     tables = page.extract_tables()
                     if tables:
@@ -369,6 +372,9 @@ def extract_text_from_pdf_robust(file_bytes, filename):
                     content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
                     if content:
                         text += normalize_spaces(content) + "\n"
+                    if len(text) > MAX_TEXT_SIZE:
+                        text = text[:MAX_TEXT_SIZE]
+                        break
             if text.strip() and len(text.strip()) > 100:
                 return normalize_unicode(text.strip())
         except Exception as e:
@@ -376,12 +382,17 @@ def extract_text_from_pdf_robust(file_bytes, filename):
     if PYPDF2_AVAILABLE:
         try:
             reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            total_pages = len(reader.pages)
+            pages_to_read = min(MAX_PDF_PAGES, total_pages)
             for i, page in enumerate(reader.pages):
-                if i >= MAX_PDF_PAGES:
+                if i >= pages_to_read:
                     break
                 content = page.extract_text()
                 if content:
                     text += normalize_spaces(content) + "\n"
+                if len(text) > MAX_TEXT_SIZE:
+                    text = text[:MAX_TEXT_SIZE]
+                    break
             if text.strip() and len(text.strip()) > 100:
                 return normalize_unicode(text.strip())
         except Exception as e:
@@ -402,6 +413,8 @@ def extract_text_from_docx_robust(file_bytes):
         texts = [e.text for e in doc.element.body.iter(W_T) if e.text and e.text.strip()]
         raw = ' '.join(texts)
         raw = re.sub(r'\s+', ' ', raw).strip()
+        if len(raw) > MAX_TEXT_SIZE:
+            raw = raw[:MAX_TEXT_SIZE]
         return normalize_unicode(raw)
     except Exception as e:
         logger.warning(f"Erreur lecture DOCX (XML): {e}")
@@ -422,11 +435,15 @@ def extract_text_from_docx_robust(file_bytes):
                 if cells:
                     parts.append(" | ".join(cells))
         result = "\n".join(parts).strip()
+        if len(result) > MAX_TEXT_SIZE:
+            result = result[:MAX_TEXT_SIZE]
         return normalize_unicode(result)
     except Exception as e2:
         logger.warning(f"Fallback DOCX échoué: {e2}")
     try:
         text = re.sub(r'[^\x20-\x7E\u00C0-\u017F]+', ' ', file_bytes.decode('utf-8', errors='ignore'))
+        if len(text) > MAX_TEXT_SIZE:
+            text = text[:MAX_TEXT_SIZE]
         return normalize_unicode(normalize_spaces(text.strip()))
     except Exception:
         pass
@@ -437,12 +454,18 @@ def extract_text_from_txt(file_bytes):
         try:
             detected = chardet.detect(file_bytes[:10000])
             encoding = detected['encoding'] or 'utf-8'
-            return normalize_unicode(normalize_spaces(file_bytes.decode(encoding, errors='ignore')))
+            text = file_bytes.decode(encoding, errors='ignore')
+            if len(text) > MAX_TEXT_SIZE:
+                text = text[:MAX_TEXT_SIZE]
+            return normalize_unicode(normalize_spaces(text))
         except Exception:
             pass
     for enc in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']:
         try:
-            return normalize_unicode(normalize_spaces(file_bytes.decode(enc, errors='ignore').strip()))
+            text = file_bytes.decode(enc, errors='ignore').strip()
+            if len(text) > MAX_TEXT_SIZE:
+                text = text[:MAX_TEXT_SIZE]
+            return normalize_unicode(normalize_spaces(text))
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
@@ -458,7 +481,10 @@ def extract_text_robust_from_bytes(file_bytes, filename):
     elif ext == 'txt':
         return extract_text_from_txt(file_bytes)
     try:
-        return normalize_unicode(normalize_spaces(file_bytes.decode('utf-8', errors='ignore').strip()))
+        text = file_bytes.decode('utf-8', errors='ignore').strip()
+        if len(text) > MAX_TEXT_SIZE:
+            text = text[:MAX_TEXT_SIZE]
+        return normalize_unicode(normalize_spaces(text))
     except Exception:
         pass
     return ""
@@ -502,6 +528,7 @@ POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
 
+# ===== GRILLES D'ÉVALUATION =====
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": [
@@ -983,17 +1010,27 @@ def detect_institution_type(text):
         return 'commercial_bank'
     return 'unknown'
 
+# ===== FONCTION DE SCORING STRICTE POUR CHARGÉ ADMIN CRÉDIT =====
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
+    """
+    Calcul strict du score pour Chargé(e) d'Administration de Crédit
+    Version v5.1 - Rejet immédiat si un critère éliminatoire n'est pas rempli
+    """
     poste = "Chargé(e) d'Administration de Crédit"
-    grille = GRILLE.get(poste, {})
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
     
+    # ===== 1. VÉRIFICATION STRICTE DES CRITÈRES ÉLIMINATOIRES =====
     flags_elim = []
     
+    # Critère 1: Niveau de diplôme Bac+3 minimum
     diplome_ok = False
-    diplome_patterns = [r'licence', r'bachelor', r'bac\+3', r'bac 3', r'baccalauréat.*université', r'master', r'mba', r'ingénieur', r'bac\+4', r'bac 4', r'bac\+5', r'bac 5', r'maîtrise', r'doctorat', r'phd', r'école de commerce', r'école supérieure']
+    diplome_patterns = [
+        r'licence', r'bachelor', r'bac\+3', r'bac 3', r'baccalauréat.*université',
+        r'master', r'mba', r'ingénieur', r'bac\+4', r'bac 4', r'bac\+5', r'bac 5',
+        r'maîtrise', r'doctorat', r'phd', r'école de commerce', r'école supérieure'
+    ]
     for pattern in diplome_patterns:
         if re.search(pattern, cv_text.lower()):
             diplome_ok = True
@@ -1001,33 +1038,40 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if not diplome_ok:
         flags_elim.append("Niveau de diplôme inférieur à Bac+3")
     
-    banking_keywords = ['express union', 'coris bank', 'ecobank', 'orabank', 'uba', 'bicec', 'banque', 'bancaire', 'microfinance', 'établissement financier', 'institution financière']
+    # Critère 2: Minimum 1 an d'expérience bancaire (HORS STAGE)
+    # Règle STRICTE : 1 an minimum, les stages NE COMPTENT PAS
+    banking_keywords = ['express union', 'coris bank', 'ecobank', 'orabank', 'uba', 'bicec', 
+                        'banque', 'bancaire', 'établissement financier', 'institution financière']
     blocks = split_into_jobs(cv_text)
     total_banking_years = 0.0
+    
     for block in blocks:
+        # IGNORER LES STAGES - NE COMPTENT PAS
         if is_stage_block(block):
             continue
+        
         is_banking = False
         for kw in banking_keywords:
             if kw in block.lower():
                 is_banking = True
                 break
+        
         if is_banking:
             duration = extract_duration_years_from_block(block)
             if duration > 0:
                 total_banking_years += duration
     
-    exp_bancaire_ok = False
-    if total_banking_years >= 1.0:
-        exp_bancaire_ok = True
-    elif total_banking_years >= 0.5:
-        exp_bancaire_ok = True
+    # Règle STRICTE : 1 an minimum pour ne pas être rejeté
+    exp_bancaire_ok = total_banking_years >= 1.0
     
     if not exp_bancaire_ok:
-        flags_elim.append(f"Moins de 1 an d'expérience bancaire ({total_banking_years:.1f} ans)")
+        flags_elim.append(f"Moins de 1 an d'expérience bancaire ({total_banking_years:.1f} ans) - les stages ne sont pas comptabilisés")
     
+    # Critère 3: Exposition au cycle de vie du crédit
     credit_cycle_ok = False
-    credit_cycle_keywords = ['crédit', 'credit', 'dossier de crédit', 'analyse de crédit', 'instruction crédit', 'octroi', 'mise en place', 'suivi crédit', 'garantie', 'échéance', 'portefeuille', 'administration de crédit', 'back-office crédit', 'credit administration']
+    credit_cycle_keywords = ['crédit', 'credit', 'dossier de crédit', 'analyse de crédit', 'instruction crédit', 
+                            'octroi', 'mise en place', 'suivi crédit', 'garantie', 'échéance', 'portefeuille',
+                            'administration de crédit', 'back-office crédit', 'credit administration']
     for kw in credit_cycle_keywords:
         if kw in cv_text.lower():
             credit_cycle_ok = True
@@ -1035,8 +1079,10 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if not credit_cycle_ok:
         flags_elim.append("Aucune exposition au cycle de vie du crédit bancaire")
     
+    # Critère 4: Expérience de production de reportings
     reporting_ok = False
-    reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'statistiques', 'indicateur', 'kpi', 'report', 'suivi', 'monitoring']
+    reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'statistiques', 
+                         'indicateur', 'kpi', 'report', 'suivi', 'monitoring']
     for kw in reporting_keywords:
         if kw in cv_text.lower():
             reporting_ok = True
@@ -1044,8 +1090,9 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if not reporting_ok:
         flags_elim.append("Aucune expérience de production de reportings")
     
+    # Critère 5: Outils bureautiques
     tools_ok = False
-    tools_keywords = ['excel', 'word', 'powerpoint', 'outlook', 'office', 'bureautique', 'tableur', 'amplitude', 'ged']
+    tools_keywords = ['excel', 'word', 'powerpoint', 'outlook', 'office', 'bureautique', 'tableur']
     for kw in tools_keywords:
         if kw in cv_text.lower():
             tools_ok = True
@@ -1053,6 +1100,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if not tools_ok:
         flags_elim.append("Incapacité à utiliser des outils bureautiques courants")
     
+    # ===== 2. REJET IMMÉDIAT SI UN CRITÈRE ÉLIMINATOIRE N'EST PAS SATISFAIT =====
     if flags_elim:
         return {
             'score': 0,
@@ -1067,18 +1115,21 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
                 "Qualité CV + Lettre de motivation": 0
             },
             'checklist': {},
-            'detail': f"ÉLIMINÉ : {len(flags_elim)} critère(s) non satisfait(s)",
+            'detail': f"REJET IMMÉDIAT - {len(flags_elim)} critère(s) éliminatoire(s) non satisfait(s)",
             'points_forts': [],
             'points_vigilance': flags_elim,
-            'synthese': f"Candidat éliminé pour les raisons suivantes : {', '.join(flags_elim[:3])}"
+            'synthese': f"Rejet immédiat : {', '.join(flags_elim[:3])}"
         }
     
+    # ===== 3. CALCUL DES SOUS-SCORES (seulement si tous les critères éliminatoires sont OK) =====
+    
+    # 3.1 Adéquation formation/expérience au crédit (0-3)
     adequation = 0
     if re.search(r'(économie|gestion|finance|comptabilité|banque|commerce)', cv_text.lower()):
         adequation += 1
     credit_years = 0.0
     for block in blocks:
-        if 'crédit' in block.lower() or 'credit' in block.lower():
+        if not is_stage_block(block) and ('crédit' in block.lower() or 'credit' in block.lower()):
             duration = extract_duration_years_from_block(block)
             if duration > 0:
                 credit_years += duration
@@ -1090,6 +1141,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         adequation += 0.5
     adequation = min(3, int(adequation))
     
+    # 3.2 Exposition IFRS 9 / gestion portefeuille (0-3)
     ifrs_score = 0
     if re.search(r'ifrs|provisionnement|stage\s*[123]|ecl', cv_text.lower()):
         ifrs_score += 2
@@ -1099,6 +1151,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         ifrs_score += 0.5
     ifrs_score = min(3, int(ifrs_score))
     
+    # 3.3 Maîtrise outils bancaires (0-2)
     tools_score = 0
     banking_tools = ['amplitude', 'finacle', 't24', 'temenos', 'flexcube', 'sopra', 'système de gestion', 'ged']
     for tool in banking_tools:
@@ -1109,9 +1162,12 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         tools_score += 1
     tools_score = min(2, tools_score)
     
+    # 3.4 Cohérence et sérieux du parcours (0-2)
     coherence = 0
     long_experience = False
     for block in blocks:
+        if is_stage_block(block):
+            continue
         duration = extract_duration_years_from_block(block)
         if duration >= 2:
             long_experience = True
@@ -1122,6 +1178,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         coherence += 1
     coherence = min(2, coherence)
     
+    # 3.5 Qualité CV + Lettre (0-2)
     qualite = 0
     if re.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*cas|\d+\s*rapports', cv_text.lower()):
         qualite += 1
@@ -1224,6 +1281,7 @@ def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vig
         synthese += "Recommandation : ne pas retenir."
     return synthese
 
+# ===== AUTRES FONCTIONS DE SCORING =====
 def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Section Compensation"
     grille = GRILLE.get(poste, {})
@@ -1251,10 +1309,10 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
                 "Qualité CV + Lettre": 0
             },
             'checklist': {},
-            'detail': f"ÉLIMINÉ : {len(flags)} critère(s)",
+            'detail': f"REJET IMMÉDIAT - {len(flags)} critère(s) éliminatoire(s)",
             'points_forts': [],
             'points_vigilance': flags,
-            'synthese': f"Candidat éliminé : {', '.join(flags[:2])}"
+            'synthese': f"Rejet immédiat : {', '.join(flags[:2])}"
         }
     
     from rapidfuzz import fuzz
@@ -1348,10 +1406,10 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
                 "Certifications": 0
             },
             'checklist': {},
-            'detail': f"ÉLIMINÉ : {len(flags)} critère(s)",
+            'detail': f"REJET IMMÉDIAT - {len(flags)} critère(s) éliminatoire(s)",
             'points_forts': [],
             'points_vigilance': flags,
-            'synthese': f"Candidat éliminé : {', '.join(flags[:2])}"
+            'synthese': f"Rejet immédiat : {', '.join(flags[:2])}"
         }
     
     from rapidfuzz import fuzz
@@ -2030,8 +2088,14 @@ def generate_word_report(candidats_data, poste_filter=None):
     buf.seek(0)
     return buf
 
+# ===== FONCTION D'ANALYSE PRINCIPALE AVEC FORCE UPDATE =====
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
+    """
+    Analyse un candidat avec la logique de scoring spécifique.
+    Force la mise à jour du score et du statut en base.
+    """
     try:
+        # Vérifier si le poste est actif ou si on force
         if not force and not is_poste_actif(poste):
             logger.info(f"Analyse ignoree pour {token} — poste cloture : {poste}")
             if supabase:
@@ -2041,21 +2105,27 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "analyse_skip_reason": f"Poste cloture : {poste}"
                 }).eq('token', token).execute()
             return
+        
+        # Traiter les attestations
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
+        
+        # Extraire les textes
         cv_text = ""
         if cv_filename:
             cv_bytes = download_file_from_supabase(cv_filename)
             if cv_bytes:
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
+        
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase(lettre_filename)
             if lm_bytes:
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
+        
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -2064,27 +2134,41 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     t = extract_text_robust_from_bytes(att_bytes, fn)
                     if t:
                         att_texts.append(t)
+        
+        # === APPLIQUER LE SCORING SPÉCIFIQUE ===
+        logger.info(f"🔍 Analyse pour {token} - poste: {poste}")
+        
         if poste == "Chargé(e) d'Administration de Crédit":
             result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
+            logger.info(f"📊 Score calculé: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
         elif poste == "Chef de Section Compensation":
             result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
         elif poste == "Chef de Division Local Corporate":
             result = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
         else:
+            # Fallback
             result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
             if result is None:
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+        
+        # === CONSTRUCTION DU RÉSULTAT ===
         score = result.get('score', 0)
         score_max = result.get('score_max', get_score_max_for_poste(poste))
         decision = result.get('decision') or get_recommandation_from_score(score, poste)
         statut = get_statut_from_decision(decision)
+        
+        # S'assurer que le score ne dépasse pas le max
         if score > score_max:
             score = score_max
+        
+        # Construire les détails
         details = result.get('details', {})
         details['points_forts'] = result.get('points_forts', [])
         details['points_vigilance'] = result.get('points_vigilance', [])
         details['synthese_recruteur'] = result.get('synthese', '')
         details['moteur'] = 'scoring_specifique_v2'
+        
+        # Construire le score_breakdown
         score_breakdown = {
             'score_final': score,
             'score_max': score_max,
@@ -2092,29 +2176,52 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             'moteur_analyse': 'scoring_specifique_v2',
             'sous_scores': result.get('sous_scores', {})
         }
+        
+        # === FORCER LA MISE À JOUR EN BASE ===
         if supabase:
-            supabase.table('candidats').update({
+            update_data = {
                 "score": str(score),
-                "checklist": json.dumps(result.get('checklist', {}), ensure_ascii=False),
-                "flags_eliminatoires": json.dumps(result.get('flags_eliminatoires', []), ensure_ascii=False),
-                "signaux_detectes": json.dumps(result.get('signaux_detectes', []), ensure_ascii=False),
-                "analyse_details": json.dumps(details, ensure_ascii=False),
-                "score_breakdown": json.dumps(score_breakdown, ensure_ascii=False),
                 "decision": decision,
                 "statut": statut,
                 "analyse_status": "completed",
                 "analyse_auto_date": datetime.datetime.now().isoformat()
-            }).eq('token', token).execute()
-        logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut}")
+            }
+            
+            # Ajouter les champs JSON si disponibles
+            if result.get('checklist'):
+                update_data["checklist"] = json.dumps(result.get('checklist', {}), ensure_ascii=False)
+            if result.get('flags_eliminatoires'):
+                update_data["flags_eliminatoires"] = json.dumps(result.get('flags_eliminatoires', []), ensure_ascii=False)
+            if result.get('signaux_detectes'):
+                update_data["signaux_detectes"] = json.dumps(result.get('signaux_detectes', []), ensure_ascii=False)
+            
+            update_data["analyse_details"] = json.dumps(details, ensure_ascii=False)
+            update_data["score_breakdown"] = json.dumps(score_breakdown, ensure_ascii=False)
+            
+            # Exécuter la mise à jour
+            supabase.table('candidats').update(update_data).eq('token', token).execute()
+            
+            logger.info(f"✅ [{decision}] Score {token}: {score}/{score_max} → statut: {statut}")
+        else:
+            logger.warning(f"⚠️ Supabase non disponible - mise à jour impossible pour {token}")
+        
+        # Nettoyage mémoire
+        del cv_text, lm_text, att_texts, result
+        gc.collect()
+        
     except Exception as e:
         import traceback
         traceback.print_exc()
+        logger.error(f"❌ Erreur analyse {token}: {str(e)}")
         if supabase:
-            supabase.table('candidats').update({
-                "analyse_status": "error",
-                "analyse_error": str(e),
-                "analyse_auto_date": datetime.datetime.now().isoformat()
-            }).eq('token', token).execute()
+            try:
+                supabase.table('candidats').update({
+                    "analyse_status": "error",
+                    "analyse_error": str(e),
+                    "analyse_auto_date": datetime.datetime.now().isoformat()
+                }).eq('token', token).execute()
+            except:
+                pass
 
 # ===== ROUTES API =====
 @app.route('/api/postes', methods=['GET'])
@@ -2889,15 +2996,17 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.0-enhanced",
+        "version": "v5.1-final",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
+        "scoring_strict": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.0-enhanced demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.1-final demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
+    logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     app.run(host="0.0.0.0", port=port, debug=False)
