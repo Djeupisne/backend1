@@ -145,7 +145,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v5.1-final',
+        'version': 'v5.2-final',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -307,12 +307,12 @@ def extract_text_from_pdf_via_ocr(file_bytes):
         return ""
     except Exception:
         return ""
-MAX_PDF_PAGES = 15
-MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
-MAX_TEXT_SIZE = 15000
+MAX_PDF_PAGES = 10
+MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024
+MAX_TEXT_SIZE = 8000
 def extract_text_from_pdf_robust(file_bytes, filename):
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
-        logger.warning(f"PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 10 MB): {filename}")
+        logger.warning(f"PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 5 MB): {filename}")
         return ""
     text = ""
     if PDFPLUMBER_AVAILABLE:
@@ -1926,6 +1926,23 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.save(buf)
     buf.seek(0)
     return buf
+def _save_error(token, error_message, statut="rejete"):
+    if supabase:
+        try:
+            supabase.table('candidats').update({
+                "score": "0",
+                "decision": f"Rejet - {error_message}",
+                "statut": statut,
+                "analyse_status": "error",
+                "analyse_error": error_message,
+                "analyse_auto_date": datetime.datetime.now().isoformat(),
+                "analyse_details": json.dumps({
+                    "erreur": error_message,
+                    "moteur": "verification_cv"
+                }, ensure_ascii=False)
+            }).eq('token', token).execute()
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde: {e}")
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
         if not force and not is_poste_actif(poste):
@@ -1947,23 +1964,49 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             cv_bytes = download_file_from_supabase(cv_filename)
             if cv_bytes:
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
+                if len(cv_text) > MAX_TEXT_SIZE:
+                    cv_text = cv_text[:MAX_TEXT_SIZE]
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase(lettre_filename)
             if lm_bytes:
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
+                if len(lm_text) > MAX_TEXT_SIZE:
+                    lm_text = lm_text[:MAX_TEXT_SIZE]
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
                 att_bytes = download_file_from_supabase(fn)
                 if att_bytes:
                     t = extract_text_robust_from_bytes(att_bytes, fn)
+                    if t and len(t) > MAX_TEXT_SIZE:
+                        t = t[:MAX_TEXT_SIZE]
                     if t:
                         att_texts.append(t)
-        logger.info(f"🔍 Analyse pour {token} - poste: {poste}")
+        if not cv_text or len(cv_text.strip()) < 50:
+            logger.warning(f"CV manquant ou vide pour {token}")
+            _save_error(token, "CV manquant ou vide", "rejete")
+            return
+        if lm_text and len(lm_text.strip()) > 50 and cv_text:
+            cv_clean = re.sub(r'\s+', ' ', cv_text.strip().lower())
+            lm_clean = re.sub(r'\s+', ' ', lm_text.strip().lower())
+            if len(cv_clean) > 100 and len(lm_clean) > 100:
+                cv_words = set(cv_clean.split())
+                lm_words = set(lm_clean.split())
+                if cv_words and lm_words:
+                    common = len(cv_words & lm_words)
+                    similarity = common / max(len(cv_words), len(lm_words))
+                    if similarity > 0.85:
+                        logger.warning(f"CV et lettre identiques pour {token} (similarite: {similarity:.0%})")
+                        lm_text = ""
+                        supabase.table('candidats').update({
+                            "note": "Attention: Le CV et la lettre de motivation sont identiques. Une lettre personnalisee est attendue."
+                        }).eq('token', token).execute()
+        logger.info(f"Analyse pour {token} - poste: {poste}")
+        gc.collect()
         if poste == "Chargé(e) d'Administration de Crédit":
             result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
-            logger.info(f"📊 Score calculé: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
+            logger.info(f"Score calcule: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
         elif poste == "Chef de Section Compensation":
             result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
         elif poste == "Chef de Division Local Corporate":
@@ -2007,15 +2050,13 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             update_data["analyse_details"] = json.dumps(details, ensure_ascii=False)
             update_data["score_breakdown"] = json.dumps(score_breakdown, ensure_ascii=False)
             supabase.table('candidats').update(update_data).eq('token', token).execute()
-            logger.info(f"✅ [{decision}] Score {token}: {score}/{score_max} → statut: {statut}")
-        else:
-            logger.warning(f"⚠️ Supabase non disponible - mise à jour impossible pour {token}")
+            logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut}")
         del cv_text, lm_text, att_texts, result
         gc.collect()
     except Exception as e:
         import traceback
         traceback.print_exc()
-        logger.error(f"❌ Erreur analyse {token}: {str(e)}")
+        logger.error(f"Erreur analyse {token}: {str(e)}")
         if supabase:
             try:
                 supabase.table('candidats').update({
@@ -2773,7 +2814,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.1-final",
+        "version": "v5.2-final",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -2782,7 +2823,8 @@ def health_version():
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.1-final demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.2-final demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
+    logger.info(f"Verification CV: Active (CV obligatoire, CV different de la lettre)")
     app.run(host="0.0.0.0", port=port, debug=False)
