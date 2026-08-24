@@ -1669,74 +1669,96 @@ def get_display_status(c):
     return 'en_attente'
 def generate_detailed_reason(candidat, poste, score, score_max):
     statut = candidat.get('statut', 'en_attente')
-    if statut == "rejete":
-        note = candidat.get('note', 'Décision manuelle du recruteur')
-        return f"REJETE PAR LE RECRUTEUR - {note}"
-    if statut == "retenu":
-        note = candidat.get('note', 'Décision manuelle du recruteur')
-        return f"RETENU PAR LE RECRUTEUR - {note}"
-    if statut == "entretien":
-        note = candidat.get('note', 'Décision manuelle du recruteur')
-        return f"ENTRETIEN DECIDE PAR LE RECRUTEUR - {note}"
     details = candidat.get('analyse_details_parsed', {})
     flags = candidat.get('flags_eliminatoires_parsed', [])
     strengths = details.get('points_forts', [])
     weaknesses = details.get('points_vigilance', [])
     sous_scores = candidat.get('score_breakdown_parsed', {}).get('sous_scores', {})
-    decision = get_recommandation_from_score(score, poste)
-    if flags:
-        lines = ["REJETE - Critères éliminatoires non satisfaits :"]
-        for flag in flags[:3]:
-            clean = str(flag).replace('❌', '').replace('⚠️', '').strip()
-            if clean and len(clean) > 5:
-                lines.append(f"  - {clean}")
-        if len(flags) > 3:
-            lines.append(f"  - +{len(flags)-3} autre(s)")
-        return "\n".join(lines)
-    if "Entretien prioritaire" in decision or "Shortlist" in decision:
-        lines = ["PROFIL RECOMMANDE - Points forts :"]
+    note = candidat.get('note', '')
+    decision_auto = get_recommandation_from_score(score, poste)
+    if statut == "rejete":
+        if flags:
+            lines = ["CRITÈRES ÉLIMINATOIRES NON SATISFAITS :"]
+            for flag in flags[:3]:
+                clean = str(flag).replace('❌', '').replace('⚠️', '').strip()
+                if clean and len(clean) > 5:
+                    lines.append(f"  • {clean}")
+            if len(flags) > 3:
+                lines.append(f"  • +{len(flags)-3} autre(s)")
+            if note and len(note) > 5:
+                lines.append(f"\nNOTE RECRUTEUR : {note}")
+            return "\n".join(lines)
+        if weaknesses:
+            lines = ["POINTS DE VIGILANCE :"]
+            for w in weaknesses[:3]:
+                lines.append(f"  • {w}")
+            if note:
+                lines.append(f"\nNOTE RECRUTEUR : {note}")
+            return "\n".join(lines)
+        return f"REJETÉ - {note if note else 'Profil ne correspond pas aux exigences du poste'}"
+    elif statut == "retenu":
         if strengths:
+            lines = ["POINTS FORTS :"]
             for s in strengths[:4]:
-                lines.append(f"  - {s}")
-        else:
-            lines.append("  - Profil correspond aux exigences du poste")
-        if sous_scores:
-            for key, value in sous_scores.items():
-                if value > 0:
-                    lines.append(f"  - {key}: {value}/3")
-        synthese = details.get('synthese_recruteur', '')
-        if synthese:
-            lines.append(f"\n{synthese}")
-        return "\n".join(lines)
-    elif "Potentiel" in decision:
-        lines = ["POTENTIEL A EVALUER - Points d'interet :"]
+                lines.append(f"  • {s}")
+            if sous_scores:
+                for key, value in sous_scores.items():
+                    if value > 0:
+                        lines.append(f"  • {key}: {value}/3")
+            if note:
+                lines.append(f"\nNOTE RECRUTEUR : {note}")
+            return "\n".join(lines)
+        if note:
+            return f"RETENU - {note}"
+        return "RETENU - Candidature retenue"
+    elif statut == "entretien":
+        lines = ["POTENTIEL À ÉVALUER :"]
         if strengths:
             for s in strengths[:2]:
-                lines.append(f"  - {s}")
-        else:
-            lines.append("  - Profil à approfondir en entretien")
+                lines.append(f"  • {s}")
         if weaknesses:
-            lines.append("Points de vigilance :")
+            lines.append("Points à vérifier :")
             for w in weaknesses[:2]:
-                lines.append(f"  - {w}")
-        lines.append("\nA convoquer en entretien pour évaluer la motivation")
-        if "IFRS" in str(weaknesses) or "garanties" in str(weaknesses):
-            lines.append("Verifier les connaissances en IFRS 9 et garanties")
+                lines.append(f"  • {w}")
+        if note:
+            lines.append(f"\nNOTE RECRUTEUR : {note}")
         return "\n".join(lines)
     else:
-        lines = ["NON RETENU - Raisons :"]
-        if weaknesses:
-            for w in weaknesses[:3]:
-                lines.append(f"  - {w}")
+        if flags:
+            lines = ["CRITÈRES ÉLIMINATOIRES :"]
+            for flag in flags[:3]:
+                clean = str(flag).replace('❌', '').replace('⚠️', '').strip()
+                if clean and len(clean) > 5:
+                    lines.append(f"  • {clean}")
+            return "\n".join(lines)
+        if "Entretien prioritaire" in decision_auto or "Shortlist" in decision_auto:
+            lines = ["PROFIL RECOMMANDÉ :"]
+            if strengths:
+                for s in strengths[:4]:
+                    lines.append(f"  • {s}")
+            if sous_scores:
+                for key, value in sous_scores.items():
+                    if value > 0:
+                        lines.append(f"  • {key}: {value}/3")
+            return "\n".join(lines)
+        elif "Potentiel" in decision_auto:
+            lines = ["POTENTIEL À ÉVALUER :"]
+            if strengths:
+                for s in strengths[:2]:
+                    lines.append(f"  • {s}")
+            if weaknesses:
+                lines.append("Points de vigilance :")
+                for w in weaknesses[:2]:
+                    lines.append(f"  • {w}")
+            return "\n".join(lines)
         else:
-            lines.append("  - Profil ne correspond pas aux exigences du poste")
-        attn = details.get('points_attention', [])
-        if attn:
-            for a in attn[:2]:
-                lines.append(f"  - {a}")
-        if score > 0:
-            lines.append(f"\nScore : {score}/{score_max}")
-        return "\n".join(lines)
+            lines = ["NON RETENU - Raisons :"]
+            if weaknesses:
+                for w in weaknesses[:3]:
+                    lines.append(f"  • {w}")
+            if not weaknesses and not flags:
+                lines.append("  • Profil ne correspond pas aux exigences du poste")
+            return "\n".join(lines)
 def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     if not OPENPYXL_AVAILABLE:
         return None
