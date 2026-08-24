@@ -1862,27 +1862,9 @@ def generate_detailed_reason(candidat, poste, score, score_max):
     sous_scores = candidat.get('score_breakdown_parsed', {}).get('sous_scores', {})
     note = candidat.get('note', '')
     decision_auto = get_recommandation_from_score(score, poste)
-    if statut == "rejete":
-        if flags:
-            lines = ["CRITÈRES ÉLIMINATOIRES NON SATISFAITS :"]
-            for flag in flags[:3]:
-                clean = str(flag).replace('❌', '').replace('⚠️', '').strip()
-                if clean and len(clean) > 5:
-                    lines.append(f"  • {clean}")
-            if len(flags) > 3:
-                lines.append(f"  • +{len(flags)-3} autre(s)")
-            if note and len(note) > 5:
-                lines.append(f"\nNOTE RECRUTEUR : {note}")
-            return "\n".join(lines)
-        if weaknesses:
-            lines = ["POINTS DE VIGILANCE :"]
-            for w in weaknesses[:3]:
-                lines.append(f"  • {w}")
-            if note:
-                lines.append(f"\nNOTE RECRUTEUR : {note}")
-            return "\n".join(lines)
-        return f"REJETÉ - {note if note else 'Profil ne correspond pas aux exigences du poste'}"
-    elif statut == "retenu":
+    
+    # ===== RETENU =====
+    if statut == "retenu":
         if strengths:
             lines = ["POINTS FORTS :"]
             for s in strengths[:4]:
@@ -1891,13 +1873,15 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                 for key, value in sous_scores.items():
                     if value > 0:
                         lines.append(f"  • {key}: {value}/3")
-            if note:
+            if note and "Décision" not in note and len(note) > 5:
                 lines.append(f"\nNOTE RECRUTEUR : {note}")
             return "\n".join(lines)
-        if note:
+        if note and "Décision" not in note and len(note) > 5:
             return f"RETENU - {note}"
         return "RETENU - Candidature retenue"
-    elif statut == "entretien":
+    
+    # ===== ENTREPRISE =====
+    if statut == "entretien":
         lines = ["POTENTIEL À ÉVALUER :"]
         if strengths:
             for s in strengths[:2]:
@@ -1906,9 +1890,50 @@ def generate_detailed_reason(candidat, poste, score, score_max):
             lines.append("Points à vérifier :")
             for w in weaknesses[:2]:
                 lines.append(f"  • {w}")
-        if note:
+        if note and "Décision" not in note and len(note) > 5:
             lines.append(f"\nNOTE RECRUTEUR : {note}")
         return "\n".join(lines)
+    
+    # ===== REJETE =====
+    if statut == "rejete":
+        # 1. Priorité aux flags éliminatoires (rejet automatique)
+        if flags:
+            lines = ["CRITÈRES ÉLIMINATOIRES NON SATISFAITS :"]
+            for flag in flags[:4]:
+                clean = str(flag).replace('❌', '').replace('⚠️', '').strip()
+                if clean and len(clean) > 3:
+                    lines.append(f"  • {clean}")
+            if len(flags) > 4:
+                lines.append(f"  • +{len(flags)-4} autre(s)")
+            if note and "Décision" not in note and len(note) > 5:
+                lines.append(f"\nNOTE RECRUTEUR : {note}")
+            return "\n".join(lines)
+        
+        # 2. Points de vigilance (si présents)
+        if weaknesses:
+            lines = ["POINTS DE VIGILANCE :"]
+            for w in weaknesses[:4]:
+                lines.append(f"  • {w}")
+            if note and "Décision" not in note and len(note) > 5:
+                lines.append(f"\nNOTE RECRUTEUR : {note}")
+            return "\n".join(lines)
+        
+        # 3. Si note personnalisée (non générique)
+        if note and "Décision" not in note and len(note) > 5:
+            return f"REJETÉ - {note}"
+        
+        # 4. Si le score est 0 (échec analyse)
+        if score == 0:
+            return "REJETÉ - Analyse automatique : le candidat ne répond pas aux critères éliminatoires du poste"
+        
+        # 5. Si score faible
+        if score < 7:
+            return f"REJETÉ - Score insuffisant ({score}/{score_max}) - Profil ne correspond pas aux exigences du poste"
+        
+        # 6. Fallback
+        return "REJETÉ - Profil ne correspond pas aux exigences du poste"
+    
+    # ===== EN ATTENTE =====
     else:
         if flags:
             lines = ["CRITÈRES ÉLIMINATOIRES :"]
@@ -1917,6 +1942,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                 if clean and len(clean) > 5:
                     lines.append(f"  • {clean}")
             return "\n".join(lines)
+        
         if "Entretien prioritaire" in decision_auto or "Shortlist" in decision_auto:
             lines = ["PROFIL RECOMMANDÉ :"]
             if strengths:
@@ -1927,6 +1953,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                     if value > 0:
                         lines.append(f"  • {key}: {value}/3")
             return "\n".join(lines)
+        
         elif "Potentiel" in decision_auto:
             lines = ["POTENTIEL À ÉVALUER :"]
             if strengths:
@@ -1937,6 +1964,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                 for w in weaknesses[:2]:
                     lines.append(f"  • {w}")
             return "\n".join(lines)
+        
         else:
             lines = ["NON RETENU - Raisons :"]
             if weaknesses:
