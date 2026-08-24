@@ -844,16 +844,45 @@ GRILLE = {
     },
     "Data Analyst Finance": {
         "eliminatoire": [
-            "Critères de présélection à venir"
+            "A une formation en Finance, Comptabilité, Contrôle de gestion, Statistiques, Data Analytics ou Informatique décisionnelle",
+            "A un diplôme de niveau Bac+3 ou supérieur",
+            "A une expérience en analyse financière, reporting financier, contrôle de gestion, audit ou data analytics",
+            "Maîtrise Excel (TCD, formules, Power Query) - compétence incontournable",
+            "A des connaissances en comptabilité et en états financiers (P&L, bilan, flux de trésorerie)"
         ],
-        "a_verifier": [],
-        "signaux_forts": [],
-        "points_attention": []
+        "a_verifier": [
+            "A produit des rapports financiers périodiques (mensuels, trimestriels)",
+            "A conçu ou maintenu des tableaux de bord financiers (Power BI, Excel ou autre outil BI)",
+            "A réalisé des analyses Budget / Réalisé / N-1 avec identification des écarts",
+            "A travaillé avec SQL pour extraire ou interroger des données financières",
+            "A assuré la réconciliation de données multi-sources (comptabilité / systèmes opérationnels)",
+            "A participé à l'élaboration d'un budget ou d'un forecast financier",
+            "A une expérience dans le secteur bancaire ou avec un Core Banking (FLEXCUBE, T24, Amplitude)"
+        ],
+        "signaux_forts": [
+            "Maîtrise explicite de Power BI (dashboards, DAX, Power Query) avec exemples concrets",
+            "Expérience avérée en automatisation de reportings (Power Query, VBA, Python, outils ETL)",
+            "Analyse d'écarts Budget / Réalisé / N-1 avec présentation à la Direction Financière ou à la DG",
+            "Participation à la construction de modèles de prévision financière ou d'analyses de scénarios",
+            "Exposition aux données bancaires : PNB, NPL, coût du risque, rentabilité par agence ou produit",
+            "Maîtrise de SQL pour l'extraction et la manipulation de données en base relationnelle",
+            "Connaissance de Python ou R pour des analyses statistiques avancées",
+            "Mise en place de contrôles qualité sur les données et documentation des règles de calcul",
+            "Résultats quantifiés dans le CV : gains de productivité, délais réduits, anomalies détectées"
+        ],
+        "points_attention": [
+            "Profil purement comptable sans exposition aux outils BI ou au reporting de gestion",
+            "Profil exclusivement IT / développeur sans connaissance financière",
+            "Expérience uniquement académique ou stage sans production de reportings réels en environnement professionnel",
+            "CV sans aucun outil cité nommément",
+            "Missions décrites en termes génériques sans livrables précis ni résultats mesurables",
+            "Trous inexpliqués dans le parcours ou expériences très courtes sans progression visible"
+        ]
     }
 }
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]
-POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate"]
+POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate", "Data Analyst Finance"]
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
         return 12
@@ -861,8 +890,6 @@ def get_score_max_for_poste(poste):
         return 14
     if poste in POSTES_AVEC_SCORING_100:
         return 100
-    if poste == "Data Analyst Finance":
-        return 10
     return 10
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
@@ -1376,25 +1403,121 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'synthese': synthese
     }
 def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts_list):
+    """
+    Scoring pour Data Analyst Finance - Grille de présélection
+    Score max: 14
+    Critères éliminatoires formulés positivement (vert si présent, rouge si absent)
+    """
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
-    score = 0
-    points_forts = []
-    points_vigilance = []
-    data_keywords = ['data', 'analyse', 'analytics', 'tableau', 'power bi', 'sql', 'python', 'r', 'statistique', 'machine learning', 'datawarehouse', 'etl', 'dashboard', 'kpi', 'visualisation', 'big data', 'excel avancé', 'vba', 'power query']
-    found_data = sum(1 for kw in data_keywords if kw in cv_text.lower())
-    if found_data >= 3:
-        score += 3
-        points_forts.append("Compétences data détectées")
-    finance_keywords = ['finance', 'financier', 'banking', 'bancaire', 'comptabilité', 'accounting', 'reporting', 'budget', 'forecast', 'prévision', 'financial', 'risk', 'risque', 'credit', 'crédit', 'portefeuille', 'ifrs']
-    found_finance = sum(1 for kw in finance_keywords if kw in cv_text.lower())
-    if found_finance >= 3:
-        score += 3
-        points_forts.append("Exposition finance/bancaire")
-    if re.search(r'(bac\+5|master|ingénieur|mba|doctorat|phd|école de commerce)', cv_text.lower()):
-        score += 2
-        points_forts.append("Formation supérieure")
+    
+    flags_elim = []
+    
+    # Éliminatoire 1: Formation en Finance/Comptabilité/Data
+    formation_keywords = ['finance', 'comptabilité', 'comptabilite', 'contrôle de gestion', 'controle de gestion', 'statistiques', 'statistique', 'data analytics', 'analyse de données', 'business intelligence', 'informatique décisionnelle', 'informatique decisionnelle', 'économie', 'economie']
+    formation_ok = any(kw in cv_text.lower() for kw in formation_keywords)
+    if not formation_ok:
+        flags_elim.append("Formation en Finance, Comptabilité, Contrôle de gestion, Statistiques, Data Analytics ou Informatique décisionnelle")
+    
+    # Éliminatoire 2: Niveau Bac+3 minimum
+    diplome_ok = False
+    diplome_patterns = [r'bac\+3', r'bac 3', r'licence', r'bachelor', r'bac\+4', r'bac 4', r'master', r'mba', r'ingénieur', r'ingenieur', r'bac\+5', r'bac 5', r'maîtrise', r'maitrise', r'doctorat', r'phd', r'école de commerce', r'ecole de commerce', r'école supérieure', r'ecole superieure']
+    for pattern in diplome_patterns:
+        if re.search(pattern, cv_text.lower()):
+            diplome_ok = True
+            break
+    if not diplome_ok:
+        flags_elim.append("Diplôme de niveau Bac+3 ou supérieur")
+    
+    # Éliminatoire 3: Expérience en analyse/reporting/data
+    exp_keywords = ['analyse financière', 'analyse financiere', 'reporting financier', 'contrôle de gestion', 'controle de gestion', 'audit', 'data analytics', 'analyse de données', 'analyse de donnees', 'tableau de bord', 'dashboard', 'reporting', 'rapport financier']
+    exp_ok = any(kw in cv_text.lower() for kw in exp_keywords)
+    if not exp_ok:
+        flags_elim.append("Expérience en analyse financière, reporting financier, contrôle de gestion, audit ou data analytics")
+    
+    # Éliminatoire 4: Maîtrise d'Excel
+    excel_keywords = ['excel', 'power query', 'tableau croisé', 'tcd', 'formule excel', 'vba']
+    excel_ok = any(kw in cv_text.lower() for kw in excel_keywords)
+    if not excel_ok:
+        flags_elim.append("Maîtrise Excel (TCD, formules, Power Query) - compétence incontournable")
+    
+    # Éliminatoire 5: Connaissance comptabilité
+    comptab_keywords = ['comptabilité', 'comptabilite', 'états financiers', 'etats financiers', 'p&l', 'bilan', 'flux de trésorerie', 'accounting', 'financial statements', 'income statement', 'balance sheet', 'cash flow']
+    comptab_ok = any(kw in cv_text.lower() for kw in comptab_keywords)
+    if not comptab_ok:
+        flags_elim.append("Connaissances en comptabilité et en états financiers (P&L, bilan, flux de trésorerie)")
+    
+    if flags_elim:
+        return {
+            'score': 0,
+            'score_max': 14,
+            'decision': 'Rejet',
+            'flags_eliminatoires': flags_elim,
+            'sous_scores': {
+                "Adéquation expérience (reporting/analyse/data)": 0,
+                "Maîtrise outils BI (Excel/Power BI)": 0,
+                "Connaissance SQL": 0,
+                "Exposition données bancaires/Core Banking": 0,
+                "Cohérence et progression": 0,
+                "Qualité CV + Lettre": 0,
+                "Compétences avancées": 0
+            },
+            'checklist': {},
+            'detail': f"REJET IMMÉDIAT - {len(flags_elim)} critère(s) éliminatoire(s) non satisfait(s)",
+            'points_forts': [],
+            'points_vigilance': flags_elim,
+            'synthese': f"Rejet immédiat : {', '.join(flags_elim[:3])}"
+        }
+    
+    # === SCORING ===
+    
+    # 1. Adéquation de l'expérience (0-3)
+    exp_score = 0
+    reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'budget', 'réalisé', 'realise', 'écart', 'ecart', 'analyse', 'prévision', 'prevision', 'forecast', 'contrôle de gestion', 'controle de gestion', 'data analyst', 'analyste de données']
+    found_exp = sum(1 for kw in reporting_keywords if kw in cv_text.lower())
+    if found_exp >= 6:
+        exp_score = 3
+    elif found_exp >= 4:
+        exp_score = 2
+    elif found_exp >= 2:
+        exp_score = 1
+    
+    # 2. Maîtrise des outils BI (0-3)
+    bi_score = 0
+    excel_advanced = ['excel avancé', 'excel avance', 'power query', 'tcd', 'tableau croisé', 'vba excel']
+    powerbi = ['power bi', 'powerbi', 'dax']
+    has_excel_advanced = any(kw in cv_text.lower() for kw in excel_advanced)
+    has_powerbi = any(kw in cv_text.lower() for kw in powerbi)
+    if has_powerbi and has_excel_advanced:
+        bi_score = 3
+    elif has_powerbi:
+        bi_score = 2
+    elif has_excel_advanced:
+        bi_score = 1
+    if 'tableau' in cv_text.lower() and bi_score > 0:
+        bi_score = min(3, bi_score + 1)
+    
+    # 3. Connaissance SQL (0-2)
+    sql_score = 0
+    sql_keywords = ['sql', 'base de données', 'base de donnees', 'extraction', 'requête', 'requete', 'data warehouse', 'etl', 'select', 'join']
+    found_sql = sum(1 for kw in sql_keywords if kw in cv_text.lower())
+    if found_sql >= 4:
+        sql_score = 2
+    elif found_sql >= 2:
+        sql_score = 1
+    
+    # 4. Exposition données bancaires / Core Banking (0-2)
+    bank_score = 0
+    banking_keywords = ['banque', 'bancaire', 'core banking', 'flexcube', 't24', 'amplitude', 'financial institution', 'institution financière', 'pnb', 'npl', 'coût du risque', 'cout du risque', 'rentabilité', 'rentabilite', 'agence', 'produit bancaire', 'crédit', 'credit']
+    found_bank = sum(1 for kw in banking_keywords if kw in cv_text.lower())
+    if found_bank >= 4:
+        bank_score = 2
+    elif found_bank >= 2:
+        bank_score = 1
+    
+    # 5. Cohérence et progression (0-2)
+    coher_score = 0
     blocks = split_into_jobs(cv_text)
     total_years = 0.0
     for block in blocks:
@@ -1403,33 +1526,96 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
         duration = extract_duration_years_from_block(block)
         if duration > 0:
             total_years += duration
-    if total_years >= 2:
-        score += 2
-        points_forts.append(f"Expérience professionnelle ({total_years:.1f} ans)")
-    score = min(10, score)
-    if score >= 8:
+    if total_years >= 5:
+        coher_score = 2
+    elif total_years >= 3:
+        coher_score = 1
+    if re.search(r'(responsable|lead|senior|chef|manager|superviseur|coordinateur)', cv_text.lower()):
+        coher_score = min(2, coher_score + 1)
+    
+    # 6. Qualité CV + Lettre (0-1)
+    qualite_score = 0
+    has_quantified = bool(re.search(r'\d+\s*(%|pourcent|réduction|reduction|gain|amélioration|amelioration|efficacité|efficacite)', cv_text.lower()))
+    has_tools = bool(re.search(r'(power bi|powerbi|sql|excel|python|r|tableau|etl|vba|dax)', cv_text.lower()))
+    if has_quantified and has_tools:
+        qualite_score = 1
+    if lettre_text and len(lettre_text.strip()) > 80:
+        lettre_kw = ['data', 'finance', 'analyste', 'reporting', 'dashboard', 'analyse', 'données', 'donnees']
+        if any(kw in lettre_text.lower() for kw in lettre_kw):
+            if 'power bi' in lettre_text.lower() or 'excel' in lettre_text.lower() or 'sql' in lettre_text.lower():
+                qualite_score = 1
+    
+    # 7. Compétences avancées (0-1)
+    avance_score = 0
+    advanced_keywords = ['python', 'r', 'automatisation', 'modélisation', 'modelisation', 'prévision', 'prevision', 'scénario', 'scenario', 'reporting réglementaire', 'reporting reglementaire', 'machine learning']
+    found_adv = sum(1 for kw in advanced_keywords if kw in cv_text.lower())
+    if found_adv >= 2:
+        avance_score = 1
+    
+    total_score = exp_score + bi_score + sql_score + bank_score + coher_score + qualite_score + avance_score
+    total_score = min(14, total_score)
+    
+    if total_score >= 11:
         decision = "Entretien prioritaire"
-    elif score >= 5:
+    elif total_score >= 7:
         decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
-        points_vigilance.append("Expérience ou compétences insuffisantes")
+    
+    points_forts = []
+    points_vigilance = []
+    
+    if exp_score >= 2:
+        points_forts.append("Expérience en reporting/analyse financière")
+    if bi_score >= 2:
+        points_forts.append("Maîtrise des outils BI (Excel/Power BI)")
+    if sql_score >= 2:
+        points_forts.append("Maîtrise de SQL")
+    if bank_score >= 2:
+        points_forts.append("Exposition au secteur bancaire")
+    if coher_score >= 2:
+        points_forts.append("Parcours cohérent avec progression")
+    if avance_score >= 1:
+        points_forts.append("Compétences avancées (Python/R/automatisation)")
+    
+    if exp_score < 2:
+        points_vigilance.append("Expérience en analyse financière limitée")
+    if bi_score < 2:
+        points_vigilance.append("Maîtrise des outils BI à renforcer")
+    if sql_score < 1:
+        points_vigilance.append("Compétences SQL à approfondir")
+    if bank_score < 1:
+        points_vigilance.append("Exposition au secteur bancaire limitée")
+    
+    sous_scores = {
+        "Adéquation expérience (reporting/analyse/data)": exp_score,
+        "Maîtrise outils BI (Excel/Power BI)": bi_score,
+        "Connaissance SQL": sql_score,
+        "Exposition données bancaires/Core Banking": bank_score,
+        "Cohérence et progression": coher_score,
+        "Qualité CV + Lettre": qualite_score,
+        "Compétences avancées": avance_score
+    }
+    
+    synthese = f"Candidat avec un score de {total_score}/14. "
+    if total_score >= 11:
+        synthese += "Profil très solide pour le poste de Data Analyst Finance. Excellente adéquation avec les exigences du poste. À recommander pour entretien prioritaire."
+    elif total_score >= 7:
+        synthese += "Profil intéressant avec des compétences pertinentes. Certains domaines sont à approfondir mais le potentiel est présent. À convoquer en entretien."
+    else:
+        synthese += "Profil insuffisant pour le poste. Manque de compétences clés en analyse financière et outils BI."
+    
     return {
-        'score': score,
-        'score_max': 10,
+        'score': total_score,
+        'score_max': 14,
         'decision': decision,
         'flags_eliminatoires': [],
-        'sous_scores': {
-            "Compétences Data": min(3, found_data // 2) if found_data > 0 else 0,
-            "Exposition Finance": min(3, found_finance // 2) if found_finance > 0 else 0,
-            "Formation": 2 if re.search(r'(bac\+5|master|ingénieur)', cv_text.lower()) else 0,
-            "Expérience": min(2, int(total_years // 2)) if total_years >= 2 else 0
-        },
+        'sous_scores': sous_scores,
         'checklist': {},
-        'detail': f"Score: {score}/10 — {decision}",
+        'detail': f"Score: {total_score}/14 — {decision}",
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
-        'synthese': f"Candidat avec un score de {score}/10. " + ("Profil prometteur à convoquer." if score >= 8 else "Profil à approfondir." if score >= 5 else "Profil insuffisant pour le poste.")
+        'synthese': synthese
     }
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
