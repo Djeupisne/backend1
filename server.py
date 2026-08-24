@@ -477,9 +477,10 @@ POSTES = [
     "Chef service reporting réglementaire",
     "Chef de Section Compensation",
     "Chargé(e) d'Administration de Crédit",
-    "Chef de Division Local Corporate"
+    "Chef de Division Local Corporate",
+    "Data Analyst Finance"
 ]
-POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate"]
+POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
@@ -840,6 +841,14 @@ GRILLE = {
             "Aucune notion de risque",
             "Expériences très courtes sans progression"
         ]
+    },
+    "Data Analyst Finance": {
+        "eliminatoire": [
+            "Critères de présélection à venir"
+        ],
+        "a_verifier": [],
+        "signaux_forts": [],
+        "points_attention": []
     }
 }
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
@@ -852,6 +861,8 @@ def get_score_max_for_poste(poste):
         return 14
     if poste in POSTES_AVEC_SCORING_100:
         return 100
+    if poste == "Data Analyst Finance":
+        return 10
     return 10
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
@@ -1363,6 +1374,62 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
         'synthese': synthese
+    }
+def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts_list):
+    all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
+    raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
+    normalized = normalize_for_matching(raw_full)[0]
+    score = 0
+    points_forts = []
+    points_vigilance = []
+    data_keywords = ['data', 'analyse', 'analytics', 'tableau', 'power bi', 'sql', 'python', 'r', 'statistique', 'machine learning', 'datawarehouse', 'etl', 'dashboard', 'kpi', 'visualisation', 'big data', 'excel avancé', 'vba', 'power query']
+    found_data = sum(1 for kw in data_keywords if kw in cv_text.lower())
+    if found_data >= 3:
+        score += 3
+        points_forts.append("Compétences data détectées")
+    finance_keywords = ['finance', 'financier', 'banking', 'bancaire', 'comptabilité', 'accounting', 'reporting', 'budget', 'forecast', 'prévision', 'financial', 'risk', 'risque', 'credit', 'crédit', 'portefeuille', 'ifrs']
+    found_finance = sum(1 for kw in finance_keywords if kw in cv_text.lower())
+    if found_finance >= 3:
+        score += 3
+        points_forts.append("Exposition finance/bancaire")
+    if re.search(r'(bac\+5|master|ingénieur|mba|doctorat|phd|école de commerce)', cv_text.lower()):
+        score += 2
+        points_forts.append("Formation supérieure")
+    blocks = split_into_jobs(cv_text)
+    total_years = 0.0
+    for block in blocks:
+        if is_stage_block(block):
+            continue
+        duration = extract_duration_years_from_block(block)
+        if duration > 0:
+            total_years += duration
+    if total_years >= 2:
+        score += 2
+        points_forts.append(f"Expérience professionnelle ({total_years:.1f} ans)")
+    score = min(10, score)
+    if score >= 8:
+        decision = "Entretien prioritaire"
+    elif score >= 5:
+        decision = "Potentiel à évaluer en entretien"
+    else:
+        decision = "Rejet"
+        points_vigilance.append("Expérience ou compétences insuffisantes")
+    return {
+        'score': score,
+        'score_max': 10,
+        'decision': decision,
+        'flags_eliminatoires': [],
+        'sous_scores': {
+            "Compétences Data": min(3, found_data // 2) if found_data > 0 else 0,
+            "Exposition Finance": min(3, found_finance // 2) if found_finance > 0 else 0,
+            "Formation": 2 if re.search(r'(bac\+5|master|ingénieur)', cv_text.lower()) else 0,
+            "Expérience": min(2, int(total_years // 2)) if total_years >= 2 else 0
+        },
+        'checklist': {},
+        'detail': f"Score: {score}/10 — {decision}",
+        'points_forts': points_forts,
+        'points_vigilance': points_vigilance,
+        'synthese': f"Candidat avec un score de {score}/10. " + ("Profil prometteur à convoquer." if score >= 8 else "Profil à approfondir." if score >= 5 else "Profil insuffisant pour le poste.")
     }
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
@@ -2086,6 +2153,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
         elif poste == "Chef de Division Local Corporate":
             result = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
+        elif poste == "Data Analyst Finance":
+            result = calculate_score_data_analyst_finance(cv_text, lm_text, att_texts)
         else:
             result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
             if result is None:
@@ -2609,6 +2678,8 @@ def reanalyze_fast():
                     result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
                 elif poste == "Chef de Division Local Corporate":
                     result = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
+                elif poste == "Data Analyst Finance":
+                    result = calculate_score_data_analyst_finance(cv_text, lm_text, att_texts)
                 else:
                     result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
                 if supabase:
