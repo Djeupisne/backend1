@@ -164,7 +164,7 @@ def after_request(response):
     return response
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
-    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running', 'version': 'v5.7-persistent', 'features': {'pdf_available': PDFPLUMBER_AVAILABLE, 'docx_available': DOCX_AVAILABLE, 'reportlab_available': REPORTLAB_AVAILABLE, 'openpyxl_available': OPENPYXL_AVAILABLE, 'ia_available': IA_ANALYSE_ACTIVE, 'scoring_strict': True, 'manual_status_priority': True, 'auto_width_excel': True, 'async_export': True, 'persistent_tasks': True}}), 200
+    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running', 'version': 'v5.8-force', 'features': {'pdf_available': PDFPLUMBER_AVAILABLE, 'docx_available': DOCX_AVAILABLE, 'reportlab_available': REPORTLAB_AVAILABLE, 'openpyxl_available': OPENPYXL_AVAILABLE, 'ia_available': IA_ANALYSE_ACTIVE, 'scoring_strict': True, 'manual_status_priority': True, 'auto_width_excel': True, 'async_export': True, 'persistent_tasks': True, 'force_mode': True}}), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
@@ -2607,6 +2607,111 @@ def download_zip(task_id):
                 logger.error(f"Cleanup ZIP error: {e}")
         threading.Thread(target=cleanup, daemon=True).start()
 
+@app.route('/api/recruteur/dossiers/zip/force/<task_id>', methods=['POST'])
+@jwt_required()
+def force_zip_task(task_id):
+    task = get_zip_task(task_id)
+    if not task:
+        return jsonify({'error': 'Tache introuvable'}), 404
+    logger.info(f"🚀 FORCE execution de la tâche {task_id}")
+    try:
+        poste_filter = task.get('poste_filter', '')
+        date_start = task.get('date_start', '')
+        date_end = task.get('date_end', '')
+        response = supabase.table('candidats').select('*').execute()
+        all_candidats = response.data if response.data else []
+        candidats = []
+        for c in all_candidats:
+            c['id'] = c.get('token', '')
+            if poste_filter and c.get('poste') != poste_filter:
+                continue
+            date_cand = c.get('date_candidature', '')
+            if date_cand:
+                date_only = date_cand.split('T')[0] if 'T' in date_cand else date_cand[:10]
+                if date_start and date_only < date_start:
+                    continue
+                if date_end and date_only > date_end:
+                    continue
+            candidats.append(c)
+        if not candidats:
+            return jsonify({'error': 'Aucun dossier a exporter'}), 404
+        update_zip_task(task_id, {'status': 'running'})
+        temp_dir = tempfile.mkdtemp(prefix=f"zip_export_{task_id}_")
+        zip_path = os.path.join(temp_dir, f"export_{task_id}.zip")
+        download_tasks = []
+        candidats_meta = {}
+        for cand in candidats:
+            poste_nom = cand.get('poste', 'Poste_Inconnu')
+            poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
+            num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+            nom_candidat = cand.get('nom', 'N/A').upper()
+            prenom_candidat = cand.get('prenom', 'N/A')
+            dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
+            dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
+            dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
+            candidats_meta[cand['id']] = {'dossier_parent': dossier_parent, 'num_dossier': num_dossier, 'cand': cand}
+            cv_file = cand.get('cv_filename', '')
+            if cv_file:
+                download_tasks.append((cand['id'], cv_file, dossier_parent, 'CV'))
+            lettre_file = cand.get('lettre_filename', '')
+            if lettre_file:
+                download_tasks.append((cand['id'], lettre_file, dossier_parent, 'Lettre_de_motivation'))
+            att_raw = cand.get('attestation_filenames', '[]')
+            try:
+                att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
+                for idx, att_file in enumerate(att_files, 1):
+                    if att_file:
+                        download_tasks.append((cand['id'], att_file, dossier_parent, f'Attestation_{idx}'))
+            except Exception:
+                pass
+        results_by_cand = {}
+        total_files = len(download_tasks)
+        for idx, task_item in enumerate(download_tasks):
+            try:
+                cand_id, blob_name, dossier_parent, prefix = task_item
+                logger.info(f"Telechargement {idx+1}/{total_files}: {blob_name}")
+                file_bytes = download_file_from_supabase_robust(blob_name)
+                if file_bytes:
+                    results_by_cand.setdefault(cand_id, []).append((file_bytes, blob_name, prefix))
+                del file_bytes
+                gc.collect()
+                time.sleep(0.3)
+                update_zip_task(task_id, {'done': idx + 1, 'progress': int((idx + 1) / total_files * 50)})
+            except Exception as e:
+                logger.error(f"Erreur telechargement {task_item[1]}: {e}")
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            files_added = 0
+            total_candidates = len(candidats_meta)
+            for cand_idx, (cand_id, meta) in enumerate(candidats_meta.items()):
+                dossier_parent = meta['dossier_parent']
+                num_dossier = meta['num_dossier']
+                cand = meta['cand']
+                fichiers_a_inclure = results_by_cand.get(cand_id, [])
+                if not fichiers_a_inclure:
+                    info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {num_dossier}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}"
+                    archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
+                    zip_file.writestr(archive_name, info_content.encode('utf-8'))
+                    files_added += 1
+                else:
+                    for file_bytes, original_filename, prefix in fichiers_a_inclure:
+                        ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
+                        archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
+                        try:
+                            zip_file.writestr(archive_name, file_bytes)
+                            files_added += 1
+                        except Exception:
+                            pass
+                update_zip_task(task_id, {'progress': 50 + int((cand_idx + 1) / total_candidates * 50)})
+        update_zip_task(task_id, {'status': 'completed', 'progress': 100, 'zip_path': zip_path})
+        logger.info(f"✅ Export force termine pour {task_id}: {files_added} fichiers")
+        return jsonify({'task_id': task_id, 'status': 'completed', 'message': f'Export terminé avec {files_added} fichiers', 'download_url': f'/api/recruteur/dossiers/zip/download/{task_id}'}), 200
+    except Exception as e:
+        logger.error(f"❌ Erreur force export {task_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        update_zip_task(task_id, {'status': 'error', 'error': str(e)})
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
 @jwt_required()
 def export_dossiers_zip_legacy():
@@ -2787,10 +2892,10 @@ def test_email():
         return jsonify({'error': str(e)}), 500
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
-    return jsonify({"version": "v5.7-persistent", "postes_actifs": POSTES_ACTIFS, "postes_count": len(POSTES), "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5", "scoring_strict": True, "manual_status_priority": True, "auto_width_excel": True, "async_export": True, "persistent_tasks": True, "deployed_at": datetime.datetime.now().isoformat()}), 200
+    return jsonify({"version": "v5.8-force", "postes_actifs": POSTES_ACTIFS, "postes_count": len(POSTES), "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5", "scoring_strict": True, "manual_status_priority": True, "auto_width_excel": True, "async_export": True, "persistent_tasks": True, "force_mode": True, "deployed_at": datetime.datetime.now().isoformat()}), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.7-persistent demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.8-force demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
@@ -2799,5 +2904,6 @@ if __name__ == '__main__':
     logger.info(f"Download concurrent: max {int(os.getenv('DOWNLOAD_MAX_CONCURRENT', '3'))} telechargements simultanes")
     logger.info(f"Export ZIP asynchrone: Active (fichier sur disque, pas en RAM)")
     logger.info(f"Persistance des taches ZIP: Active (table zip_tasks dans Supabase)")
+    logger.info(f"Mode FORCE: Active (endpoint /force/ pour execution synchrone)")
     cleanup_old_zip_tasks()
     app.run(host="0.0.0.0", port=port, debug=False)
