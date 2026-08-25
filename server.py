@@ -260,7 +260,7 @@ def update_zip_task(task_id, **kwargs):
             supabase.table('zip_tasks').update(kwargs).eq('task_id', task_id).execute()
             return True
         except Exception as e:
-            logger.error(f"Erreur mise à jour tâche ZIP: {e}")
+            logger.error(f"Erreur mise à jour tâche ZIP {task_id}: {e}")
     return False
 
 def get_zip_task(task_id):
@@ -2489,7 +2489,7 @@ def start_zip_export():
         create_zip_task(task_id, len(candidats), poste_filter, date_start, date_end)
         def run_zip_export():
             try:
-                update_zip_task(task_id, {'status': 'running'})
+                update_zip_task(task_id, status='running')
                 temp_dir = tempfile.mkdtemp(prefix=f"zip_export_{task_id}_")
                 zip_path = os.path.join(temp_dir, f"export_{task_id}.zip")
                 download_tasks = []
@@ -2530,7 +2530,7 @@ def start_zip_export():
                         del file_bytes
                         gc.collect()
                         time.sleep(0.3)
-                        update_zip_task(task_id, {'done': idx + 1, 'progress': int((idx + 1) / total_files * 50)})
+                        update_zip_task(task_id, done=idx + 1, progress=int((idx + 1) / total_files * 50))
                     except Exception as e:
                         logger.error(f"Erreur telechargement {task[1]}: {e}")
                 with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -2555,14 +2555,14 @@ def start_zip_export():
                                     files_added += 1
                                 except Exception:
                                     pass
-                        update_zip_task(task_id, {'progress': 50 + int((cand_idx + 1) / total_candidates * 50)})
-                update_zip_task(task_id, {'status': 'completed', 'progress': 100, 'zip_path': zip_path})
+                        update_zip_task(task_id, progress=50 + int((cand_idx + 1) / total_candidates * 50))
+                update_zip_task(task_id, status='completed', progress=100, zip_path=zip_path)
                 del results_by_cand, download_tasks, candidats_meta
                 gc.collect()
                 logger.info(f"Export ZIP termine pour {task_id}: {files_added} fichiers, {len(candidats)} candidats")
             except Exception as e:
                 logger.error(f"Erreur export ZIP {task_id}: {e}")
-                update_zip_task(task_id, {'status': 'error', 'error': str(e)})
+                update_zip_task(task_id, status='error', error=str(e))
         threading.Thread(target=run_zip_export, daemon=True).start()
         return jsonify({'task_id': task_id, 'status': 'pending', 'total_candidates': len(candidats)}), 202
     except Exception as e:
@@ -2635,7 +2635,7 @@ def force_zip_task(task_id):
             candidats.append(c)
         if not candidats:
             return jsonify({'error': 'Aucun dossier a exporter'}), 404
-        update_zip_task(task_id, {'status': 'running'})
+        update_zip_task(task_id, status='running')
         temp_dir = tempfile.mkdtemp(prefix=f"zip_export_{task_id}_")
         zip_path = os.path.join(temp_dir, f"export_{task_id}.zip")
         download_tasks = []
@@ -2676,7 +2676,7 @@ def force_zip_task(task_id):
                 del file_bytes
                 gc.collect()
                 time.sleep(0.3)
-                update_zip_task(task_id, {'done': idx + 1, 'progress': int((idx + 1) / total_files * 50)})
+                update_zip_task(task_id, done=idx + 1, progress=int((idx + 1) / total_files * 50))
             except Exception as e:
                 logger.error(f"Erreur telechargement {task_item[1]}: {e}")
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -2701,15 +2701,15 @@ def force_zip_task(task_id):
                             files_added += 1
                         except Exception:
                             pass
-                update_zip_task(task_id, {'progress': 50 + int((cand_idx + 1) / total_candidates * 50)})
-        update_zip_task(task_id, {'status': 'completed', 'progress': 100, 'zip_path': zip_path})
+                update_zip_task(task_id, progress=50 + int((cand_idx + 1) / total_candidates * 50))
+        update_zip_task(task_id, status='completed', progress=100, zip_path=zip_path)
         logger.info(f"✅ Export force termine pour {task_id}: {files_added} fichiers")
         return jsonify({'task_id': task_id, 'status': 'completed', 'message': f'Export terminé avec {files_added} fichiers', 'download_url': f'/api/recruteur/dossiers/zip/download/{task_id}'}), 200
     except Exception as e:
         logger.error(f"❌ Erreur force export {task_id}: {e}")
         import traceback
         traceback.print_exc()
-        update_zip_task(task_id, {'status': 'error', 'error': str(e)})
+        update_zip_task(task_id, status='error', error=str(e))
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/recruteur/dossiers/zip', methods=['GET'])
@@ -2742,7 +2742,7 @@ def export_dossiers_zip_legacy():
         create_zip_task(task_id, len(candidats), poste_filter, date_start, date_end)
         def run_zip_export():
             try:
-                update_zip_task(task_id, {'status': 'running'})
+                update_zip_task(task_id, status='running')
                 temp_dir = tempfile.mkdtemp(prefix=f"zip_export_{task_id}_")
                 zip_path = os.path.join(temp_dir, f"export_{task_id}.zip")
                 download_tasks = []
@@ -2783,7 +2783,7 @@ def export_dossiers_zip_legacy():
                         del file_bytes
                         gc.collect()
                         time.sleep(0.3)
-                        update_zip_task(task_id, {'done': idx + 1, 'progress': int((idx + 1) / total_files * 50)})
+                        update_zip_task(task_id, done=idx + 1, progress=int((idx + 1) / total_files * 50))
                     except Exception as e:
                         logger.error(f"Erreur telechargement {task[1]}: {e}")
                 with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -2808,8 +2808,8 @@ def export_dossiers_zip_legacy():
                                     files_added += 1
                                 except Exception:
                                     pass
-                        update_zip_task(task_id, {'progress': 50 + int((cand_idx + 1) / total_candidates * 50)})
-                update_zip_task(task_id, {'status': 'completed', 'progress': 100, 'zip_path': zip_path})
+                        update_zip_task(task_id, progress=50 + int((cand_idx + 1) / total_candidates * 50))
+                update_zip_task(task_id, status='completed', progress=100, zip_path=zip_path)
                 del results_by_cand, download_tasks, candidats_meta
                 gc.collect()
                 logger.info(f"Export ZIP termine pour {task_id}: {files_added} fichiers, {len(candidats)} candidats")
@@ -2827,7 +2827,7 @@ def export_dossiers_zip_legacy():
                 threading.Thread(target=auto_cleanup, daemon=True).start()
             except Exception as e:
                 logger.error(f"Erreur export ZIP {task_id}: {e}")
-                update_zip_task(task_id, {'status': 'error', 'error': str(e)})
+                update_zip_task(task_id, status='error', error=str(e))
         threading.Thread(target=run_zip_export, daemon=True).start()
         return jsonify({'message': 'Export ZIP demarre en arriere-plan', 'task_id': task_id, 'status': 'pending', 'total_candidates': len(candidats), 'note': 'Utilisez /api/recruteur/dossiers/zip/status/<task_id> pour suivre la progression'}), 202
     except Exception as e:
