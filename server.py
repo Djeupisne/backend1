@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time, gc, random
+import os, hashlib, datetime, uuid, json, re, threading, mimetypes, io, csv, unicodedata, zipfile, time, gc, random, tempfile, shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from werkzeug.utils import secure_filename
 from supabase import create_client, Client
@@ -98,7 +98,7 @@ _Nlp_en = None
 DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "5"))
 DOWNLOAD_BASE_DELAY = int(os.getenv("DOWNLOAD_BASE_DELAY", "1"))
 DOWNLOAD_MAX_DELAY = int(os.getenv("DOWNLOAD_MAX_DELAY", "30"))
-_DOWNLOAD_SEMAPHORE = threading.Semaphore(int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "3")))
+_DOWNLOAD_SEMAPHORE = threading.Semaphore(int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "2")))
 
 def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BASE_DELAY, max_delay=DOWNLOAD_MAX_DELAY):
     def decorator(func):
@@ -125,6 +125,7 @@ def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BAS
                     total_delay = delay + jitter
                     logger.warning(f"Tentative {attempt + 1}/{max_retries} échouée pour {func.__name__}: {e}. Nouvel essai dans {total_delay:.2f}s")
                     time.sleep(total_delay)
+                    gc.collect()
             raise last_exception
         return wrapper
     return decorator
@@ -163,7 +164,7 @@ def after_request(response):
     return response
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
-    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running', 'version': 'v5.5-final', 'features': {'pdf_available': PDFPLUMBER_AVAILABLE, 'docx_available': DOCX_AVAILABLE, 'reportlab_available': REPORTLAB_AVAILABLE, 'openpyxl_available': OPENPYXL_AVAILABLE, 'ia_available': IA_ANALYSE_ACTIVE, 'scoring_strict': True, 'manual_status_priority': True, 'auto_width_excel': True}}), 200
+    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running', 'version': 'v5.6-async', 'features': {'pdf_available': PDFPLUMBER_AVAILABLE, 'docx_available': DOCX_AVAILABLE, 'reportlab_available': REPORTLAB_AVAILABLE, 'openpyxl_available': OPENPYXL_AVAILABLE, 'ia_available': IA_ANALYSE_ACTIVE, 'scoring_strict': True, 'manual_status_priority': True, 'auto_width_excel': True, 'async_export': True}}), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
@@ -214,7 +215,9 @@ def download_file_from_supabase(blob_name):
         error_str = str(e).lower()
         if any(kw in error_str for kw in ["errno 11", "resource temporarily unavailable", "timeout", "connection"]):
             logger.warning(f"Erreur temporaire détectée, activation du mode robuste pour {blob_name}")
-            return download_file_from_supabase_robust(blob_name)
+            result = download_file_from_supabase_robust(blob_name)
+            gc.collect()
+            return result
         logger.error(f"Download error: {e}")
         return None
 
@@ -1730,6 +1733,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
                 if len(cv_text) > MAX_TEXT_SIZE:
                     cv_text = cv_text[:MAX_TEXT_SIZE]
+            del cv_bytes
+            gc.collect()
+            time.sleep(0.3)
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase_robust(lettre_filename)
@@ -1737,6 +1743,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
                 if len(lm_text) > MAX_TEXT_SIZE:
                     lm_text = lm_text[:MAX_TEXT_SIZE]
+            del lm_bytes
+            gc.collect()
+            time.sleep(0.3)
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -1747,6 +1756,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         t = t[:MAX_TEXT_SIZE]
                     if t:
                         att_texts.append(t)
+                del att_bytes
+                gc.collect()
+                time.sleep(0.3)
         if not cv_text or len(cv_text.strip()) < 50:
             logger.warning(f"CV manquant ou vide pour {token}")
             _save_error(token, "CV manquant ou vide", "rejete")
@@ -2244,11 +2256,17 @@ def reanalyze_fast():
                     cv_bytes = download_file_from_supabase_robust(cv_fn)
                     if cv_bytes:
                         cv_text = extract_text_robust_from_bytes(cv_bytes, cv_fn)
+                    del cv_bytes
+                    gc.collect()
+                    time.sleep(0.3)
                 lm_text = ""
                 if lm_fn:
                     lm_bytes = download_file_from_supabase_robust(lm_fn)
                     if lm_bytes:
                         lm_text = extract_text_robust_from_bytes(lm_bytes, lm_fn)
+                    del lm_bytes
+                    gc.collect()
+                    time.sleep(0.3)
                 att_texts = []
                 if isinstance(att_raw, str):
                     try:
@@ -2264,6 +2282,9 @@ def reanalyze_fast():
                             t = extract_text_robust_from_bytes(att_bytes, fn)
                             if t:
                                 att_texts.append(t)
+                        del att_bytes
+                        gc.collect()
+                        time.sleep(0.3)
                 if poste == "Chargé(e) d'Administration de Crédit":
                     result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
                 elif poste == "Chef de Section Compensation":
@@ -2366,11 +2387,13 @@ def export_candidates(fmt):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-@app.route('/api/recruteur/dossiers/zip', methods=['GET'])
+
+_ZIP_EXPORT_TASKS = {}
+_ZIP_EXPORT_LOCK = threading.Lock()
+
+@app.route('/api/recruteur/dossiers/zip/start', methods=['POST'])
 @jwt_required()
-def export_dossiers_zip():
-    start_time = time.time()
-    logger.info(f"Debout export ZIP - {datetime.datetime.now()}")
+def start_zip_export():
     try:
         poste_filter = request.args.get('poste', '')
         date_start = request.args.get('date_start', '')
@@ -2394,84 +2417,142 @@ def export_dossiers_zip():
             candidats.append(c)
         if not candidats:
             return jsonify({'error': 'Aucun dossier a exporter'}), 404
-        download_tasks = []
-        candidats_meta = {}
-        for cand in candidats:
-            poste_nom = cand.get('poste', 'Poste_Inconnu')
-            poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
-            num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
-            nom_candidat = cand.get('nom', 'N/A').upper()
-            prenom_candidat = cand.get('prenom', 'N/A')
-            dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
-            dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
-            dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
-            candidats_meta[cand['id']] = {'dossier_parent': dossier_parent, 'num_dossier': num_dossier, 'cand': cand}
-            cv_file = cand.get('cv_filename', '')
-            if cv_file:
-                download_tasks.append((cand['id'], cv_file, dossier_parent, 'CV'))
-            lettre_file = cand.get('lettre_filename', '')
-            if lettre_file:
-                download_tasks.append((cand['id'], lettre_file, dossier_parent, 'Lettre_de_motivation'))
-            att_raw = cand.get('attestation_filenames', '[]')
+        task_id = uuid.uuid4().hex[:8]
+        with _ZIP_EXPORT_LOCK:
+            _ZIP_EXPORT_TASKS[task_id] = {'status': 'pending', 'progress': 0, 'total': len(candidats), 'done': 0, 'error': None, 'result': None}
+        def run_zip_export():
             try:
-                att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
-                for idx, att_file in enumerate(att_files, 1):
-                    if att_file:
-                        download_tasks.append((cand['id'], att_file, dossier_parent, f'Attestation_{idx}'))
-            except Exception:
-                pass
-        def _download_one(task):
-            cand_id, blob_name, dossier_parent, prefix = task
-            file_bytes = download_file_from_supabase_robust(blob_name)
-            return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
-        results_by_cand = {}
-        max_workers = min(2, max(1, len(download_tasks) // 2)) if download_tasks else 1
-        if download_tasks:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [executor.submit(_download_one, t) for t in download_tasks]
-                for future in as_completed(futures):
+                with _ZIP_EXPORT_LOCK:
+                    _ZIP_EXPORT_TASKS[task_id]['status'] = 'running'
+                temp_dir = tempfile.mkdtemp(prefix=f"zip_export_{task_id}_")
+                zip_path = os.path.join(temp_dir, f"export_{task_id}.zip")
+                download_tasks = []
+                candidats_meta = {}
+                for cand in candidats:
+                    poste_nom = cand.get('poste', 'Poste_Inconnu')
+                    poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
+                    num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+                    nom_candidat = cand.get('nom', 'N/A').upper()
+                    prenom_candidat = cand.get('prenom', 'N/A')
+                    dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
+                    dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
+                    dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
+                    candidats_meta[cand['id']] = {'dossier_parent': dossier_parent, 'num_dossier': num_dossier, 'cand': cand}
+                    cv_file = cand.get('cv_filename', '')
+                    if cv_file:
+                        download_tasks.append((cand['id'], cv_file, dossier_parent, 'CV'))
+                    lettre_file = cand.get('lettre_filename', '')
+                    if lettre_file:
+                        download_tasks.append((cand['id'], lettre_file, dossier_parent, 'Lettre_de_motivation'))
+                    att_raw = cand.get('attestation_filenames', '[]')
                     try:
-                        cand_id, blob_name, dossier_parent, prefix, file_bytes = future.result()
+                        att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
+                        for idx, att_file in enumerate(att_files, 1):
+                            if att_file:
+                                download_tasks.append((cand['id'], att_file, dossier_parent, f'Attestation_{idx}'))
+                    except Exception:
+                        pass
+                results_by_cand = {}
+                total_files = len(download_tasks)
+                for idx, task in enumerate(download_tasks):
+                    try:
+                        cand_id, blob_name, dossier_parent, prefix = task
+                        logger.info(f"Telechargement {idx+1}/{total_files}: {blob_name}")
+                        file_bytes = download_file_from_supabase_robust(blob_name)
+                        if file_bytes:
+                            results_by_cand.setdefault(cand_id, []).append((file_bytes, blob_name, prefix))
+                        del file_bytes
+                        gc.collect()
+                        time.sleep(0.3)
+                        with _ZIP_EXPORT_LOCK:
+                            _ZIP_EXPORT_TASKS[task_id]['done'] = idx + 1
+                            _ZIP_EXPORT_TASKS[task_id]['progress'] = int((idx + 1) / total_files * 50)
                     except Exception as e:
-                        logger.error(f"Erreur telechargement fichier ZIP: {e}")
-                        continue
-                    if file_bytes:
-                        results_by_cand.setdefault(cand_id, []).append((file_bytes, blob_name, prefix))
-        zip_buffer = io.BytesIO()
-        files_added = 0
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for cand_id, meta in candidats_meta.items():
-                dossier_parent = meta['dossier_parent']
-                num_dossier = meta['num_dossier']
-                cand = meta['cand']
-                fichiers_a_inclure = results_by_cand.get(cand_id, [])
-                if not fichiers_a_inclure:
-                    info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {num_dossier}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}"
-                    archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
-                    zip_file.writestr(archive_name, info_content.encode('utf-8'))
-                    files_added += 1
-                else:
-                    for file_bytes, original_filename, prefix in fichiers_a_inclure:
-                        ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
-                        archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
-                        try:
-                            zip_file.writestr(archive_name, file_bytes)
+                        logger.error(f"Erreur telechargement {task[1]}: {e}")
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    files_added = 0
+                    total_candidates = len(candidats_meta)
+                    for cand_idx, (cand_id, meta) in enumerate(candidats_meta.items()):
+                        dossier_parent = meta['dossier_parent']
+                        num_dossier = meta['num_dossier']
+                        cand = meta['cand']
+                        fichiers_a_inclure = results_by_cand.get(cand_id, [])
+                        if not fichiers_a_inclure:
+                            info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {num_dossier}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}"
+                            archive_name = f"{dossier_parent}/INFOS_CANDIDAT.txt"
+                            zip_file.writestr(archive_name, info_content.encode('utf-8'))
                             files_added += 1
-                        except Exception:
-                            pass
-        zip_buffer.seek(0)
-        elapsed = time.time() - start_time
-        logger.info(f"Export ZIP termine en {elapsed:.2f} secondes pour {len(candidats)} candidats ({files_added} fichiers)")
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
-        filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
-        del results_by_cand, download_tasks, candidats_meta
-        gc.collect()
-        return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=filename)
+                        else:
+                            for file_bytes, original_filename, prefix in fichiers_a_inclure:
+                                ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
+                                archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
+                                try:
+                                    zip_file.writestr(archive_name, file_bytes)
+                                    files_added += 1
+                                except Exception:
+                                    pass
+                        with _ZIP_EXPORT_LOCK:
+                            _ZIP_EXPORT_TASKS[task_id]['progress'] = 50 + int((cand_idx + 1) / total_candidates * 50)
+                with _ZIP_EXPORT_LOCK:
+                    _ZIP_EXPORT_TASKS[task_id]['status'] = 'completed'
+                    _ZIP_EXPORT_TASKS[task_id]['progress'] = 100
+                    _ZIP_EXPORT_TASKS[task_id]['result'] = zip_path
+                del results_by_cand, download_tasks, candidats_meta
+                gc.collect()
+                logger.info(f"Export ZIP termine pour {task_id}: {files_added} fichiers, {len(candidats)} candidats")
+            except Exception as e:
+                logger.error(f"Erreur export ZIP {task_id}: {e}")
+                with _ZIP_EXPORT_LOCK:
+                    _ZIP_EXPORT_TASKS[task_id]['status'] = 'error'
+                    _ZIP_EXPORT_TASKS[task_id]['error'] = str(e)
+        threading.Thread(target=run_zip_export, daemon=True).start()
+        return jsonify({'task_id': task_id, 'status': 'pending', 'total_candidates': len(candidats)}), 202
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/recruteur/dossiers/zip/status/<task_id>', methods=['GET'])
+@jwt_required()
+def get_zip_status(task_id):
+    with _ZIP_EXPORT_LOCK:
+        task = _ZIP_EXPORT_TASKS.get(task_id)
+        if not task:
+            return jsonify({'error': 'Tache introuvable'}), 404
+        return jsonify({'task_id': task_id, 'status': task.get('status'), 'progress': task.get('progress', 0), 'total': task.get('total', 0), 'done': task.get('done', 0), 'error': task.get('error')}), 200
+
+@app.route('/api/recruteur/dossiers/zip/download/<task_id>', methods=['GET'])
+@jwt_required()
+def download_zip(task_id):
+    with _ZIP_EXPORT_LOCK:
+        task = _ZIP_EXPORT_TASKS.get(task_id)
+        if not task:
+            return jsonify({'error': 'Tache introuvable'}), 404
+        if task.get('status') != 'completed':
+            return jsonify({'error': 'Tache non terminee', 'status': task.get('status')}), 400
+        zip_path = task.get('result')
+        if not zip_path or not os.path.exists(zip_path):
+            return jsonify({'error': 'Fichier ZIP introuvable'}), 404
+    try:
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"dossiers_candidats_{ts}.zip"
+        return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=filename)
+    finally:
+        def cleanup():
+            try:
+                time.sleep(5)
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                temp_dir = os.path.dirname(zip_path)
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
+                with _ZIP_EXPORT_LOCK:
+                    if task_id in _ZIP_EXPORT_TASKS:
+                        del _ZIP_EXPORT_TASKS[task_id]
+            except Exception as e:
+                logger.error(f"Cleanup ZIP error: {e}")
+        threading.Thread(target=cleanup, daemon=True).start()
+
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -2529,14 +2610,15 @@ def test_email():
         return jsonify({'error': str(e)}), 500
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
-    return jsonify({"version": "v5.5-final", "postes_actifs": POSTES_ACTIFS, "postes_count": len(POSTES), "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5", "scoring_strict": True, "manual_status_priority": True, "auto_width_excel": True, "deployed_at": datetime.datetime.now().isoformat()}), 200
+    return jsonify({"version": "v5.6-async", "postes_actifs": POSTES_ACTIFS, "postes_count": len(POSTES), "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5", "scoring_strict": True, "manual_status_priority": True, "auto_width_excel": True, "async_export": True, "deployed_at": datetime.datetime.now().isoformat()}), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.5-final demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.6-async demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
     logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
     logger.info(f"Download retry: Active (max {DOWNLOAD_MAX_RETRIES} tentatives, backoff exponentiel)")
-    logger.info(f"Download concurrent: max {int(os.getenv('DOWNLOAD_MAX_CONCURRENT', '3'))} telechargements simultanes")
+    logger.info(f"Download concurrent: max {int(os.getenv('DOWNLOAD_MAX_CONCURRENT', '2'))} telechargements simultanes")
+    logger.info(f"Export ZIP asynchrone: Active (fichier sur disque, pas en RAM)")
     app.run(host="0.0.0.0", port=port, debug=False)
