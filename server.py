@@ -98,7 +98,9 @@ _Nlp_en = None
 DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "5"))
 DOWNLOAD_BASE_DELAY = int(os.getenv("DOWNLOAD_BASE_DELAY", "1"))
 DOWNLOAD_MAX_DELAY = int(os.getenv("DOWNLOAD_MAX_DELAY", "30"))
-_DOWNLOAD_SEMAPHORE = threading.Semaphore(int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "2")))
+_DOWNLOAD_SEMAPHORE = threading.Semaphore(int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "3")))
+_ZIP_EXPORT_TASKS = {}
+_ZIP_EXPORT_LOCK = threading.Lock()
 
 def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BASE_DELAY, max_delay=DOWNLOAD_MAX_DELAY):
     def decorator(func):
@@ -2256,17 +2258,11 @@ def reanalyze_fast():
                     cv_bytes = download_file_from_supabase_robust(cv_fn)
                     if cv_bytes:
                         cv_text = extract_text_robust_from_bytes(cv_bytes, cv_fn)
-                    del cv_bytes
-                    gc.collect()
-                    time.sleep(0.3)
                 lm_text = ""
                 if lm_fn:
                     lm_bytes = download_file_from_supabase_robust(lm_fn)
                     if lm_bytes:
                         lm_text = extract_text_robust_from_bytes(lm_bytes, lm_fn)
-                    del lm_bytes
-                    gc.collect()
-                    time.sleep(0.3)
                 att_texts = []
                 if isinstance(att_raw, str):
                     try:
@@ -2282,9 +2278,6 @@ def reanalyze_fast():
                             t = extract_text_robust_from_bytes(att_bytes, fn)
                             if t:
                                 att_texts.append(t)
-                        del att_bytes
-                        gc.collect()
-                        time.sleep(0.3)
                 if poste == "Chargé(e) d'Administration de Crédit":
                     result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
                 elif poste == "Chef de Section Compensation":
@@ -2387,9 +2380,6 @@ def export_candidates(fmt):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
-_ZIP_EXPORT_TASKS = {}
-_ZIP_EXPORT_LOCK = threading.Lock()
 
 @app.route('/api/recruteur/dossiers/zip/start', methods=['POST'])
 @jwt_required()
@@ -2619,6 +2609,6 @@ if __name__ == '__main__':
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
     logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
     logger.info(f"Download retry: Active (max {DOWNLOAD_MAX_RETRIES} tentatives, backoff exponentiel)")
-    logger.info(f"Download concurrent: max {int(os.getenv('DOWNLOAD_MAX_CONCURRENT', '2'))} telechargements simultanes")
+    logger.info(f"Download concurrent: max {int(os.getenv('DOWNLOAD_MAX_CONCURRENT', '3'))} telechargements simultanes")
     logger.info(f"Export ZIP asynchrone: Active (fichier sur disque, pas en RAM)")
     app.run(host="0.0.0.0", port=port, debug=False)
