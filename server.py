@@ -164,7 +164,7 @@ def after_request(response):
     return response
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
-    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running', 'version': 'v5.8-force', 'features': {'pdf_available': PDFPLUMBER_AVAILABLE, 'docx_available': DOCX_AVAILABLE, 'reportlab_available': REPORTLAB_AVAILABLE, 'openpyxl_available': OPENPYXL_AVAILABLE, 'ia_available': IA_ANALYSE_ACTIVE, 'scoring_strict': True, 'manual_status_priority': True, 'auto_width_excel': True, 'async_export': True, 'persistent_tasks': True, 'force_mode': True}}), 200
+    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running', 'version': 'v5.9-final', 'features': {'pdf_available': PDFPLUMBER_AVAILABLE, 'docx_available': DOCX_AVAILABLE, 'reportlab_available': REPORTLAB_AVAILABLE, 'openpyxl_available': OPENPYXL_AVAILABLE, 'ia_available': IA_ANALYSE_ACTIVE, 'scoring_strict': True, 'manual_status_priority': True, 'auto_width_excel': True, 'async_export': True, 'persistent_tasks': True, 'force_mode': True}}), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
@@ -2459,6 +2459,8 @@ def export_candidates(fmt):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ===== FONCTIONS POUR L'EXPORT ZIP ASYNCHRONE =====
+
 @app.route('/api/recruteur/dossiers/zip/start', methods=['POST'])
 @jwt_required()
 def start_zip_export():
@@ -2575,14 +2577,39 @@ def start_zip_export():
 def get_zip_status(task_id):
     task = get_zip_task(task_id)
     if not task:
+        # Vérifier si un fichier ZIP existe sur le disque
+        temp_dir = tempfile.gettempdir()
+        zip_path = os.path.join(temp_dir, f"zip_export_{task_id}_", f"export_{task_id}.zip")
+        if os.path.exists(zip_path):
+            return jsonify({
+                'task_id': task_id,
+                'status': 'completed',
+                'progress': 100,
+                'message': 'ZIP prêt',
+                'zip_path': zip_path
+            }), 200
         return jsonify({'error': 'Tache introuvable'}), 404
-    return jsonify({'task_id': task_id, 'status': task.get('status'), 'progress': task.get('progress', 0), 'total': task.get('total', 0), 'done': task.get('done', 0), 'error': task.get('error')}), 200
+    return jsonify({
+        'task_id': task_id,
+        'status': task.get('status'),
+        'progress': task.get('progress', 0),
+        'total': task.get('total', 0),
+        'done': task.get('done', 0),
+        'error': task.get('error')
+    }), 200
 
 @app.route('/api/recruteur/dossiers/zip/download/<task_id>', methods=['GET'])
 @jwt_required()
 def download_zip(task_id):
     task = get_zip_task(task_id)
     if not task:
+        # Vérifier si un fichier ZIP existe sur le disque
+        temp_dir = tempfile.gettempdir()
+        zip_path = os.path.join(temp_dir, f"zip_export_{task_id}_", f"export_{task_id}.zip")
+        if os.path.exists(zip_path):
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"dossiers_candidats_{ts}.zip"
+            return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=filename)
         return jsonify({'error': 'Tache introuvable'}), 404
     if task.get('status') != 'completed':
         return jsonify({'error': 'Tache non terminee', 'status': task.get('status')}), 400
@@ -2610,6 +2637,7 @@ def download_zip(task_id):
 @app.route('/api/recruteur/dossiers/zip/force/<task_id>', methods=['POST'])
 @jwt_required()
 def force_zip_task(task_id):
+    """Force l'exécution d'une tâche ZIP en mode synchrone"""
     task = get_zip_task(task_id)
     if not task:
         return jsonify({'error': 'Tache introuvable'}), 404
@@ -2892,10 +2920,10 @@ def test_email():
         return jsonify({'error': str(e)}), 500
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
-    return jsonify({"version": "v5.8-force", "postes_actifs": POSTES_ACTIFS, "postes_count": len(POSTES), "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5", "scoring_strict": True, "manual_status_priority": True, "auto_width_excel": True, "async_export": True, "persistent_tasks": True, "force_mode": True, "deployed_at": datetime.datetime.now().isoformat()}), 200
+    return jsonify({"version": "v5.9-final", "postes_actifs": POSTES_ACTIFS, "postes_count": len(POSTES), "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5", "scoring_strict": True, "manual_status_priority": True, "auto_width_excel": True, "async_export": True, "persistent_tasks": True, "force_mode": True, "deployed_at": datetime.datetime.now().isoformat()}), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.8-force demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.9-final demarree sur le port {port}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
