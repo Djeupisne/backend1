@@ -45,7 +45,7 @@ try:
     from rapidfuzz import fuzz
     RAPIDFUZZ_AVAILABLE = True
 except ImportError:
-    RAPIDFUZZ_AVAILABLE = False
+    RAPIDFUfZZ_AVAILABLE = False
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -546,7 +546,7 @@ def init_zip_tasks_table():
 init_zip_tasks_table()
 
 POSTES = ["Responsable Administration de Crédit", "Analyste Crédit CCB", "Archiviste (Administration Crédit)", "Senior Finance Officer", "Market Risk Officer", "IT Réseau & Infrastructure", "Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire", "Chef de Section Compensation", "Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate", "Data Analyst Finance"]
-POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate", "Data Analyst Finance"]
+POSTES_ACTIFS = ["Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
