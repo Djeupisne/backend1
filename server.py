@@ -95,17 +95,21 @@ _claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_AC
 _ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
 _Nlp_fr = None
 _Nlp_en = None
-DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "5"))
-DOWNLOAD_BASE_DELAY = int(os.getenv("DOWNLOAD_BASE_DELAY", "1"))
-DOWNLOAD_MAX_DELAY = int(os.getenv("DOWNLOAD_MAX_DELAY", "30"))
-_DOWNLOAD_SEMAPHORE = threading.Semaphore(int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "3")))
-# Job store pour l'export ZIP asynchrone : evite de bloquer un thread
-# gunicorn pendant toute la duree de generation (ce qui peut faire
-# echouer les health checks de Render et provoquer un redemarrage
-# force en plein telechargement).
+
+# ====== OPTIMISATION TÉLÉCHARGEMENT ======
+# Augmentation des limites pour gérer 400+ fichiers
+DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "3"))
+DOWNLOAD_BASE_DELAY = float(os.getenv("DOWNLOAD_BASE_DELAY", "0.5"))
+DOWNLOAD_MAX_DELAY = int(os.getenv("DOWNLOAD_MAX_DELAY", "10"))
+DOWNLOAD_MAX_CONCURRENT = int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "15"))  # Augmenté à 15
+_DOWNLOAD_SEMAPHORE = threading.Semaphore(DOWNLOAD_MAX_CONCURRENT)
+
+# ====== OPTIMISATION ZIP ======
+# Job store pour l'export ZIP asynchrone
 _ZIP_JOBS = {}
 _ZIP_JOBS_LOCK = threading.Lock()
 _ZIP_JOBS_MAX_AGE_SECONDS = 3600
+_ZIP_MAX_WORKERS = int(os.getenv("ZIP_MAX_WORKERS", "25"))  # Nombre max de workers pour le ZIP
 
 def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BASE_DELAY, max_delay=DOWNLOAD_MAX_DELAY):
     def decorator(func):
@@ -157,9 +161,11 @@ def _get_spacy_model(lang='fr'):
             except OSError:
                 return None
         return _Nlp_en
+
 app = Flask(__name__)
 ALLOWED_ORIGINS = ["https://recrutment.onrender.com", "https://backend1-fiq5.onrender.com", "http://localhost:5000", "http://localhost:3000"]
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"], "supports_credentials": True, "max_age": 600}})
+
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
@@ -168,26 +174,49 @@ def after_request(response):
     if request.method == 'OPTIONS':
         response.status_code = 204
     return response
+
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
-    return jsonify({'status': 'ok', 'message': 'RecrutBank API is running', 'version': 'v5.5-final', 'features': {'pdf_available': PDFPLUMBER_AVAILABLE, 'docx_available': DOCX_AVAILABLE, 'reportlab_available': REPORTLAB_AVAILABLE, 'openpyxl_available': OPENPYXL_AVAILABLE, 'ia_available': IA_ANALYSE_ACTIVE, 'scoring_strict': True, 'manual_status_priority': True, 'auto_width_excel': True}}), 200
+    return jsonify({
+        'status': 'ok', 
+        'message': 'RecrutBank API is running', 
+        'version': 'v5.6-optimized',
+        'features': {
+            'pdf_available': PDFPLUMBER_AVAILABLE,
+            'docx_available': DOCX_AVAILABLE,
+            'reportlab_available': REPORTLAB_AVAILABLE,
+            'openpyxl_available': OPENPYXL_AVAILABLE,
+            'ia_available': IA_ANALYSE_ACTIVE,
+            'scoring_strict': True,
+            'manual_status_priority': True,
+            'auto_width_excel': True,
+            'max_concurrent_downloads': DOWNLOAD_MAX_CONCURRENT,
+            'zip_max_workers': _ZIP_MAX_WORKERS
+        }
+    }), 200
+
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
 app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupisne@gmail.com>')
 app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
+
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     if not supabase:
         return None
@@ -234,6 +263,7 @@ def get_signed_url(blob_name, expiration_minutes=60):
     except Exception as e:
         logger.error(f"Signed URL error: {e}")
         return None
+
 def send_email(to_email, subject, body):
     import requests
     import re as _re
@@ -253,8 +283,10 @@ def send_email(to_email, subject, body):
         return response.status_code == 201
     except Exception:
         return False
+
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
+
 def normalize_spaces(text):
     if not text:
         return ""
@@ -268,6 +300,7 @@ def normalize_spaces(text):
     for wrong, correct in typo_corrections.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
     return text.strip()
+
 def normalize_unicode(text):
     if not text:
         return ""
@@ -275,6 +308,7 @@ def normalize_unicode(text):
     text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
     text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
     return text.strip()
+
 def normalize_for_matching(text):
     if not text:
         return "", []
@@ -284,6 +318,7 @@ def normalize_for_matching(text):
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
     return cleaned, tokens
+
 def contains_negative_context(text, keyword):
     if not text or not keyword:
         return False
@@ -300,6 +335,7 @@ def contains_negative_context(text, keyword):
             if re.search(pattern, context, re.IGNORECASE):
                 return True
     return False
+
 def extract_text_from_pdf_via_ocr(file_bytes):
     if not OCR_AVAILABLE:
         return ""
@@ -320,9 +356,11 @@ def extract_text_from_pdf_via_ocr(file_bytes):
         return ""
     except Exception:
         return ""
+
 MAX_PDF_PAGES = 10
 MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024
 MAX_TEXT_SIZE = 8000
+
 def extract_text_from_pdf_robust(file_bytes, filename):
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
         logger.warning(f"PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 5 MB): {filename}")
@@ -377,6 +415,7 @@ def extract_text_from_pdf_robust(file_bytes, filename):
         if ocr_text and len(ocr_text.strip()) > 100:
             return ocr_text
     return ""
+
 def extract_text_from_docx_robust(file_bytes):
     if not DOCX_AVAILABLE:
         return ""
@@ -422,6 +461,7 @@ def extract_text_from_docx_robust(file_bytes):
     except Exception:
         pass
     return ""
+
 def extract_text_from_txt(file_bytes):
     if CHARDET_AVAILABLE:
         try:
@@ -442,6 +482,7 @@ def extract_text_from_txt(file_bytes):
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
+
 def extract_text_robust_from_bytes(file_bytes, filename):
     if not file_bytes:
         return ""
@@ -460,6 +501,7 @@ def extract_text_robust_from_bytes(file_bytes, filename):
     except Exception:
         pass
     return ""
+
 def init_recruteur():
     try:
         if supabase:
@@ -469,11 +511,14 @@ def init_recruteur():
     except Exception as e:
         logger.warning(f"Erreur initialisation recruteur : {e}")
 init_recruteur()
+
 POSTES = ["Responsable Administration de Crédit", "Analyste Crédit CCB", "Archiviste (Administration Crédit)", "Senior Finance Officer", "Market Risk Officer", "IT Réseau & Infrastructure", "Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire", "Chef de Section Compensation", "Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_ACTIFS = ["Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
+
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
+
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": ["A une expérience significative dans le secteur bancaire (minimum 5 ans)", "A un diplôme de niveau Bac+4 ou supérieur (Master, MBA ou équivalent)", "A géré un portefeuille de clients Corporate avec des résultats mesurables", "A une expérience managériale démontrée (encadrement d'équipe d'au moins 3 personnes)", "Maîtrise la gestion du risque de crédit et le suivi de portefeuille (NPL, provisions)"],
@@ -554,9 +599,11 @@ GRILLE = {
         "points_attention": ["Profil purement comptable sans exposition aux outils BI ou au reporting de gestion", "Profil exclusivement IT / développeur sans connaissance financière", "Expérience uniquement académique ou stage sans production de reportings réels en environnement professionnel", "CV sans aucun outil cité nommément", "Missions décrites en termes génériques sans livrables précis ni résultats mesurables", "Trous inexpliqués dans le parcours ou expériences très courtes sans progression visible"]
     }
 }
+
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]
 POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate", "Data Analyst Finance"]
+
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
         return 12
@@ -565,6 +612,7 @@ def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_100:
         return 100
     return 10
+
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
     if poste and poste in POSTES_AVEC_SCORING_12:
@@ -596,6 +644,7 @@ def get_recommandation_from_score(score, poste=None):
         return "Potentiel à évaluer en entretien"
     else:
         return "Rejet"
+
 def get_statut_from_decision(decision):
     if not decision:
         return 'en_attente'
@@ -605,14 +654,18 @@ def get_statut_from_decision(decision):
         return "entretien"
     else:
         return "rejete"
+
 def split_into_jobs(raw_text):
     separators = re.compile(r"(?:^|\n)(?=\s*(?:(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(?:20\d{2}|19\d{2})|\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|(?:depuis|de |from |since |desde |a partir de |starting |beginning)))", re.IGNORECASE | re.MULTILINE)
     blocks = separators.split(raw_text)
     return [b.strip() for b in blocks if b.strip()]
+
 STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b', r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b', r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b', r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b']
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
+
 def is_stage_block(block_text):
     return bool(STAGE_PATTERN.search(block_text))
+
 def extract_duration_years_from_block(block_text):
     years = 0.0
     text = block_text.lower()
@@ -656,6 +709,7 @@ def extract_duration_years_from_block(block_text):
         if 0 < delta <= 40:
             return round(float(delta), 1)
     return 0.0
+
 def detect_institution_type(text):
     text_lower = text.lower()
     commercial_banks = ['ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 'société générale', 'standard chartered', 'nsia banque', 'commercial bank', 'banque commerciale', 'investment bank', 'banque d affaires', 'credit institution', 'financial institution', 'banque', 'express union', 'coris bank']
@@ -663,6 +717,7 @@ def detect_institution_type(text):
     if commercial_pattern.search(text_lower):
         return 'commercial_bank'
     return 'unknown'
+
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Chargé(e) d'Administration de Crédit"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
@@ -808,6 +863,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     sous_scores = {"Adéquation formation/expérience au crédit": adequation, "Exposition IFRS 9 / gestion portefeuille": ifrs_score, "Maîtrise outils bancaires": tools_score, "Cohérence et sérieux du parcours": coherence, "Qualité CV + Lettre de motivation": qualite}
     synthese = _generate_synthese_rac(cv_text, lettre_text, total_score, points_forts, points_vigilance)
     return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}", 'points_forts': points_forts, 'points_vigilance': points_vigilance, 'synthese': synthese}
+
 def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vigilance):
     synthese = ""
     has_experience = bool(re.search(r'Express Union|Coris Bank|Ecobank|banque|bancaire|\d+\s*ans', cv_text.lower()))
@@ -842,6 +898,7 @@ def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vig
             synthese += "Certifications professionnelles manquantes. "
         synthese += "Recommandation : ne pas retenir."
     return synthese
+
 def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Section Compensation"
     grille = GRILLE.get(poste, {})
@@ -890,6 +947,7 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     else:
         decision = "Rejet"
     return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}", 'points_forts': ["Expérience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""], 'synthese': f"Candidat avec un score de {total_score}/12"}
+
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
     grille = GRILLE.get(poste, {})
@@ -967,6 +1025,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     else:
         synthese += "Profil insuffisant pour le poste."
     return {'score': total_score, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/14 — {decision}", 'points_forts': points_forts, 'points_vigilance': points_vigilance, 'synthese': synthese}
+
 def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts_list):
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
@@ -1103,6 +1162,7 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     else:
         synthese += "Profil insuffisant pour le poste. Manque de compétences clés en analyse financière et outils BI."
     return {'score': total_score, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/14 — {decision}", 'points_forts': points_forts, 'points_vigilance': points_vigilance, 'synthese': synthese}
+
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
         return {'score': 0, 'checklist': {}, 'flags_eliminatoires': ['CV non analysable'], 'signaux_detectes': [], 'details': {'error': 'CV vide'}, 'score_breakdown': {'bloc1_eliminatoire': True, 'score_final': 0, 'note': 'CV non analysable'}}
@@ -1154,6 +1214,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
     nb_elim_manquants = len(flags_elim)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'score_final': score_final, 'note': f"Score: {score_final}/10"}}
+
 KEYWORD_MAPPING = {
     "Expérience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
     "Minimum 3 ans en crédit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
@@ -1162,8 +1223,10 @@ KEYWORD_MAPPING = {
     "A une exposition au cycle de vie du crédit bancaire": ["cycle de credit", "mise en place credit", "suivi credit", "garantie", "echeances credit", "credit administration", "administration de credit"],
     "A une connaissance des normes comptables bancaires ou de la réglementation COBAC": ["cobac", "reglementation bancaire", "ifrs 9", "normes ifrs", "comptabilite bancaire", "syscohada", "bale ii", "bale iii"]
 }
+
 EXP_MIN_YEARS_MAP = {"EXP_CREDIT_3ANS": 3.0, "EXP_BANK_1ANS": 1.0, "EXP_BACKOFFICE_3ANS": 3.0}
 DOMAIN_KEYWORDS_MAP = {"EXP_CREDIT_3ANS": ["credit", "risque", "banque", "bancaire", "institution financiere", "analyste", "charge", "gestionnaire", "loan", "credit analysis"], "EXP_BANK_1ANS": ["credit", "banque", "bancaire", "administration credit", "back office", "back-office", "risque", "risk", "analyse credit", "credit analysis", "loan", "institution financiere", "financial institution", "banking", "credit officer", "credit analyst", "credit administrator", "charge de credit", "gestionnaire credit", "analyste credit", "operations bancaires", "banking operations", "portfolio", "portefeuille", "garantie", "collateral"], "EXP_BACKOFFICE_3ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire", "banque", "bancaire", "middle office", "moyens de paiement", "traitement des operations", "chambre de compensation"]}
+
 def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="", tokens=None, poste=None):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1201,6 +1264,7 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
     return best_score >= 0.60, round(best_score, 2), found_kws
+
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
@@ -1226,6 +1290,7 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
         if duration > 0:
             total_years += duration
     return total_years >= min_years
+
 def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     if not IA_ANALYSE_ACTIVE or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
         return None
@@ -1273,6 +1338,7 @@ Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
         return None
+
 def get_display_status(c):
     statut = c.get('statut', 'en_attente')
     if statut == "rejete":
@@ -1290,6 +1356,7 @@ def get_display_status(c):
         else:
             return "rejete"
     return 'en_attente'
+
 def generate_detailed_reason(candidat, poste, score, score_max):
     statut = candidat.get('statut', 'en_attente')
     details = candidat.get('analyse_details_parsed', {})
@@ -1388,6 +1455,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
             if not weaknesses and not flags:
                 lines.append("  • Profil ne correspond pas aux exigences du poste")
             return "\n".join(lines)
+
 def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     if not OPENPYXL_AVAILABLE:
         return None
@@ -1546,6 +1614,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     wb.save(buf)
     buf.seek(0)
     return buf
+
 def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
     if not REPORTLAB_AVAILABLE:
         return None
@@ -1622,6 +1691,7 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
     doc.build(els)
     buf.seek(0)
     return buf
+
 def generate_csv_report(candidats_data, poste_filter=None):
     out = io.StringIO()
     w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL, quotechar='"')
@@ -1641,6 +1711,7 @@ def generate_csv_report(candidats_data, poste_filter=None):
         w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), statut, decision, motif.replace('\n', ' | ')])
     out.seek(0)
     return out.getvalue()
+
 def generate_word_report(candidats_data, poste_filter=None):
     if not DOCX_AVAILABLE:
         return None
@@ -1712,12 +1783,14 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.save(buf)
     buf.seek(0)
     return buf
+
 def _save_error(token, error_message, statut="rejete"):
     if supabase:
         try:
             supabase.table('candidats').update({"score": "0", "decision": f"Rejet - {error_message}", "statut": statut, "analyse_status": "error", "analyse_error": error_message, "analyse_auto_date": datetime.datetime.now().isoformat(), "analyse_details": json.dumps({"erreur": error_message, "moteur": "verification_cv"}, ensure_ascii=False)}).eq('token', token).execute()
         except Exception as e:
             logger.error(f"Erreur sauvegarde: {e}")
+
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
         if not force and not is_poste_actif(poste):
@@ -1821,18 +1894,22 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 supabase.table('candidats').update({"analyse_status": "error", "analyse_error": str(e), "analyse_auto_date": datetime.datetime.now().isoformat()}).eq('token', token).execute()
             except:
                 pass
+
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
     return jsonify({"postes": POSTES, "postes_actifs": POSTES_ACTIFS, "postes_clotures": POSTES_CLOTURES}), 200
+
 @app.route('/api/postes/actifs', methods=['GET'])
 def get_postes_actifs():
     return jsonify(POSTES_ACTIFS), 200
+
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
+
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
@@ -1854,6 +1931,7 @@ def login():
         except Exception as e:
             logger.error(f"Erreur login: {e}")
     return jsonify({'error': 'Identifiants incorrects'}), 401
+
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -1920,6 +1998,7 @@ def postuler():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
     if supabase:
@@ -1929,6 +2008,7 @@ def get_statut(token):
             hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown'}
             return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
     return jsonify({'error': 'Candidature introuvable'}), 404
+
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
@@ -1948,6 +2028,7 @@ def get_stats():
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
+
 @app.route('/api/recruteur/postes/stats', methods=['GET'])
 @jwt_required()
 def get_postes_stats():
@@ -1968,6 +2049,7 @@ def get_postes_stats():
             clotures_count += 1
             par_poste_cloture[poste] = par_poste_cloture.get(poste, 0) + 1
     return jsonify({'total': len(keys), 'postes_actifs': {'count': actifs_count, 'liste': POSTES_ACTIFS, 'par_poste': par_poste_actif, 'eligible_reanalyse': True}, 'postes_clotures': {'count': clotures_count, 'liste': POSTES_CLOTURES, 'par_poste': par_poste_cloture, 'eligible_reanalyse': False}}), 200
+
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
@@ -2003,6 +2085,7 @@ def list_candidats():
         result.append(c)
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
+
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
@@ -2025,6 +2108,7 @@ def get_candidat_detail(token):
             except Exception:
                 pass
     return jsonify(data), 200
+
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
@@ -2047,6 +2131,7 @@ def update_candidat(token):
         update_data["decision"] = "Entretien - Décision du recruteur"
     supabase.table('candidats').update(update_data).eq('token', token).execute()
     return jsonify({'message': 'Mis a jour avec succes', 'statut': statut}), 200
+
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
@@ -2068,6 +2153,7 @@ def trigger_analyze(token):
     supabase.table('candidats').update({"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()}).eq('token', token).execute()
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, force), daemon=True).start()
     return jsonify({'message': 'Analyse re-declenchee', 'token': token}), 202
+
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
 def get_reanalyze_status():
@@ -2091,6 +2177,7 @@ def get_reanalyze_status():
     except Exception as e:
         logger.error(f"Erreur reanalyze-status: {e}")
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-one/<token>', methods=['POST'])
 @jwt_required()
 def reanalyze_one_candidate(token):
@@ -2115,6 +2202,7 @@ def reanalyze_one_candidate(token):
     except Exception as e:
         logger.error(f"Erreur reanalyze-one: {e}")
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
@@ -2148,7 +2236,7 @@ def reanalyze_all_candidates():
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(1, len(candidates_to_reanalyze))
+        MAX_WORKERS = min(8, len(candidates_to_reanalyze))  # Augmenté à 8
         logger.info(f"Reanalyse parallele : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
         start_time = time.time()
         reanalyzed_count = 0
@@ -2157,7 +2245,7 @@ def reanalyze_all_candidates():
             futures = {executor.submit(analyze_one, c): c for c in candidates_to_reanalyze}
             for future in as_completed(futures):
                 try:
-                    token, success, msg = future.result(timeout=180)
+                    token, success, msg = future.result(timeout=300)  # Augmenté à 300s
                     if success:
                         reanalyzed_count += 1
                     else:
@@ -2171,6 +2259,7 @@ def reanalyze_all_candidates():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
@@ -2206,7 +2295,7 @@ def reanalyze_by_poste(poste):
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-        MAX_WORKERS = min(1, len(candidates_with_cv))
+        MAX_WORKERS = min(8, len(candidates_with_cv))
         start_time = time.time()
         reanalyzed_count = 0
         errors = []
@@ -2214,7 +2303,7 @@ def reanalyze_by_poste(poste):
             futures = [executor.submit(analyze_one, c) for c in candidates_with_cv]
             for future in as_completed(futures):
                 try:
-                    token, success, msg = future.result(timeout=180)
+                    token, success, msg = future.result(timeout=300)
                     if success:
                         reanalyzed_count += 1
                     else:
@@ -2228,6 +2317,7 @@ def reanalyze_by_poste(poste):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-fast', methods=['POST'])
 @jwt_required()
 def reanalyze_fast():
@@ -2289,11 +2379,12 @@ def reanalyze_fast():
         start = time.time()
         success_count = 0
         errors = []
-        with ThreadPoolExecutor(max_workers=min(1, len(candidates))) as executor:
+        MAX_WORKERS = min(8, len(candidates))
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = [executor.submit(analyze_fast_only, c) for c in candidates]
             for future in as_completed(futures):
                 try:
-                    token, ok, msg = future.result(timeout=60)
+                    token, ok, msg = future.result(timeout=120)
                     if ok:
                         success_count += 1
                     else:
@@ -2307,6 +2398,7 @@ def reanalyze_fast():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/cleanup-closed', methods=['POST'])
 @jwt_required()
 def cleanup_closed_statuses():
@@ -2319,6 +2411,7 @@ def cleanup_closed_statuses():
             supabase.table('candidats').update({"analyse_status": "completed"}).eq('token', row['token']).execute()
             fixed += 1
     return jsonify({'message': f'{fixed} dossier(s) de postes clotures stabilises (scores conserves)', 'fixed': fixed, 'postes_concernes': POSTES_CLOTURES}), 200
+
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -2373,154 +2466,15 @@ def export_candidates(fmt):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-@app.route('/api/recruteur/dossiers/zip', methods=['GET'])
-@jwt_required()
-def export_dossiers_zip():
-    start_time = time.time()
-    logger.info(f"Debut export ZIP - {datetime.datetime.now()}")
-    tmp_zip_path = None
-    try:
-        poste_filter = request.args.get('poste', '')
-        date_start = request.args.get('date_start', '')
-        date_end = request.args.get('date_end', '')
-        if not supabase:
-            return jsonify({'error': 'Supabase non configure'}), 500
-        response = supabase.table('candidats').select('*').execute()
-        all_candidats = response.data if response.data else []
-        candidats = []
-        for c in all_candidats:
-            c['id'] = c.get('token', '')
-            if poste_filter and c.get('poste') != poste_filter:
-                continue
-            date_cand = c.get('date_candidature', '')
-            if date_cand:
-                date_only = date_cand.split('T')[0] if 'T' in date_cand else date_cand[:10]
-                if date_start and date_only < date_start:
-                    continue
-                if date_end and date_only > date_end:
-                    continue
-            candidats.append(c)
-        if not candidats:
-            return jsonify({'error': 'Aucun dossier a exporter'}), 404
-        download_tasks = []
-        candidats_meta = {}
-        for cand in candidats:
-            poste_nom = cand.get('poste', 'Poste_Inconnu')
-            poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
-            num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
-            nom_candidat = cand.get('nom', 'N/A').upper()
-            prenom_candidat = cand.get('prenom', 'N/A')
-            dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
-            dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
-            dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
-            candidats_meta[cand['id']] = {'dossier_parent': dossier_parent, 'num_dossier': num_dossier, 'cand': cand, 'files_written': 0}
-            cv_file = cand.get('cv_filename', '')
-            if cv_file:
-                download_tasks.append((cand['id'], cv_file, dossier_parent, 'CV'))
-            lettre_file = cand.get('lettre_filename', '')
-            if lettre_file:
-                download_tasks.append((cand['id'], lettre_file, dossier_parent, 'Lettre_de_motivation'))
-            att_raw = cand.get('attestation_filenames', '[]')
-            try:
-                att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
-                for idx, att_file in enumerate(att_files, 1):
-                    if att_file:
-                        download_tasks.append((cand['id'], att_file, dossier_parent, f'Attestation_{idx}'))
-            except Exception:
-                pass
-        def _download_one(task):
-            cand_id, blob_name, dossier_parent, prefix = task
-            file_bytes = download_file_from_supabase_robust(blob_name)
-            return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
-        # CORRECTIF : ecriture du ZIP directement sur disque (pas d'accumulation
-        # de tous les octets en RAM avant ecriture -> evite l'OOM/SIGKILL).
-        tmp_fd = tempfile.NamedTemporaryFile(delete=False, suffix='.zip', dir='/tmp')
-        tmp_zip_path = tmp_fd.name
-        tmp_fd.close()
-        files_added = 0
-        # CORRECTIF : pool de telechargement elargi (le semaphore global
-        # _DOWNLOAD_SEMAPHORE continue de limiter les appels Supabase
-        # simultanes reels ; augmenter le pool reduit juste le temps
-        # d'attente entre deux vagues de telechargement).
-        max_workers = min(8, max(1, len(download_tasks))) if download_tasks else 1
-        with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            if download_tasks:
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = [executor.submit(_download_one, t) for t in download_tasks]
-                    for future in as_completed(futures):
-                        try:
-                            cand_id, blob_name, dossier_parent, prefix, file_bytes = future.result()
-                        except Exception as e:
-                            logger.error(f"Erreur telechargement fichier ZIP: {e}")
-                            continue
-                        if file_bytes:
-                            ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
-                            archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
-                            try:
-                                zip_file.writestr(archive_name, file_bytes)
-                                files_added += 1
-                                if cand_id in candidats_meta:
-                                    candidats_meta[cand_id]['files_written'] += 1
-                            except Exception as e:
-                                logger.error(f"Erreur ecriture ZIP {archive_name}: {e}")
-                            finally:
-                                del file_bytes
-            for cand_id, meta in candidats_meta.items():
-                if meta['files_written'] > 0:
-                    continue
-                cand = meta['cand']
-                info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {meta['num_dossier']}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}"
-                archive_name = f"{meta['dossier_parent']}/INFOS_CANDIDAT.txt"
-                zip_file.writestr(archive_name, info_content.encode('utf-8'))
-                files_added += 1
-        elapsed = time.time() - start_time
-        logger.info(f"Export ZIP termine en {elapsed:.2f} secondes pour {len(candidats)} candidats ({files_added} fichiers)")
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
-        filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
-        del candidats_meta, download_tasks
-        gc.collect()
-        response_obj = send_file(tmp_zip_path, mimetype='application/zip', as_attachment=True, download_name=filename)
-        @response_obj.call_on_close
-        def _cleanup_tmp_zip():
-            try:
-                if tmp_zip_path and os.path.exists(tmp_zip_path):
-                    os.remove(tmp_zip_path)
-            except Exception as e:
-                logger.warning(f"Nettoyage fichier temporaire ZIP echoue: {e}")
-        return response_obj
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        if tmp_zip_path and os.path.exists(tmp_zip_path):
-            try:
-                os.remove(tmp_zip_path)
-            except Exception:
-                pass
-        return jsonify({'error': str(e)}), 500
-def _cleanup_old_zip_jobs():
-    now = time.time()
-    with _ZIP_JOBS_LOCK:
-        stale = [jid for jid, j in _ZIP_JOBS.items() if now - j.get('created_at', now) > _ZIP_JOBS_MAX_AGE_SECONDS]
-        for jid in stale:
-            job = _ZIP_JOBS.pop(jid, None)
-            if job and job.get('filepath') and os.path.exists(job['filepath']):
-                try:
-                    os.remove(job['filepath'])
-                except Exception:
-                    pass
 
+# ====== FONCTION OPTIMISÉE POUR LE TÉLÉCHARGEMENT ZIP ======
 def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
-    # Meme logique que export_dossiers_zip, mais executee dans un thread
-    # a part : la requete HTTP qui a declenche le job n'attend jamais
-    # cette fonction, donc aucun thread gunicorn n'est bloque pendant la
-    # generation (peu importe qu'elle prenne 10s ou 5 minutes).
     tmp_zip_path = None
     start_time = time.time()
     try:
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'processing'
-        logger.info(f"[job {job_id}] Debut export ZIP asynchrone - {datetime.datetime.now()}")
+        logger.info(f"[job {job_id}] Début export ZIP optimisé - {datetime.datetime.now()}")
         if not supabase:
             with _ZIP_JOBS_LOCK:
                 _ZIP_JOBS[job_id]['status'] = 'error'
@@ -2574,6 +2528,7 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
                 pass
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['total'] = len(download_tasks)
+        logger.info(f"[job {job_id}] {len(download_tasks)} fichiers a telecharger")
 
         def _download_one(task):
             cand_id, blob_name, dossier_parent, prefix = task
@@ -2584,31 +2539,48 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
         tmp_zip_path = tmp_fd.name
         tmp_fd.close()
         files_added = 0
-        max_workers = min(8, max(1, len(download_tasks))) if download_tasks else 1
+        
+        # OPTIMISATION : Utiliser plus de workers pour le téléchargement parallèle
+        max_workers = min(_ZIP_MAX_WORKERS, max(1, len(download_tasks)))
+        logger.info(f"[job {job_id}] Utilisation de {max_workers} workers pour le téléchargement")
+        
         with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             if download_tasks:
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = [executor.submit(_download_one, t) for t in download_tasks]
-                    for future in as_completed(futures):
-                        try:
-                            cand_id, blob_name, dossier_parent, prefix, file_bytes = future.result()
-                        except Exception as e:
-                            logger.error(f"[job {job_id}] Erreur telechargement fichier ZIP: {e}")
-                            continue
-                        if file_bytes:
-                            ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
-                            archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
+                # Traiter par lots pour éviter de saturer la mémoire
+                BATCH_SIZE = 50
+                total_batches = (len(download_tasks) + BATCH_SIZE - 1) // BATCH_SIZE
+                
+                for batch_idx in range(0, len(download_tasks), BATCH_SIZE):
+                    batch = download_tasks[batch_idx:batch_idx + BATCH_SIZE]
+                    logger.info(f"[job {job_id}] Traitement du lot {batch_idx//BATCH_SIZE + 1}/{total_batches} ({len(batch)} fichiers)")
+                    
+                    with ThreadPoolExecutor(max_workers=min(max_workers, len(batch))) as executor:
+                        futures = [executor.submit(_download_one, t) for t in batch]
+                        for future in as_completed(futures):
                             try:
-                                zip_file.writestr(archive_name, file_bytes)
-                                files_added += 1
-                                if cand_id in candidats_meta:
-                                    candidats_meta[cand_id]['files_written'] += 1
+                                cand_id, blob_name, dossier_parent, prefix, file_bytes = future.result(timeout=60)
                             except Exception as e:
-                                logger.error(f"[job {job_id}] Erreur ecriture ZIP {archive_name}: {e}")
-                            finally:
-                                del file_bytes
-                        with _ZIP_JOBS_LOCK:
-                            _ZIP_JOBS[job_id]['progress'] = _ZIP_JOBS[job_id].get('progress', 0) + 1
+                                logger.error(f"[job {job_id}] Erreur telechargement: {e}")
+                                continue
+                            if file_bytes:
+                                ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
+                                archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
+                                try:
+                                    zip_file.writestr(archive_name, file_bytes)
+                                    files_added += 1
+                                    if cand_id in candidats_meta:
+                                        candidats_meta[cand_id]['files_written'] += 1
+                                except Exception as e:
+                                    logger.error(f"[job {job_id}] Erreur ecriture ZIP: {e}")
+                                finally:
+                                    del file_bytes
+                            with _ZIP_JOBS_LOCK:
+                                _ZIP_JOBS[job_id]['progress'] = _ZIP_JOBS[job_id].get('progress', 0) + 1
+                    
+                    # Libérer la mémoire après chaque lot
+                    gc.collect()
+            
+            # Ajouter les fichiers d'info pour les candidats sans fichiers
             for cand_id, meta in candidats_meta.items():
                 if meta['files_written'] > 0:
                     continue
@@ -2617,11 +2589,13 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
                 archive_name = f"{meta['dossier_parent']}/INFOS_CANDIDAT.txt"
                 zip_file.writestr(archive_name, info_content.encode('utf-8'))
                 files_added += 1
+        
         elapsed = time.time() - start_time
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
         filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
         logger.info(f"[job {job_id}] Export ZIP termine en {elapsed:.2f}s pour {len(candidats)} candidats ({files_added} fichiers)")
+        
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'done'
             _ZIP_JOBS[job_id]['filepath'] = tmp_zip_path
@@ -2641,6 +2615,7 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
             _ZIP_JOBS[job_id]['status'] = 'error'
             _ZIP_JOBS[job_id]['error'] = str(e)
 
+# ====== ROUTES ZIP OPTIMISÉES ======
 @app.route('/api/recruteur/dossiers/zip/start', methods=['GET'])
 @jwt_required()
 def start_zip_export():
@@ -2678,7 +2653,6 @@ def zip_export_download(job_id):
     if not filepath or not os.path.exists(filepath):
         return jsonify({'error': 'Fichier expire ou deja supprime'}), 410
     response_obj = send_file(filepath, mimetype='application/zip', as_attachment=True, download_name=job['filename'])
-
     @response_obj.call_on_close
     def _cleanup_after_send():
         try:
@@ -2688,8 +2662,19 @@ def zip_export_download(job_id):
             logger.warning(f"Nettoyage fichier temporaire ZIP (job {job_id}) echoue: {e}")
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS.pop(job_id, None)
-
     return response_obj
+
+def _cleanup_old_zip_jobs():
+    now = time.time()
+    with _ZIP_JOBS_LOCK:
+        stale = [jid for jid, j in _ZIP_JOBS.items() if now - j.get('created_at', now) > _ZIP_JOBS_MAX_AGE_SECONDS]
+        for jid in stale:
+            job = _ZIP_JOBS.pop(jid, None)
+            if job and job.get('filepath') and os.path.exists(job['filepath']):
+                try:
+                    os.remove(job['filepath'])
+                except Exception:
+                    pass
 
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
@@ -2716,6 +2701,7 @@ def email_preview(token):
         sujet = f"Reponse a votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'interet que vous portez a notre institution.\nApres examen attentif de votre dossier pour le poste de {poste}, nous avons le regret de vous informer que votre candidature n'a pas ete retenue.\nNous vous encourageons a postuler a nouveau." + sign
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
+
 @app.route('/api/recruteur/uploads/<path:filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename.replace('/', '_'))
@@ -2725,6 +2711,7 @@ def serve_upload(filename):
     if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
     return redirect(url)
+
 @app.route('/api/recruteur/debug/analyse-ia', methods=['POST'])
 @jwt_required()
 def debug_analyse_ia():
@@ -2736,6 +2723,7 @@ def debug_analyse_ia():
         return jsonify({'error': 'cv_text requis et poste doit exister dans GRILLE'}), 400
     result = analyze_cv_against_grille(cv_text, lettre_text, [], poste)
     return jsonify(result), 200
+
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     try:
@@ -2746,16 +2734,45 @@ def test_email():
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
-    return jsonify({"version": "v5.5-final", "postes_actifs": POSTES_ACTIFS, "postes_count": len(POSTES), "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5", "scoring_strict": True, "manual_status_priority": True, "auto_width_excel": True, "deployed_at": datetime.datetime.now().isoformat()}), 200
+    return jsonify({
+        "version": "v5.6-optimized",
+        "postes_actifs": POSTES_ACTIFS,
+        "postes_count": len(POSTES),
+        "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
+        "scoring_strict": True,
+        "manual_status_priority": True,
+        "auto_width_excel": True,
+        "max_concurrent_downloads": DOWNLOAD_MAX_CONCURRENT,
+        "zip_max_workers": _ZIP_MAX_WORKERS,
+        "deployed_at": datetime.datetime.now().isoformat()
+    }), 200
+
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
-    logger.info(f"RecrutBank API v5.5-final demarree sur le port {port}")
+    
+    # Déterminer le nombre de workers en fonction du CPU
+    import multiprocessing
+    cpu_count = multiprocessing.cpu_count()
+    suggested_workers = min(4, cpu_count * 2)
+    
+    logger.info(f"RecrutBank API v5.6-optimized demarree sur le port {port}")
+    logger.info(f"Workers suggeres: {suggested_workers} (configurable via GUNICORN_WORKERS)")
+    logger.info(f"Threads par worker: 4 (configurable via GUNICORN_THREADS)")
+    logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
+    logger.info(f"Workers ZIP max: {_ZIP_MAX_WORKERS}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
     logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
     logger.info(f"Download retry: Active (max {DOWNLOAD_MAX_RETRIES} tentatives, backoff exponentiel)")
-    logger.info(f"Download concurrent: max {int(os.getenv('DOWNLOAD_MAX_CONCURRENT', '3'))} telechargements simultanes")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    logger.info(f"Download concurrent: max {DOWNLOAD_MAX_CONCURRENT} telechargements simultanes")
+    
+    # Utiliser gunicorn si disponible, sinon app.run()
+    try:
+        import gunicorn
+        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    except ImportError:
+        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
