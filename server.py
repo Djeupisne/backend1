@@ -99,6 +99,13 @@ DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "5"))
 DOWNLOAD_BASE_DELAY = int(os.getenv("DOWNLOAD_BASE_DELAY", "1"))
 DOWNLOAD_MAX_DELAY = int(os.getenv("DOWNLOAD_MAX_DELAY", "30"))
 _DOWNLOAD_SEMAPHORE = threading.Semaphore(int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "3")))
+# Job store pour l'export ZIP asynchrone : evite de bloquer un thread
+# gunicorn pendant toute la duree de generation (ce qui peut faire
+# echouer les health checks de Render et provoquer un redemarrage
+# force en plein telechargement).
+_ZIP_JOBS = {}
+_ZIP_JOBS_LOCK = threading.Lock()
+_ZIP_JOBS_MAX_AGE_SECONDS = 3600
 
 def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BASE_DELAY, max_delay=DOWNLOAD_MAX_DELAY):
     def decorator(func):
@@ -2491,6 +2498,199 @@ def export_dossiers_zip():
             except Exception:
                 pass
         return jsonify({'error': str(e)}), 500
+def _cleanup_old_zip_jobs():
+    now = time.time()
+    with _ZIP_JOBS_LOCK:
+        stale = [jid for jid, j in _ZIP_JOBS.items() if now - j.get('created_at', now) > _ZIP_JOBS_MAX_AGE_SECONDS]
+        for jid in stale:
+            job = _ZIP_JOBS.pop(jid, None)
+            if job and job.get('filepath') and os.path.exists(job['filepath']):
+                try:
+                    os.remove(job['filepath'])
+                except Exception:
+                    pass
+
+def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
+    # Meme logique que export_dossiers_zip, mais executee dans un thread
+    # a part : la requete HTTP qui a declenche le job n'attend jamais
+    # cette fonction, donc aucun thread gunicorn n'est bloque pendant la
+    # generation (peu importe qu'elle prenne 10s ou 5 minutes).
+    tmp_zip_path = None
+    start_time = time.time()
+    try:
+        with _ZIP_JOBS_LOCK:
+            _ZIP_JOBS[job_id]['status'] = 'processing'
+        logger.info(f"[job {job_id}] Debut export ZIP asynchrone - {datetime.datetime.now()}")
+        if not supabase:
+            with _ZIP_JOBS_LOCK:
+                _ZIP_JOBS[job_id]['status'] = 'error'
+                _ZIP_JOBS[job_id]['error'] = 'Supabase non configure'
+            return
+        response = supabase.table('candidats').select('*').execute()
+        all_candidats = response.data if response.data else []
+        candidats = []
+        for c in all_candidats:
+            c['id'] = c.get('token', '')
+            if poste_filter and c.get('poste') != poste_filter:
+                continue
+            date_cand = c.get('date_candidature', '')
+            if date_cand:
+                date_only = date_cand.split('T')[0] if 'T' in date_cand else date_cand[:10]
+                if date_start and date_only < date_start:
+                    continue
+                if date_end and date_only > date_end:
+                    continue
+            candidats.append(c)
+        if not candidats:
+            with _ZIP_JOBS_LOCK:
+                _ZIP_JOBS[job_id]['status'] = 'error'
+                _ZIP_JOBS[job_id]['error'] = 'Aucun dossier a exporter'
+            return
+        download_tasks = []
+        candidats_meta = {}
+        for cand in candidats:
+            poste_nom = cand.get('poste', 'Poste_Inconnu')
+            poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
+            num_dossier = cand.get('numero_dossier', '') or f"candidat_{cand['id'][:8]}"
+            nom_candidat = cand.get('nom', 'N/A').upper()
+            prenom_candidat = cand.get('prenom', 'N/A')
+            dossier_candidat_nom = f"{num_dossier} - {nom_candidat} {prenom_candidat}"
+            dossier_candidat_nom = re.sub(r'[<>:"/\\|?*]', '_', dossier_candidat_nom)
+            dossier_parent = f"{poste_nom_clean}/{dossier_candidat_nom}"
+            candidats_meta[cand['id']] = {'dossier_parent': dossier_parent, 'num_dossier': num_dossier, 'cand': cand, 'files_written': 0}
+            cv_file = cand.get('cv_filename', '')
+            if cv_file:
+                download_tasks.append((cand['id'], cv_file, dossier_parent, 'CV'))
+            lettre_file = cand.get('lettre_filename', '')
+            if lettre_file:
+                download_tasks.append((cand['id'], lettre_file, dossier_parent, 'Lettre_de_motivation'))
+            att_raw = cand.get('attestation_filenames', '[]')
+            try:
+                att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
+                for idx, att_file in enumerate(att_files, 1):
+                    if att_file:
+                        download_tasks.append((cand['id'], att_file, dossier_parent, f'Attestation_{idx}'))
+            except Exception:
+                pass
+        with _ZIP_JOBS_LOCK:
+            _ZIP_JOBS[job_id]['total'] = len(download_tasks)
+
+        def _download_one(task):
+            cand_id, blob_name, dossier_parent, prefix = task
+            file_bytes = download_file_from_supabase_robust(blob_name)
+            return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
+
+        tmp_fd = tempfile.NamedTemporaryFile(delete=False, suffix='.zip', dir='/tmp')
+        tmp_zip_path = tmp_fd.name
+        tmp_fd.close()
+        files_added = 0
+        max_workers = min(8, max(1, len(download_tasks))) if download_tasks else 1
+        with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            if download_tasks:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [executor.submit(_download_one, t) for t in download_tasks]
+                    for future in as_completed(futures):
+                        try:
+                            cand_id, blob_name, dossier_parent, prefix, file_bytes = future.result()
+                        except Exception as e:
+                            logger.error(f"[job {job_id}] Erreur telechargement fichier ZIP: {e}")
+                            continue
+                        if file_bytes:
+                            ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
+                            archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
+                            try:
+                                zip_file.writestr(archive_name, file_bytes)
+                                files_added += 1
+                                if cand_id in candidats_meta:
+                                    candidats_meta[cand_id]['files_written'] += 1
+                            except Exception as e:
+                                logger.error(f"[job {job_id}] Erreur ecriture ZIP {archive_name}: {e}")
+                            finally:
+                                del file_bytes
+                        with _ZIP_JOBS_LOCK:
+                            _ZIP_JOBS[job_id]['progress'] = _ZIP_JOBS[job_id].get('progress', 0) + 1
+            for cand_id, meta in candidats_meta.items():
+                if meta['files_written'] > 0:
+                    continue
+                cand = meta['cand']
+                info_content = f"Candidat: {cand.get('nom', 'N/A')} {cand.get('prenom', 'N/A')}\nPoste: {cand.get('poste', 'N/A')}\nNumero dossier: {meta['num_dossier']}\nEmail: {cand.get('email', 'N/A')}\nTelephone: {cand.get('telephone', 'N/A')}\nDate candidature: {cand.get('date_candidature', 'N/A')}"
+                archive_name = f"{meta['dossier_parent']}/INFOS_CANDIDAT.txt"
+                zip_file.writestr(archive_name, info_content.encode('utf-8'))
+                files_added += 1
+        elapsed = time.time() - start_time
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
+        filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
+        logger.info(f"[job {job_id}] Export ZIP termine en {elapsed:.2f}s pour {len(candidats)} candidats ({files_added} fichiers)")
+        with _ZIP_JOBS_LOCK:
+            _ZIP_JOBS[job_id]['status'] = 'done'
+            _ZIP_JOBS[job_id]['filepath'] = tmp_zip_path
+            _ZIP_JOBS[job_id]['filename'] = filename
+        del candidats_meta, download_tasks
+        gc.collect()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        logger.error(f"[job {job_id}] Erreur export ZIP: {e}")
+        if tmp_zip_path and os.path.exists(tmp_zip_path):
+            try:
+                os.remove(tmp_zip_path)
+            except Exception:
+                pass
+        with _ZIP_JOBS_LOCK:
+            _ZIP_JOBS[job_id]['status'] = 'error'
+            _ZIP_JOBS[job_id]['error'] = str(e)
+
+@app.route('/api/recruteur/dossiers/zip/start', methods=['GET'])
+@jwt_required()
+def start_zip_export():
+    _cleanup_old_zip_jobs()
+    poste_filter = request.args.get('poste', '')
+    date_start = request.args.get('date_start', '')
+    date_end = request.args.get('date_end', '')
+    job_id = uuid.uuid4().hex
+    with _ZIP_JOBS_LOCK:
+        _ZIP_JOBS[job_id] = {'status': 'pending', 'created_at': time.time(), 'progress': 0, 'total': 0, 'filepath': None, 'filename': None, 'error': None}
+    threading.Thread(target=_run_zip_export_job, args=(job_id, poste_filter, date_start, date_end), daemon=True).start()
+    return jsonify({'job_id': job_id}), 202
+
+@app.route('/api/recruteur/dossiers/zip/status/<job_id>', methods=['GET'])
+@jwt_required()
+def zip_export_status(job_id):
+    with _ZIP_JOBS_LOCK:
+        job = _ZIP_JOBS.get(job_id)
+        if not job:
+            return jsonify({'error': 'Job introuvable ou expire'}), 404
+        return jsonify({'status': job['status'], 'progress': job.get('progress', 0), 'total': job.get('total', 0), 'error': job.get('error')}), 200
+
+@app.route('/api/recruteur/dossiers/zip/download/<job_id>', methods=['GET'])
+@jwt_required()
+def zip_export_download(job_id):
+    with _ZIP_JOBS_LOCK:
+        job = _ZIP_JOBS.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job introuvable ou expire'}), 404
+    if job['status'] == 'error':
+        return jsonify({'error': job.get('error', 'Erreur inconnue')}), 500
+    if job['status'] != 'done':
+        return jsonify({'error': 'Export pas encore termine', 'status': job['status']}), 425
+    filepath = job.get('filepath')
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'error': 'Fichier expire ou deja supprime'}), 410
+    response_obj = send_file(filepath, mimetype='application/zip', as_attachment=True, download_name=job['filename'])
+
+    @response_obj.call_on_close
+    def _cleanup_after_send():
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            logger.warning(f"Nettoyage fichier temporaire ZIP (job {job_id}) echoue: {e}")
+        with _ZIP_JOBS_LOCK:
+            _ZIP_JOBS.pop(job_id, None)
+
+    return response_obj
+
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
