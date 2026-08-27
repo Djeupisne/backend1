@@ -169,7 +169,7 @@ def health_check():
     return jsonify({
         'status': 'ok', 
         'message': 'RecrutBank API is running', 
-        'version': 'v5.6-optimized',
+        'version': 'v5.7-intelligent',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -180,7 +180,8 @@ def health_check():
             'manual_status_priority': True,
             'auto_width_excel': True,
             'max_concurrent_downloads': DOWNLOAD_MAX_CONCURRENT,
-            'zip_max_workers': _ZIP_MAX_WORKERS
+            'zip_max_workers': _ZIP_MAX_WORKERS,
+            'intelligent_scoring': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -330,62 +331,82 @@ def extract_text_from_pdf_via_ocr(file_bytes):
     except Exception:
         return ""
 MAX_PDF_PAGES = 10
-MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024
-MAX_TEXT_SIZE = 8000
+MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
+MAX_TEXT_SIZE = 15000
 def extract_text_from_pdf_robust(file_bytes, filename):
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
-        logger.warning(f"PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 5 MB): {filename}")
+        logger.warning(f"PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 10 MB): {filename}")
         return ""
     text = ""
     if PDFPLUMBER_AVAILABLE:
         try:
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                total_pages = len(pdf.pages)
-                pages_to_read = min(MAX_PDF_PAGES, total_pages)
-                for i, page in enumerate(pdf.pages):
-                    if i >= pages_to_read:
-                        break
-                    tables = page.extract_tables()
-                    if tables:
-                        for table in tables:
-                            for row in table:
-                                if row:
-                                    row_text = ' | '.join([str(cell).strip() if cell else '' for cell in row])
-                                    if row_text.strip():
-                                        text += normalize_spaces(row_text) + "\n"
-                    content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
-                    if content:
-                        text += normalize_spaces(content) + "\n"
-                    if len(text) > MAX_TEXT_SIZE:
-                        text = text[:MAX_TEXT_SIZE]
-                        break
-            if text.strip() and len(text.strip()) > 100:
+                total_pages = min(len(pdf.pages), MAX_PDF_PAGES)
+                for i in range(total_pages):
+                    try:
+                        page = pdf.pages[i]
+                        tables = page.extract_tables()
+                        if tables:
+                            for table in tables:
+                                for row in table:
+                                    if row:
+                                        row_text = ' | '.join([str(cell).strip() if cell else '' for cell in row])
+                                        if row_text.strip():
+                                            text += normalize_spaces(row_text) + "\n"
+                        content = page.extract_text(x_tolerance=3, y_tolerance=3, keep_blank_chars=True, use_text_flow=True)
+                        if content:
+                            text += normalize_spaces(content) + "\n"
+                        if len(text) > MAX_TEXT_SIZE:
+                            text = text[:MAX_TEXT_SIZE]
+                            break
+                    except Exception as e:
+                        logger.warning(f"pdfplumber page {i} erreur: {e}")
+                        continue
+            if text.strip() and len(text.strip()) > 50:
                 return normalize_unicode(text.strip())
         except Exception as e:
             logger.warning(f"pdfplumber erreur: {e}")
     if PYPDF2_AVAILABLE:
         try:
             reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-            total_pages = len(reader.pages)
-            pages_to_read = min(MAX_PDF_PAGES, total_pages)
-            for i, page in enumerate(reader.pages):
-                if i >= pages_to_read:
-                    break
-                content = page.extract_text()
-                if content:
-                    text += normalize_spaces(content) + "\n"
-                if len(text) > MAX_TEXT_SIZE:
-                    text = text[:MAX_TEXT_SIZE]
-                    break
-            if text.strip() and len(text.strip()) > 100:
+            total_pages = min(len(reader.pages), MAX_PDF_PAGES)
+            for i in range(total_pages):
+                try:
+                    content = reader.pages[i].extract_text()
+                    if content:
+                        text += normalize_spaces(content) + "\n"
+                    if len(text) > MAX_TEXT_SIZE:
+                        text = text[:MAX_TEXT_SIZE]
+                        break
+                except Exception as e:
+                    logger.warning(f"PyPDF2 page {i} erreur: {e}")
+                    continue
+            if text.strip() and len(text.strip()) > 50:
                 return normalize_unicode(text.strip())
         except Exception as e:
             logger.warning(f"PyPDF2 erreur: {e}")
-    if len(text.strip()) < 100:
-        ocr_text = extract_text_from_pdf_via_ocr(file_bytes)
-        if ocr_text and len(ocr_text.strip()) > 100:
-            return ocr_text
-    return ""
+    if len(text.strip()) < 50 and OCR_AVAILABLE:
+        try:
+            ocr_text = extract_text_from_pdf_via_ocr(file_bytes)
+            if ocr_text and len(ocr_text.strip()) > 50:
+                return ocr_text
+        except Exception as e:
+            logger.warning(f"OCR erreur: {e}")
+    if len(text.strip()) < 30:
+        try:
+            for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+                try:
+                    raw_text = file_bytes.decode(encoding, errors='ignore')
+                    raw_text = re.sub(r'[^\w\s\.\,\:\;\-\?\!\@\#\%\&\*\(\)\-\+\=\/\'\"]', ' ', raw_text)
+                    raw_text = re.sub(r'\s+', ' ', raw_text).strip()
+                    if len(raw_text) > 50:
+                        logger.info(f"Extraction brute réussie avec {encoding}")
+                        return normalize_unicode(raw_text)
+                except:
+                    continue
+        except Exception as e:
+            logger.warning(f"Extraction brute échouée: {e}")
+    return text.strip() if text.strip() else ""
 def extract_text_from_docx_robust(file_bytes):
     if not DOCX_AVAILABLE:
         return ""
@@ -455,20 +476,34 @@ def extract_text_robust_from_bytes(file_bytes, filename):
     if not file_bytes:
         return ""
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    text = ""
     if ext == 'pdf':
-        return extract_text_from_pdf_robust(file_bytes, filename)
+        text = extract_text_from_pdf_robust(file_bytes, filename)
+        logger.info(f"Extraction PDF {filename}: {len(text)} caractères")
     elif ext in ('doc', 'docx'):
-        return extract_text_from_docx_robust(file_bytes)
+        text = extract_text_from_docx_robust(file_bytes)
+        logger.info(f"Extraction DOCX {filename}: {len(text)} caractères")
     elif ext == 'txt':
-        return extract_text_from_txt(file_bytes)
-    try:
-        text = file_bytes.decode('utf-8', errors='ignore').strip()
-        if len(text) > MAX_TEXT_SIZE:
-            text = text[:MAX_TEXT_SIZE]
-        return normalize_unicode(normalize_spaces(text))
-    except Exception:
-        pass
-    return ""
+        text = extract_text_from_txt(file_bytes)
+        logger.info(f"Extraction TXT {filename}: {len(text)} caractères")
+    else:
+        try:
+            for encoding in ['utf-8', 'latin-1', 'cp1252']:
+                try:
+                    text = file_bytes.decode(encoding, errors='ignore').strip()
+                    if len(text) > 50:
+                        break
+                except:
+                    continue
+            if len(text) > MAX_TEXT_SIZE:
+                text = text[:MAX_TEXT_SIZE]
+            text = normalize_unicode(normalize_spaces(text))
+            logger.info(f"Extraction brute {filename}: {len(text)} caractères")
+        except Exception:
+            pass
+    if len(text.strip()) < 30:
+        logger.warning(f"Extraction faible pour {filename}: {len(text)} caractères")
+    return text.strip() if text.strip() else ""
 def init_recruteur():
     try:
         if supabase:
@@ -694,7 +729,16 @@ def extract_duration_years_from_block(block_text):
     return 0.0
 def detect_institution_type(text):
     text_lower = text.lower()
-    commercial_banks = ['ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 'société générale', 'standard chartered', 'nsia banque', 'commercial bank', 'banque commerciale', 'investment bank', 'banque d affaires', 'credit institution', 'financial institution', 'banque', 'express union', 'coris bank']
+    commercial_banks = [
+        'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 
+        'société générale', 'standard chartered', 'nsia banque', 
+        'commercial bank', 'banque commerciale', 'investment bank', 
+        'banque d affaires', 'credit institution', 'financial institution', 
+        'banque', 'express union', 'coris bank', 'orabank tchad', 
+        'uba tchad', 'commercial bank tchad', 'cbt', 'finadev',
+        'united bank for africa', 'banque islamique', 'microfinance',
+        'orabank tchad', 'commercial bank tchad'
+    ]
     commercial_pattern = re.compile(r'\b(' + '|'.join(re.escape(b) for b in commercial_banks) + r')\b', re.IGNORECASE)
     if commercial_pattern.search(text_lower):
         return 'commercial_bank'
@@ -724,6 +768,47 @@ def extract_quantified_results(text):
         if matches:
             results.extend(matches)
     return results
+def detect_banking_experience_years(text):
+    if not text:
+        return 0.0
+    text_lower = text.lower()
+    bank_list = [
+        'ecobank', 'orabank', 'uba', 'united bank for africa',
+        'commercial bank tchad', 'cbt', 'finadev', 'société générale',
+        'bicec', 'coris bank', 'banque commerciale', 'microfinance'
+    ]
+    blocks = split_into_jobs(text)
+    total_years = 0.0
+    banking_blocks = []
+    for block in blocks:
+        if is_stage_block(block):
+            continue
+        is_banking = False
+        block_lower = block.lower()
+        for bank in bank_list:
+            if bank.lower() in block_lower:
+                is_banking = True
+                break
+        if is_banking:
+            duration = extract_duration_years_from_block(block)
+            if duration > 0:
+                total_years += duration
+                banking_blocks.append({'block': block[:200], 'years': duration})
+            else:
+                years_match = re.search(r'(\d+)\s*(?:ans|années?)', block_lower)
+                if years_match:
+                    try:
+                        years = float(years_match.group(1))
+                        if 0 < years <= 40:
+                            total_years += years
+                            banking_blocks.append({'block': block[:200], 'years': years})
+                    except:
+                        pass
+    if total_years > 0:
+        logger.info(f"Années bancaires détectées: {total_years} ans - {len(banking_blocks)} expériences")
+        for b in banking_blocks[:3]:
+            logger.info(f"  - {b['years']} ans: {b['block'][:80]}...")
+    return total_years
 def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="", poste=None, lang='fr'):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -748,7 +833,7 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
             continue
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 80:
+            if ratio >= 75:
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
                     best_score = max(best_score, ratio / 100)
@@ -759,7 +844,7 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
-    if best_score < 0.6 and lang in ['en', 'fr']:
+    if best_score < 0.5 and lang in ['en', 'fr']:
         for category, synonyms in semantic_expansions.items():
             for kw in keywords:
                 if category in kw.lower() or kw.lower() in category:
@@ -767,8 +852,9 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
                         syn_clean, _ = normalize_for_matching(syn)
                         if syn_clean in text_clean:
                             found_kws.append(f"{syn} (sémantique)")
-                            best_score = max(best_score, 0.8)
-    return best_score >= 0.60, round(best_score, 2), found_kws
+                            best_score = max(best_score, 0.75)
+    threshold = 0.45 if len(normalized_text) < 500 else 0.55
+    return best_score >= threshold, round(best_score, 2), found_kws
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
     grille = GRILLE.get(poste, {})
@@ -777,10 +863,43 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     normalized = normalize_for_matching(raw_full)[0]
     detected_lang = detect_language(raw_full)
     logger.info(f"Langue détectée pour l'analyse Chef Division Corporate: {detected_lang}")
+    logger.info(f"Texte CV analysé: {len(cv_text)} caractères, {len(cv_text.split())} mots")
+    banking_years = detect_banking_experience_years(cv_text)
+    logger.info(f"Années bancaires détectées: {banking_years}")
+    def check_crit(crit):
+        ok, _, _ = check_criterion_match_semantic(crit, normalized, raw_full, poste=poste, lang=detected_lang)
+        return ok
     flags = []
+    has_banking = banking_years >= 1.0
+    if not has_banking:
+        flags.append("Aucune expérience dans le secteur bancaire ou financier réglementé")
+    elif banking_years < 5.0:
+        flags.append(f"Moins de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
+    has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd|diplôme d\'expertise', cv_text.lower()))
+    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maîtrise|master|mba|licence.*professionnelle', cv_text.lower()))
+    if not has_master and not has_bac4:
+        flags.append("Niveau de diplôme inférieur à Bac+4 (Master ou équivalent requis)")
+    has_management = False
+    management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'équipe', 'pilotage', 'responsable']
+    for kw in management_keywords:
+        if kw in cv_text.lower():
+            has_management = True
+            break
+    if not has_management:
+        flags.append("Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale")
+    has_credit_risk = False
+    credit_keywords = ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']
+    for kw in credit_keywords:
+        if kw in cv_text.lower():
+            has_credit_risk = True
+            break
+    if not has_credit_risk:
+        flags.append("Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)")
     for crit in grille.get('eliminatoire', []):
         ok, _, _ = check_criterion_match_semantic(crit, normalized, raw_full, poste=poste, lang=detected_lang)
-        if not ok:
+        if not ok and crit not in flags:
+            if "minimum 5 ans" in crit.lower() and banking_years >= 5.0:
+                continue
             flags.append(crit)
     if flags:
         return {
@@ -802,9 +921,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             'points_vigilance': flags,
             'synthese': f"Rejet immédiat : {', '.join(flags[:3])}"
         }
-    def check_crit(crit):
-        ok, _, _ = check_criterion_match_semantic(crit, normalized, raw_full, poste=poste, lang=detected_lang)
-        return ok
     management_signals = [
         "Encadrement d'équipe commerciale ou bancaire",
         "Supervision d'une équipe ou d'un département",
@@ -966,6 +1082,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
+    banking_years = detect_banking_experience_years(cv_text)
     flags_elim = []
     diplome_ok = False
     diplome_patterns = [r'licence', r'bachelor', r'bac\+3', r'bac 3', r'baccalauréat.*université', r'master', r'mba', r'ingénieur', r'bac\+4', r'bac 4', r'bac\+5', r'bac 5', r'maîtrise', r'doctorat', r'phd', r'école de commerce', r'école supérieure']
@@ -975,24 +1092,9 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             break
     if not diplome_ok:
         flags_elim.append("Niveau de diplôme inférieur à Bac+3")
-    banking_keywords = ['express union', 'coris bank', 'ecobank', 'orabank', 'uba', 'bicec', 'banque', 'bancaire', 'établissement financier', 'institution financière']
-    blocks = split_into_jobs(cv_text)
-    total_banking_years = 0.0
-    for block in blocks:
-        if is_stage_block(block):
-            continue
-        is_banking = False
-        for kw in banking_keywords:
-            if kw in block.lower():
-                is_banking = True
-                break
-        if is_banking:
-            duration = extract_duration_years_from_block(block)
-            if duration > 0:
-                total_banking_years += duration
-    exp_bancaire_ok = total_banking_years >= 1.0
+    exp_bancaire_ok = banking_years >= 1.0
     if not exp_bancaire_ok:
-        flags_elim.append(f"Moins de 1 an d'expérience bancaire ({total_banking_years:.1f} ans) - les stages ne sont pas comptabilisés")
+        flags_elim.append(f"Moins de 1 an d'expérience bancaire ({banking_years:.1f} ans) - les stages ne sont pas comptabilisés")
     credit_cycle_ok = False
     credit_cycle_keywords = ['crédit', 'credit', 'dossier de crédit', 'analyse de crédit', 'instruction crédit', 'octroi', 'mise en place', 'suivi crédit', 'garantie', 'échéance', 'portefeuille', 'administration de crédit', 'back-office crédit', 'credit administration']
     for kw in credit_cycle_keywords:
@@ -1023,6 +1125,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if re.search(r'(économie|gestion|finance|comptabilité|banque|commerce)', cv_text.lower()):
         adequation += 1
     credit_years = 0.0
+    blocks = split_into_jobs(cv_text)
     for block in blocks:
         if not is_stage_block(block) and ('crédit' in block.lower() or 'credit' in block.lower()):
             duration = extract_duration_years_from_block(block)
@@ -1146,11 +1249,31 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
+    banking_years = detect_banking_experience_years(cv_text)
     flags = []
+    if banking_years < 1.0:
+        flags.append("A une expérience en banque ou établissement financier réglementé")
+    if banking_years < 3.0:
+        flags.append("Minimum 3 ans d'expérience en opérations bancaires ou back-office")
+    has_diploma = bool(re.search(r'licence|bachelor|bac\+3|bac 3|master|mba', cv_text.lower()))
+    if not has_diploma:
+        flags.append("A un diplôme de niveau Bac+3 minimum (Licence, Bachelor ou équivalent)")
+    has_compensation = False
+    compensation_keywords = ['compensation', 'interbancaire', 'systac', 'sygma', 'gimac', 'back-office', 'clearing']
+    for kw in compensation_keywords:
+        if kw in cv_text.lower():
+            has_compensation = True
+            break
+    if not has_compensation:
+        flags.append("A une exposition aux opérations de compensation interbancaire")
+        flags.append("A une connaissance des règles BEAC / GIMAC ou d'un système de compensation équivalent")
     for crit in grille.get('eliminatoire', []):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         if not ok:
-            flags.append(crit)
+            if "minimum 3 ans" in crit.lower() and banking_years >= 3.0:
+                continue
+            if crit not in flags:
+                flags.append(crit)
     if flags:
         return {'score': 0, 'score_max': 12, 'decision': 'Rejet', 'flags_eliminatoires': flags, 'sous_scores': {"Adéquation de l'expérience (compensation interbancaire)": 0, "Exposition BEAC / GIMAC / SYSTAC": 0, "Capacité d'encadrement": 0, "Cohérence du parcours": 0, "Qualité CV + Lettre": 0}, 'checklist': {}, 'detail': f"REJET IMMÉDIAT - {len(flags)} critère(s) éliminatoire(s)", 'points_forts': [], 'points_vigilance': flags, 'synthese': f"Rejet immédiat : {', '.join(flags[:2])}"}
     from rapidfuzz import fuzz
@@ -1410,18 +1533,19 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
             continue
         if RAPIDFUZZ_AVAILABLE and len(kw_clean) >= 4:
             ratio = fuzz.partial_ratio(kw_clean, text_clean)
-            if ratio >= 80:
+            if ratio >= 75:
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}~{ratio/100:.2f}")
                     best_score = max(best_score, ratio / 100)
                 continue
         if kw_tokens and text_tokens:
             common = set(kw_tokens) & set(text_tokens)
-            if len(common) >= max(2, len(kw_tokens) * 0.6):
+            if len(common) >= max(2, len(kw_tokens) * 0.5):
                 if not contains_negative_context(raw_full_text, kw):
                     found_kws.append(f"{kw}[{len(common)}/{len(kw_tokens)}]")
                     best_score = max(best_score, len(common) / len(kw_tokens))
-    return best_score >= 0.60, round(best_score, 2), found_kws
+    threshold = 0.45 if len(normalized_text) < 500 else 0.55
+    return best_score >= threshold, round(best_score, 2), found_kws
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
@@ -1958,6 +2082,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
                 if len(cv_text) > MAX_TEXT_SIZE:
                     cv_text = cv_text[:MAX_TEXT_SIZE]
+                logger.info(f"CV extrait pour {token}: {len(cv_text)} caractères")
+                if len(cv_text) < 50:
+                    logger.warning(f"CV {cv_filename} très court ({len(cv_text)} caractères)")
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase_robust(lettre_filename)
@@ -1965,6 +2092,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
                 if len(lm_text) > MAX_TEXT_SIZE:
                     lm_text = lm_text[:MAX_TEXT_SIZE]
+                logger.info(f"Lettre extraite pour {token}: {len(lm_text)} caractères")
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -1975,7 +2103,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         t = t[:MAX_TEXT_SIZE]
                     if t:
                         att_texts.append(t)
-        if not cv_text or len(cv_text.strip()) < 50:
+        if not cv_text or len(cv_text.strip()) < 30:
             logger.warning(f"CV manquant ou vide pour {token}")
             _save_error(token, "CV manquant ou vide", "rejete")
             return
@@ -1992,21 +2120,27 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         logger.warning(f"CV et lettre identiques pour {token} (similarite: {similarity:.0%})")
                         lm_text = ""
                         supabase.table('candidats').update({"note": "Attention: Le CV et la lettre de motivation sont identiques. Une lettre personnalisee est attendue."}).eq('token', token).execute()
-        logger.info(f"Analyse pour {token} - poste: {poste}")
+        logger.info(f"Analyse pour {token} - poste: {poste}, CV: {len(cv_text)} caractères")
         gc.collect()
         if poste == "Chargé(e) d'Administration de Crédit":
             result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
-            logger.info(f"Score calcule: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
+            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
         elif poste == "Chef de Section Compensation":
             result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
+            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
         elif poste == "Chef de Division Local Corporate":
+            logger.info(f"Appel du scoring specifique pour {poste}")
             result = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
+            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/14 - {result.get('decision', 'Inconnu')}")
         elif poste == "Data Analyst Finance":
             result = calculate_score_data_analyst_finance(cv_text, lm_text, att_texts)
+            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/14 - {result.get('decision', 'Inconnu')}")
         else:
             result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
             if result is None:
+                logger.info(f"Fallback vers analyse_grille pour {poste}")
                 result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/10 - {result.get('decision', 'Inconnu')}")
         score = result.get('score', 0)
         score_max = result.get('score_max', get_score_max_for_poste(poste))
         decision = result.get('decision') or get_recommandation_from_score(score, poste)
@@ -2841,7 +2975,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.6-optimized",
+        "version": "v5.7-intelligent",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -2850,6 +2984,7 @@ def health_version():
         "auto_width_excel": True,
         "max_concurrent_downloads": DOWNLOAD_MAX_CONCURRENT,
         "zip_max_workers": _ZIP_MAX_WORKERS,
+        "intelligent_scoring": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -2857,12 +2992,13 @@ if __name__ == '__main__':
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
-    logger.info(f"RecrutBank API v5.6-optimized demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.7-intelligent demarree sur le port {port}")
     logger.info(f"Workers suggeres: {suggested_workers} (configurable via GUNICORN_WORKERS)")
     logger.info(f"Threads par worker: 4 (configurable via GUNICORN_THREADS)")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
     logger.info(f"Workers ZIP max: {_ZIP_MAX_WORKERS}")
     logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
+    logger.info(f"Mode scoring INTELLIGENT: Actif (detection des banques, extraction avancee)")
     logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
     logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
     logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
