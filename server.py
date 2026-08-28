@@ -934,9 +934,35 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             flags.append(crit)
     if flags:
         return {'score': 0, 'score_max': 14, 'decision': '❌ Rejet (éliminatoire)', 'flags_eliminatoires': flags, 'sous_scores': {}, 'checklist': {}, 'detail': f"ÉLIMINÉ: {len(flags)} critère(s)"}
-    exp_criteria = ["Pilotage Corporate", "Gestion portefeuille Corporate", "Développement portefeuille"]
-    n_exp = sum(1 for c in exp_criteria if check_criterion_semantic(c, cv_text, lettre_text, poste, normalized, raw_full)[0])
-    adequation = min(3, n_exp)
+    
+    # === EXTRACTION ROBUSTE DES ANNÉES D'EXPÉRIENCE BANCAIRE ===
+    # Utiliser la fonction centralisée pour éviter les doublons
+    experience_data = extract_years_of_experience(raw_full)
+    years_total = experience_data['total_years']
+    
+    # Vérifier spécifiquement l'expérience bancaire
+    has_bank_experience = any(re.search(r'\b' + re.escape(b) + r'\b', raw_full, re.IGNORECASE) 
+                              for b in ['banque', 'bank', 'finance', 'credit', 'orabank', 'bicec', 'sg', 'standard bank'])
+    
+    # Si on a une expérience bancaire explicite, utiliser ces années
+    banking_years = years_total if has_bank_experience else 0
+    
+    # Score basé sur les années d'expérience bancaire (critère clé pour ce poste)
+    if banking_years >= 10:
+        exp_score = 3
+    elif banking_years >= 7:
+        exp_score = 2
+    elif banking_years >= 5:
+        exp_score = 2
+    elif banking_years >= 3:
+        exp_score = 1
+    else:
+        exp_score = 0
+    
+    # Ajuster le score d'adéquation en fonction de l'expérience bancaire réelle
+    adequation = max(exp_score, min(3, sum(1 for c in ["Pilotage Corporate", "Gestion portefeuille Corporate", "Développement portefeuille"] 
+                                            if check_criterion_semantic(c, cv_text, lettre_text, poste, normalized, raw_full)[0])))
+    
     mgmt_criteria = ["Management", "Leadership"]
     n_mgmt = sum(1 for c in mgmt_criteria if check_criterion_semantic(c, cv_text, lettre_text, poste, normalized, raw_full)[0])
     management = min(3, n_mgmt)
