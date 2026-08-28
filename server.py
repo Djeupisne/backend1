@@ -850,6 +850,16 @@ def extract_quantified_results(text):
 def detect_banking_experience_years(text):
     if not text:
         return 0.0
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[^a-zA-Z0-9\u00C0-\u017F\s\-\/\.]', ' ', text)
+    bank_keywords = [
+        'ecobank', 'orabank', 'uba', 'united bank', 'banque', 'bank',
+        'bancaire', 'commercial bank', 'cbt', 'finadev', 'societe generale',
+        'sogé', 'bicec', 'sgbc', 'cbc', 'bct', 'standard chartered',
+        'nsia banque', 'express union', 'coris bank', 'orabank tchad',
+        'commercial bank tchad', 'uba tchad', 'cbt tchad', 'orabank',
+        'commercial bank', 'united bank for africa'
+    ]
     blocks = split_into_jobs(text)
     total_years = 0.0
     bank_found = False
@@ -857,25 +867,45 @@ def detect_banking_experience_years(text):
         if is_stage_block(block):
             continue
         block_lower = block.lower()
-        bank_keywords = ['ecobank', 'orabank', 'uba', 'united bank', 'banque', 'bank', 'bancaire', 'financial institution', 'credit institution', 'commercial bank', 'finadev', 'societe generale', 'sogé', 'bicec', 'sgbc', 'cbc', 'bct', 'standard chartered', 'nsia banque', 'express union', 'coris bank']
         is_bank = False
         for kw in bank_keywords:
             if kw in block_lower:
                 is_bank = True
                 bank_found = True
+                logger.info(f"Banque détectée dans le bloc: {kw}")
                 break
         if is_bank:
-            duration = extract_duration_years_from_block(block)
-            if duration > 0:
-                total_years += duration
-                logger.info(f"Expérience bancaire détectée: {duration} ans")
-            else:
-                years = re.findall(r'(20\d{2})', block)
-                if years:
-                    years_int = sorted([int(y) for y in years])
-                    if len(years_int) >= 2:
-                        total_years += years_int[-1] - years_int[0]
-                        logger.info(f"Durée estimée: {years_int[-1] - years_int[0]} ans")
+            duration_match = re.search(r'(\d+)\s*(?:ans|années?|years?)', block, re.IGNORECASE)
+            if duration_match:
+                try:
+                    years = float(duration_match.group(1))
+                    if 0 < years <= 40:
+                        total_years += years
+                        logger.info(f"Durée explicite trouvée: {years} ans")
+                        continue
+                except:
+                    pass
+            year_matches = re.findall(r'(20\d{2})', block)
+            if len(year_matches) >= 2:
+                years_int = sorted([int(y) for y in year_matches])
+                duration = years_int[-1] - years_int[0]
+                if 0 < duration <= 40:
+                    total_years += duration
+                    logger.info(f"Dates trouvées: {years_int[0]}-{years_int[-1]} = {duration} ans")
+                    continue
+            from_to = re.search(r'(?:depuis|de|from)\s+(20\d{2})\s*(?:[àa]|au|jusqu\'au|to|until|-|–|—)\s*(20\d{2}|présent|present|current|now)', block, re.IGNORECASE)
+            if from_to:
+                start_year = int(from_to.group(1))
+                end_raw = from_to.group(2).lower()
+                if end_raw in ['présent', 'present', 'current', 'now']:
+                    end_year = datetime.datetime.now().year
+                else:
+                    end_year = int(end_raw)
+                duration = end_year - start_year
+                if 0 < duration <= 40:
+                    total_years += duration
+                    logger.info(f"Période trouvée: {start_year}-{end_year} = {duration} ans")
+                    continue
     if not bank_found:
         bank_mentions = re.findall(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire)', text, re.IGNORECASE)
         if bank_mentions:
@@ -884,17 +914,25 @@ def detect_banking_experience_years(text):
                 logger.info(f"Expérience bancaire mentionnée explicitement: {total_years} ans")
             except:
                 pass
-    finance_keywords = ['microfinance', 'institution financière', 'financial institution']
-    for kw in finance_keywords:
-        if kw in text.lower():
-            finance_duration = re.search(r'(\d+)\s*(?:ans|années?)', text.lower())
-            if finance_duration:
-                try:
-                    finance_years = float(finance_duration.group(1))
-                    total_years += finance_years * 0.5
-                    logger.info(f"Expérience en finance non bancaire: {finance_years} ans (pondéré à {finance_years * 0.5})")
-                except:
-                    pass
+    if total_years == 0:
+        finance_keywords = ['microfinance', 'institution financière', 'financial institution']
+        for kw in finance_keywords:
+            if kw in text.lower():
+                finance_duration = re.search(r'(\d+)\s*(?:ans|années?)', text.lower())
+                if finance_duration:
+                    try:
+                        finance_years = float(finance_duration.group(1))
+                        total_years += finance_years * 0.5
+                        logger.info(f"Expérience en finance non bancaire: {finance_years} ans (pondéré à {finance_years * 0.5})")
+                    except:
+                        pass
+    if total_years == 0:
+        all_years = re.findall(r'(20\d{2})', text)
+        if len(all_years) >= 2:
+            years_int = sorted([int(y) for y in all_years])
+            total_years = years_int[-1] - years_int[0]
+            if 0 < total_years <= 40:
+                logger.info(f"Années totales extraites: {total_years} ans")
     logger.info(f"Total années bancaires strict: {total_years} ans")
     return total_years
 def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="", poste=None, lang='fr'):
