@@ -169,7 +169,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v6.0-multi-detection',
+        'version': 'v6.1-regex-direct',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -184,7 +184,8 @@ def health_check():
             'intelligent_scoring': True,
             'date_pattern_fixed': True,
             'advanced_date_detection': True,
-            'multi_detection_methods': True
+            'multi_detection_methods': True,
+            'regex_direct_extraction': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -845,9 +846,106 @@ def extract_quantified_results(text):
         if matches:
             results.extend(matches)
     return results
+def extract_all_banking_years_direct(text):
+    if not text:
+        return 0.0
+    bank_list = [
+        'ecobank', 'orabank', 'uba', 'united bank for africa',
+        'commercial bank tchad', 'cbt', 'finadev', 'société générale',
+        'bicec', 'coris bank', 'banque commerciale', 'microfinance',
+        'societe generale', 'sogé', 'orabank tchad', 'uba tchad'
+    ]
+    text_lower = text.lower()
+    total_years = 0.0
+    found_banks = []
+    for bank in bank_list:
+        if bank.lower() in text_lower:
+            positions = []
+            start = 0
+            while True:
+                pos = text_lower.find(bank.lower(), start)
+                if pos == -1:
+                    break
+                positions.append(pos)
+                start = pos + 1
+            for pos in positions:
+                context_start = max(0, pos - 300)
+                context_end = min(len(text_lower), pos + 300)
+                context = text_lower[context_start:context_end]
+                date_matches = re.findall(r'(20\d{2})\s*[-–—àau]\s*(20\d{2}|present|current|actuel|ce\s+jour|nos\s+jours|aujourd\'hui)', context, re.IGNORECASE)
+                for match in date_matches:
+                    start_year = int(match[0])
+                    end_raw = match[1].lower()
+                    if end_raw in ['present', 'current', 'actuel', 'ce jour', 'nos jours', 'aujourd\'hui']:
+                        end_year = datetime.datetime.now().year
+                    else:
+                        try:
+                            end_year = int(end_raw)
+                        except:
+                            continue
+                    delta = end_year - start_year
+                    if 0 < delta <= 40:
+                        if bank not in found_banks:
+                            found_banks.append(bank)
+                        total_years = max(total_years, float(delta))
+                        logger.info(f"Date trouvée pour {bank}: {start_year}->{end_year} = {delta} ans")
+                years_direct = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience|dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', context, re.IGNORECASE)
+                if years_direct:
+                    try:
+                        years = float(years_direct.group(1))
+                        if 0 < years <= 40:
+                            if bank not in found_banks:
+                                found_banks.append(bank)
+                            total_years = max(total_years, float(years))
+                            logger.info(f"Années directes pour {bank}: {years} ans")
+                    except:
+                        pass
+    if total_years == 0:
+        generic_patterns = [
+            r'(\d+)\s*(?:ans|années?)\s+(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)',
+            r'expérience\s+(?:de\s+)?(\d+)\s*(?:ans|années?)\s+(?:en\s+)?(?:banque|bancaire)',
+            r'(\d+)\s*(?:ans|années?)\s+de\s+banque',
+            r'banque\s*(?:depuis\s+)?(\d+)\s*(?:ans|années?)',
+            r'(\d+)\s+ans\s+d\'expérience\s+bancaire'
+        ]
+        for pattern in generic_patterns:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            for match in matches:
+                try:
+                    years = float(match)
+                    if 0 < years <= 40:
+                        total_years = max(total_years, float(years))
+                        logger.info(f"Pattern générique trouvé: {years} ans")
+                        break
+                except:
+                    continue
+            if total_years > 0:
+                break
+    if total_years == 0:
+        date_matches = re.findall(r'(20\d{2})\s*[-–—]\s*(20\d{2})', text_lower)
+        for match in date_matches:
+            start_year = int(match[0])
+            end_year = int(match[1])
+            delta = end_year - start_year
+            if 0 < delta <= 40:
+                for bank in bank_list:
+                    if bank.lower() in text_lower:
+                        total_years = max(total_years, float(delta))
+                        logger.info(f"Date générique trouvée: {delta} ans (banque: {bank})")
+                        break
+                if total_years > 0:
+                    break
+    if total_years > 0:
+        logger.info(f"Total années bancaires trouvées (regex direct): {total_years} ans ({len(found_banks)} banques)")
+    else:
+        logger.warning("Aucune année bancaire trouvée avec méthode regex directe")
+    return total_years
 def detect_banking_experience_years(text):
     if not text:
         return 0.0
+    total_years = extract_all_banking_years_direct(text)
+    if total_years > 0:
+        return total_years
     bank_list = [
         'ecobank', 'orabank', 'uba', 'united bank for africa',
         'commercial bank tchad', 'cbt', 'finadev', 'société générale',
@@ -855,9 +953,9 @@ def detect_banking_experience_years(text):
         'banque', 'bank', 'financial institution', 'credit institution',
         'societe generale', 'sogé'
     ]
+    blocks = split_into_jobs(text)
     total_years = 0.0
     banking_blocks = []
-    blocks = split_into_jobs(text)
     for block in blocks:
         if is_stage_block(block):
             continue
@@ -894,7 +992,7 @@ def detect_banking_experience_years(text):
                     except:
                         pass
     if total_years > 0:
-        logger.info(f"Années bancaires détectées: {total_years} ans - {len(banking_blocks)} expériences")
+        logger.info(f"Années bancaires détectées (blocs): {total_years} ans - {len(banking_blocks)} expériences")
         for b in banking_blocks[:5]:
             logger.info(f"  - {b['years']} ans ({b['bank']}): {b['block'][:80]}...")
         return total_years
@@ -953,6 +1051,20 @@ def detect_banking_experience_years(text):
                     continue
             if total_years > 0:
                 break
+    if total_years == 0:
+        date_matches_all = re.findall(r'(20\d{2})\s*[-–—]\s*(20\d{2})', text_lower)
+        for match in date_matches_all:
+            start_year = int(match[0])
+            end_year = int(match[1])
+            delta = end_year - start_year
+            if 0 < delta <= 40:
+                for bank in bank_list:
+                    if bank.lower() in text_lower:
+                        total_years = max(total_years, float(delta))
+                        logger.info(f"Années bancaires trouvées par dates: {delta} ans")
+                        break
+                if total_years > 0:
+                    break
     if total_years > 0:
         logger.info(f"Années bancaires détectées (multi-méthodes): {total_years} ans")
     else:
@@ -3124,7 +3236,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v6.0-multi-detection",
+        "version": "v6.1-regex-direct",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3137,6 +3249,7 @@ def health_version():
         "date_pattern_fixed": True,
         "advanced_date_detection": True,
         "multi_detection_methods": True,
+        "regex_direct_extraction": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3144,7 +3257,7 @@ if __name__ == '__main__':
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
-    logger.info(f"RecrutBank API v6.0-multi-detection demarree sur le port {port}")
+    logger.info(f"RecrutBank API v6.1-regex-direct demarree sur le port {port}")
     logger.info(f"Workers suggeres: {suggested_workers} (configurable via GUNICORN_WORKERS)")
     logger.info(f"Threads par worker: 4 (configurable via GUNICORN_THREADS)")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
@@ -3156,7 +3269,7 @@ if __name__ == '__main__':
     logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
     logger.info(f"Download retry: Active (max {DOWNLOAD_MAX_RETRIES} tentatives, backoff exponentiel)")
     logger.info(f"Download concurrent: max {DOWNLOAD_MAX_CONCURRENT} telechargements simultanes")
-    logger.info(f"Multi-detection des annees bancaires: 3 methodes (blocs, contexte direct, patterns)")
+    logger.info(f"Regex directe pour extraction des annees bancaires: Active")
     try:
         import gunicorn
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
