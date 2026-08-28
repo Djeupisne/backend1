@@ -938,76 +938,84 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     banking_years = detect_banking_experience_years(raw_full)
-    score = 0
-    points_vigilance = []
-    points_forts = []
-    checklist = {}
-    has_5_years_banking = banking_years >= 5
-    checklist["elim_0"] = has_5_years_banking
-    if has_5_years_banking:
-        score += 4
-        points_forts.append(f"Plus de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
+    if banking_years >= 5:
+        exp_bancaire = 4
+    elif banking_years >= 3:
+        exp_bancaire = 2
+    elif banking_years >= 1:
+        exp_bancaire = 1
     else:
-        points_vigilance.append(f"Expérience bancaire de {banking_years:.1f} ans (idéalement 5 ans+)")
+        exp_bancaire = 0
     has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd', cv_text, re.IGNORECASE))
     has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maîtrise|licence.*professionnelle', cv_text, re.IGNORECASE))
-    has_bac4_or_more = has_master or has_bac4
-    checklist["elim_1"] = has_bac4_or_more
     if has_master:
-        score += 3
-        points_forts.append("Diplôme Bac+5 ou supérieur")
+        diplome = 3
     elif has_bac4:
-        score += 2
-        points_forts.append("Diplôme Bac+4")
+        diplome = 2
     else:
-        points_vigilance.append("Niveau de diplôme inférieur à Bac+4")
+        diplome = 0
     management_count = 0
     for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'équipe']:
         if kw in cv_text.lower():
             management_count += 1
-    has_management = management_count >= 2
-    checklist["elim_2"] = has_management
-    if management_count >= 3:
-        score += 3
-        points_forts.append("Expérience managériale forte")
-    elif management_count >= 1:
-        score += 1
-        points_vigilance.append("Expérience managériale à vérifier")
-    else:
-        points_vigilance.append("Aucune expérience managériale détectée")
+    management = min(3, management_count)
     credit_count = 0
     for kw in ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']:
         if kw in cv_text.lower():
             credit_count += 1
-    has_credit_risk = credit_count >= 3
-    checklist["elim_3"] = has_credit_risk
     if credit_count >= 4:
-        score += 3
-        points_forts.append("Exposition solide au risque de crédit")
+        risque_credit = 2
     elif credit_count >= 2:
-        score += 1
-        points_vigilance.append("Exposition au risque de crédit limitée")
+        risque_credit = 1
+    else:
+        risque_credit = 0
     jobs = cv_text.split('\n')
     job_count = 0
     for j in jobs:
         if 'chef' in j.lower() or 'manager' in j.lower() or 'responsable' in j.lower():
             job_count += 1
-    has_coherent_jobs = job_count >= 3
-    checklist["elim_4"] = has_coherent_jobs
-    if job_count >= 3:
-        score += 2
-        points_forts.append("Parcours cohérent avec des postes à responsabilité")
-    if len(cv_text) > 500:
-        score += 1
-        points_forts.append("CV détaillé")
-    score = min(score, 14)
+    coherence = 2 if job_count >= 3 else (1 if job_count >= 1 else 0)
+    qualite_cv = 1 if len(cv_text) > 500 else 0
+    score = exp_bancaire + diplome + management + risque_credit + coherence + qualite_cv
+    score = min(14, score)
+    checklist = {
+        "elim_0": banking_years >= 5,
+        "elim_1": has_master or has_bac4,
+        "elim_2": management_count >= 2,
+        "elim_3": credit_count >= 3,
+        "elim_4": job_count >= 3
+    }
     if score >= 11:
         decision = "Entretien prioritaire"
     elif score >= 7:
         decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
-    if banking_years < 5 or management_count < 2:
+    points_forts = []
+    points_vigilance = []
+    if banking_years >= 5:
+        points_forts.append(f"Plus de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
+    else:
+        points_vigilance.append(f"Expérience bancaire de {banking_years:.1f} ans (idéalement 5 ans+)")
+    if has_master:
+        points_forts.append("Diplôme Bac+5 ou supérieur")
+    elif has_bac4:
+        points_forts.append("Diplôme Bac+4")
+    else:
+        points_vigilance.append("Niveau de diplôme inférieur à Bac+4")
+    if management >= 2:
+        points_forts.append(f"Expérience managériale (score: {management}/3)")
+    else:
+        points_vigilance.append("Expérience managériale à renforcer")
+    if risque_credit >= 2:
+        points_forts.append(f"Exposition au risque de crédit (score: {risque_credit}/3)")
+    else:
+        points_vigilance.append("Exposition au risque de crédit limitée")
+    if coherence >= 2:
+        points_forts.append("Parcours cohérent avec des postes à responsabilité")
+    if qualite_cv >= 1:
+        points_forts.append("CV détaillé")
+    if banking_years < 5 or management < 2:
         points_vigilance.append("Vérifier en entretien : expérience et management")
     return {
         'score': score,
@@ -1016,10 +1024,12 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'flags_eliminatoires': [],
         'checklist': checklist,
         'sous_scores': {
-            "Expérience bancaire": min(4, max(0, int(banking_years // 1.5))),
-            "Diplôme": 3 if 'master' in cv_text.lower() else (2 if 'bac+4' in cv_text.lower() else 0),
-            "Management": management_count,
-            "Risque de crédit": credit_count // 2
+            "Expérience bancaire": exp_bancaire,
+            "Diplôme": diplome,
+            "Management": management,
+            "Risque de crédit": risque_credit,
+            "Cohérence": coherence,
+            "Qualité CV": qualite_cv
         },
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
