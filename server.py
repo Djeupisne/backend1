@@ -169,7 +169,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v5.8-fixed',
+        'version': 'v5.9-advanced',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -182,7 +182,8 @@ def health_check():
             'max_concurrent_downloads': DOWNLOAD_MAX_CONCURRENT,
             'zip_max_workers': _ZIP_MAX_WORKERS,
             'intelligent_scoring': True,
-            'date_pattern_fixed': True
+            'date_pattern_fixed': True,
+            'advanced_date_detection': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -690,7 +691,13 @@ def extract_duration_years_from_block(block_text):
     text = block_text.lower()
     _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
     text = text.translate(_ACCENT_MAP)
-    duration_patterns = [r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)', r'\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)', r'\w+\s+\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)', r'plus\s+de\s+(\d+)\s*(?:ans?|annee?s?|years?)', r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:ans?|annee?s?)']
+    duration_patterns = [
+        r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)',
+        r'\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',
+        r'\w+\s+\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',
+        r'plus\s+de\s+(\d+)\s*(?:ans?|annee?s?|years?)',
+        r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:ans?|annee?s?)'
+    ]
     for dp in duration_patterns:
         m = re.search(dp, text)
         if m:
@@ -701,9 +708,10 @@ def extract_duration_years_from_block(block_text):
             except (ValueError, IndexError):
                 pass
     date_patterns = [
-        r'(?:de|du|d[eu])\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*(?:[àa]|au|jusqu\'au|-|–|—)\s*(?:(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})|(?:ce\s+jour|aujourd\'hui|present|actuel|en\s+cours|now|current))',
+        r'(?:de|du|d[eu])\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*(?:[àa]|au|jusqu\'au|-|–|—)\s*(?:ce\s+jour|aujourd\'hui|present|actuel|en\s+cours|nos\s+jours|now|current)',
+        r'(?:de|du|d[eu])\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*(?:[àa]|au|jusqu\'au|-|–|—)\s*(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})',
         r'(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*[-–—]\s*(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})',
-        r'(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*(?:à|au|jusqu\'au)\s*(?:nos\s+jours|ce\s+jour|aujourd\'hui|present|actuel|en\s+cours)',
+        r'(?:de|du|d[eu])\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})',
     ]
     for pattern in date_patterns:
         m = re.search(pattern, text, re.IGNORECASE)
@@ -712,17 +720,28 @@ def extract_duration_years_from_block(block_text):
                 groups = m.groups()
                 start_year = None
                 end_year = None
-                if groups and len(groups) >= 6 and groups[2] and groups[5]:
+                if groups and len(groups) >= 6:
                     try:
-                        start_year = int(groups[2])
-                        end_year = int(groups[5])
-                    except (ValueError, TypeError):
+                        year_positions = []
+                        for idx, g in enumerate(groups):
+                            if g and re.match(r'^\d{4}$', g):
+                                year_positions.append(idx)
+                        if len(year_positions) >= 2:
+                            start_year = int(groups[year_positions[0]])
+                            end_year = int(groups[year_positions[1]])
+                        elif len(year_positions) == 1:
+                            start_year = int(groups[year_positions[0]])
+                            end_year = datetime.datetime.now().year
+                    except (ValueError, IndexError):
                         pass
-                elif groups and len(groups) >= 3 and groups[2]:
+                elif groups and len(groups) >= 3:
                     try:
-                        start_year = int(groups[2])
-                        end_year = datetime.datetime.now().year
-                    except (ValueError, TypeError):
+                        for g in groups:
+                            if g and re.match(r'^\d{4}$', g):
+                                start_year = int(g)
+                                end_year = datetime.datetime.now().year
+                                break
+                    except (ValueError, IndexError):
                         pass
                 if start_year and end_year:
                     delta = end_year - start_year
@@ -773,6 +792,16 @@ def extract_duration_years_from_block(block_text):
         delta = current_year - start_year
         if 0 < delta <= 40:
             return round(float(delta), 1)
+    m = re.search(r'(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(20\d{2})\s*(?:a|-|–|—|au|jusqu\'au)\s*(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)?\s*(20\d{2})', text, re.IGNORECASE)
+    if m:
+        try:
+            start_year = int(m.group(2))
+            end_year = int(m.group(3)) if m.group(3) else datetime.datetime.now().year
+            delta = end_year - start_year
+            if 0 < delta <= 40:
+                return round(float(delta), 1)
+        except (ValueError, IndexError):
+            pass
     return 0.0
 def detect_institution_type(text):
     text_lower = text.lower()
@@ -784,7 +813,7 @@ def detect_institution_type(text):
         'banque', 'express union', 'coris bank', 'orabank tchad',
         'uba tchad', 'commercial bank tchad', 'cbt', 'finadev',
         'united bank for africa', 'banque islamique', 'microfinance',
-        'orabank tchad', 'commercial bank tchad'
+        'orabank tchad', 'commercial bank tchad', 'societe generale', 'sogé'
     ]
     commercial_pattern = re.compile(r'\b(' + '|'.join(re.escape(b) for b in commercial_banks) + r')\b', re.IGNORECASE)
     if commercial_pattern.search(text_lower):
@@ -822,7 +851,8 @@ def detect_banking_experience_years(text):
         'ecobank', 'orabank', 'uba', 'united bank for africa',
         'commercial bank tchad', 'cbt', 'finadev', 'société générale',
         'bicec', 'coris bank', 'banque commerciale', 'microfinance',
-        'banque', 'bank', 'financial institution', 'credit institution'
+        'banque', 'bank', 'financial institution', 'credit institution',
+        'societe generale', 'sogé'
     ]
     blocks = split_into_jobs(text)
     total_years = 0.0
@@ -832,26 +862,42 @@ def detect_banking_experience_years(text):
             continue
         block_lower = block.lower()
         is_banking = False
+        matched_bank = None
         for bank in bank_list:
             if bank.lower() in block_lower:
                 is_banking = True
+                matched_bank = bank
                 break
         if not is_banking:
             banking_keywords = ['banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit']
             for kw in banking_keywords:
                 if kw in block_lower:
                     is_banking = True
+                    matched_bank = kw
                     break
         if is_banking:
             duration = extract_duration_years_from_block(block)
             if duration > 0:
                 total_years += duration
-                banking_blocks.append({'block': block[:200], 'years': duration})
-                logger.debug(f"Bloc bancaire: {duration} ans - {block[:80]}...")
+                banking_blocks.append({'block': block[:200], 'years': duration, 'bank': matched_bank})
+                logger.info(f"Bloc bancaire détecté: {matched_bank} - {duration} ans")
+            else:
+                years_match = re.search(r'(\d+)\s*(?:ans|années?)', block_lower)
+                if years_match:
+                    try:
+                        years = float(years_match.group(1))
+                        if 0 < years <= 40:
+                            total_years += years
+                            banking_blocks.append({'block': block[:200], 'years': years, 'bank': matched_bank})
+                            logger.info(f"Bloc bancaire (années directes): {matched_bank} - {years} ans")
+                    except:
+                        pass
     if total_years > 0:
         logger.info(f"Années bancaires détectées: {total_years} ans - {len(banking_blocks)} expériences")
-        for b in banking_blocks[:3]:
-            logger.info(f"  - {b['years']} ans: {b['block'][:80]}...")
+        for b in banking_blocks[:5]:
+            logger.info(f"  - {b['years']} ans ({b['bank']}): {b['block'][:80]}...")
+    else:
+        logger.warning("Aucune année bancaire détectée dans le CV")
     return total_years
 def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="", poste=None, lang='fr'):
     keywords = KEYWORD_MAPPING.get(criterion, [])
@@ -3019,7 +3065,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.8-fixed",
+        "version": "v5.9-advanced",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3030,6 +3076,7 @@ def health_version():
         "zip_max_workers": _ZIP_MAX_WORKERS,
         "intelligent_scoring": True,
         "date_pattern_fixed": True,
+        "advanced_date_detection": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3037,7 +3084,7 @@ if __name__ == '__main__':
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
-    logger.info(f"RecrutBank API v5.8-fixed demarree sur le port {port}")
+    logger.info(f"RecrutBank API v5.9-advanced demarree sur le port {port}")
     logger.info(f"Workers suggeres: {suggested_workers} (configurable via GUNICORN_WORKERS)")
     logger.info(f"Threads par worker: 4 (configurable via GUNICORN_THREADS)")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
