@@ -169,7 +169,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v5.9-advanced',
+        'version': 'v6.0-multi-detection',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -183,7 +183,8 @@ def health_check():
             'zip_max_workers': _ZIP_MAX_WORKERS,
             'intelligent_scoring': True,
             'date_pattern_fixed': True,
-            'advanced_date_detection': True
+            'advanced_date_detection': True,
+            'multi_detection_methods': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -854,9 +855,9 @@ def detect_banking_experience_years(text):
         'banque', 'bank', 'financial institution', 'credit institution',
         'societe generale', 'sogé'
     ]
-    blocks = split_into_jobs(text)
     total_years = 0.0
     banking_blocks = []
+    blocks = split_into_jobs(text)
     for block in blocks:
         if is_stage_block(block):
             continue
@@ -896,6 +897,64 @@ def detect_banking_experience_years(text):
         logger.info(f"Années bancaires détectées: {total_years} ans - {len(banking_blocks)} expériences")
         for b in banking_blocks[:5]:
             logger.info(f"  - {b['years']} ans ({b['bank']}): {b['block'][:80]}...")
+        return total_years
+    text_lower = text.lower()
+    for bank in bank_list:
+        if bank.lower() in text_lower:
+            bank_pos = text_lower.find(bank.lower())
+            if bank_pos != -1:
+                context_start = max(0, bank_pos - 300)
+                context_end = min(len(text_lower), bank_pos + 300)
+                context = text_lower[context_start:context_end]
+                date_matches = re.findall(r'(20\d{2})\s*[-–—à]\s*(20\d{2}|present|current|actuel|nos\s+jours)', context, re.IGNORECASE)
+                if date_matches:
+                    for match in date_matches:
+                        start_year = int(match[0])
+                        end_raw = match[1].lower()
+                        if end_raw in ['present', 'current', 'actuel', 'nos jours']:
+                            end_year = datetime.datetime.now().year
+                        else:
+                            try:
+                                end_year = int(end_raw)
+                            except:
+                                continue
+                        delta = end_year - start_year
+                        if 0 < delta <= 40:
+                            total_years = max(total_years, float(delta))
+                            logger.info(f"Années bancaires trouvées pour {bank}: {delta} ans")
+                            break
+                if total_years == 0:
+                    years_direct = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience|dans\s+la\s+banque)', context, re.IGNORECASE)
+                    if years_direct:
+                        try:
+                            years = float(years_direct.group(1))
+                            if 0 < years <= 40:
+                                total_years = max(total_years, float(years))
+                                logger.info(f"Années directes trouvées pour {bank}: {years} ans")
+                        except:
+                            pass
+    if total_years == 0:
+        patterns = [
+            r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire)',
+            r'expérience\s+(?:de\s+)?(\d+)\s*(?:ans|années?)\s+(?:en\s+)?(?:banque|bancaire)',
+            r'(\d+)\s*(?:ans|années?)\s+de\s+banque',
+            r'banque\s*(?:depuis\s+)?(\d+)\s*(?:ans|années?)'
+        ]
+        for pattern in patterns:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            for match in matches:
+                try:
+                    years = float(match)
+                    if 0 < years <= 40:
+                        total_years = max(total_years, float(years))
+                        logger.info(f"Années bancaires trouvées directement: {years} ans")
+                        break
+                except:
+                    continue
+            if total_years > 0:
+                break
+    if total_years > 0:
+        logger.info(f"Années bancaires détectées (multi-méthodes): {total_years} ans")
     else:
         logger.warning("Aucune année bancaire détectée dans le CV")
     return total_years
@@ -3065,7 +3124,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v5.9-advanced",
+        "version": "v6.0-multi-detection",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3077,6 +3136,7 @@ def health_version():
         "intelligent_scoring": True,
         "date_pattern_fixed": True,
         "advanced_date_detection": True,
+        "multi_detection_methods": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3084,7 +3144,7 @@ if __name__ == '__main__':
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
-    logger.info(f"RecrutBank API v5.9-advanced demarree sur le port {port}")
+    logger.info(f"RecrutBank API v6.0-multi-detection demarree sur le port {port}")
     logger.info(f"Workers suggeres: {suggested_workers} (configurable via GUNICORN_WORKERS)")
     logger.info(f"Threads par worker: 4 (configurable via GUNICORN_THREADS)")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
@@ -3096,6 +3156,7 @@ if __name__ == '__main__':
     logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
     logger.info(f"Download retry: Active (max {DOWNLOAD_MAX_RETRIES} tentatives, backoff exponentiel)")
     logger.info(f"Download concurrent: max {DOWNLOAD_MAX_CONCURRENT} telechargements simultanes")
+    logger.info(f"Multi-detection des annees bancaires: 3 methodes (blocs, contexte direct, patterns)")
     try:
         import gunicorn
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
