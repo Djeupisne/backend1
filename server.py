@@ -847,230 +847,46 @@ def extract_quantified_results(text):
         if matches:
             results.extend(matches)
     return results
-def extract_all_banking_years_direct(text):
-    if not text:
-        return 0.0
-    bank_list = [
-        'ecobank', 'orabank', 'uba', 'united bank for africa',
-        'commercial bank tchad', 'cbt', 'finadev', 'société générale',
-        'bicec', 'coris bank', 'banque commerciale', 'microfinance',
-        'societe generale', 'sogé', 'orabank tchad', 'uba tchad'
-    ]
-    text_lower = text.lower()
-    total_years = 0.0
-    found_banks = []
-    for bank in bank_list:
-        if bank.lower() in text_lower:
-            positions = []
-            start = 0
-            while True:
-                pos = text_lower.find(bank.lower(), start)
-                if pos == -1:
-                    break
-                positions.append(pos)
-                start = pos + 1
-            for pos in positions:
-                context_start = max(0, pos - 300)
-                context_end = min(len(text_lower), pos + 300)
-                context = text_lower[context_start:context_end]
-                date_matches = re.findall(r'(20\d{2})\s*[-–—àau]\s*(20\d{2}|present|current|actuel|ce\s+jour|nos\s+jours|aujourd\'hui)', context, re.IGNORECASE)
-                for match in date_matches:
-                    start_year = int(match[0])
-                    end_raw = match[1].lower()
-                    if end_raw in ['present', 'current', 'actuel', 'ce jour', 'nos jours', 'aujourd\'hui']:
-                        end_year = datetime.datetime.now().year
-                    else:
-                        try:
-                            end_year = int(end_raw)
-                        except:
-                            continue
-                    delta = end_year - start_year
-                    if 0 < delta <= 40:
-                        if bank not in found_banks:
-                            found_banks.append(bank)
-                        total_years += delta
-                        logger.info(f"Date trouvée pour {bank}: {start_year}->{end_year} = {delta} ans (cumul: {total_years})")
-                years_direct = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience|dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', context, re.IGNORECASE)
-                if years_direct:
-                    try:
-                        years = float(years_direct.group(1))
-                        if 0 < years <= 40:
-                            if bank not in found_banks:
-                                found_banks.append(bank)
-                            total_years += years
-                            logger.info(f"Années directes pour {bank}: {years} ans (cumul: {total_years})")
-                    except:
-                        pass
-    if total_years == 0:
-        generic_patterns = [
-            r'(\d+)\s*(?:ans|années?)\s+(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)',
-            r'expérience\s+(?:de\s+)?(\d+)\s*(?:ans|années?)\s+(?:en\s+)?(?:banque|bancaire)',
-            r'(\d+)\s*(?:ans|années?)\s+de\s+banque',
-            r'banque\s*(?:depuis\s+)?(\d+)\s*(?:ans|années?)',
-            r'(\d+)\s+ans\s+d\'expérience\s+bancaire'
-        ]
-        for pattern in generic_patterns:
-            matches = re.findall(pattern, text_lower, re.IGNORECASE)
-            for match in matches:
-                try:
-                    years = float(match)
-                    if 0 < years <= 40:
-                        total_years += years
-                        logger.info(f"Pattern générique trouvé: {years} ans (cumul: {total_years})")
-                        break
-                except:
-                    continue
-            if total_years > 0:
-                break
-    if total_years == 0:
-        date_matches = re.findall(r'(20\d{2})\s*[-–—]\s*(20\d{2})', text_lower)
-        for match in date_matches:
-            start_year = int(match[0])
-            end_year = int(match[1])
-            delta = end_year - start_year
-            if 0 < delta <= 40:
-                for bank in bank_list:
-                    if bank.lower() in text_lower:
-                        total_years += delta
-                        logger.info(f"Date générique trouvée: {delta} ans (banque: {bank}) (cumul: {total_years})")
-                        break
-                if total_years > 0:
-                    break
-    if total_years > 0:
-        logger.info(f"Total années bancaires trouvées (regex direct): {total_years} ans ({len(found_banks)} banques)")
-    else:
-        logger.warning("Aucune année bancaire trouvée avec méthode regex directe")
-    return total_years
 def detect_banking_experience_years(text):
     if not text:
         return 0.0
-    total_years = extract_all_banking_years_direct(text)
-    if total_years > 0:
-        return total_years
-    bank_list = [
-        'ecobank', 'orabank', 'uba', 'united bank for africa',
-        'commercial bank tchad', 'cbt', 'finadev', 'société générale',
-        'bicec', 'coris bank', 'banque commerciale', 'microfinance',
-        'banque', 'bank', 'financial institution', 'credit institution',
-        'societe generale', 'sogé'
-    ]
+    text_lower = text.lower()
+    years = re.findall(r'\b(19|20)\d{2}\b', text)
+    if years:
+        years_int = sorted([int(y) for y in years])
+        total_years = years_int[-1] - years_int[0]
+        if total_years > 0 and total_years < 50:
+            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
+            for kw in bank_keywords:
+                if kw in text_lower:
+                    return total_years
+    match = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', text, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    match = re.search(r'depuis\s+(19|20)\d{2}', text, re.IGNORECASE)
+    if match:
+        start_year = int(match.group(1))
+        current_year = datetime.datetime.now().year
+        return current_year - start_year
     blocks = split_into_jobs(text)
     total_years = 0.0
-    banking_blocks = []
     for block in blocks:
         if is_stage_block(block):
             continue
         block_lower = block.lower()
         is_banking = False
-        matched_bank = None
-        for bank in bank_list:
-            if bank.lower() in block_lower:
+        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
+        for kw in banking_keywords:
+            if kw in block_lower:
                 is_banking = True
-                matched_bank = bank
                 break
-        if not is_banking:
-            banking_keywords = ['banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit']
-            for kw in banking_keywords:
-                if kw in block_lower:
-                    is_banking = True
-                    matched_bank = kw
-                    break
         if is_banking:
             duration = extract_duration_years_from_block(block)
             if duration > 0:
                 total_years += duration
-                banking_blocks.append({'block': block[:200], 'years': duration, 'bank': matched_bank})
-                logger.info(f"Bloc bancaire détecté: {matched_bank} - {duration} ans (cumul: {total_years})")
-            else:
-                years_match = re.search(r'(\d+)\s*(?:ans|années?)', block_lower)
-                if years_match:
-                    try:
-                        years = float(years_match.group(1))
-                        if 0 < years <= 40:
-                            total_years += years
-                            banking_blocks.append({'block': block[:200], 'years': years, 'bank': matched_bank})
-                            logger.info(f"Bloc bancaire (années directes): {matched_bank} - {years} ans (cumul: {total_years})")
-                    except:
-                        pass
     if total_years > 0:
-        logger.info(f"Années bancaires détectées (blocs): {total_years} ans - {len(banking_blocks)} expériences")
-        for b in banking_blocks[:5]:
-            logger.info(f"  - {b['years']} ans ({b['bank']}): {b['block'][:80]}...")
         return total_years
-    text_lower = text.lower()
-    for bank in bank_list:
-        if bank.lower() in text_lower:
-            bank_pos = text_lower.find(bank.lower())
-            if bank_pos != -1:
-                context_start = max(0, bank_pos - 300)
-                context_end = min(len(text_lower), bank_pos + 300)
-                context = text_lower[context_start:context_end]
-                date_matches = re.findall(r'(20\d{2})\s*[-–—à]\s*(20\d{2}|present|current|actuel|nos\s+jours)', context, re.IGNORECASE)
-                if date_matches:
-                    for match in date_matches:
-                        start_year = int(match[0])
-                        end_raw = match[1].lower()
-                        if end_raw in ['present', 'current', 'actuel', 'nos jours']:
-                            end_year = datetime.datetime.now().year
-                        else:
-                            try:
-                                end_year = int(end_raw)
-                            except:
-                                continue
-                        delta = end_year - start_year
-                        if 0 < delta <= 40:
-                            total_years += delta
-                            logger.info(f"Années bancaires trouvées pour {bank}: {delta} ans (cumul: {total_years})")
-                            break
-                if total_years == 0:
-                    years_direct = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience|dans\s+la\s+banque)', context, re.IGNORECASE)
-                    if years_direct:
-                        try:
-                            years = float(years_direct.group(1))
-                            if 0 < years <= 40:
-                                total_years += years
-                                logger.info(f"Années directes trouvées pour {bank}: {years} ans (cumul: {total_years})")
-                        except:
-                            pass
-    if total_years == 0:
-        patterns = [
-            r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire)',
-            r'expérience\s+(?:de\s+)?(\d+)\s*(?:ans|années?)\s+(?:en\s+)?(?:banque|bancaire)',
-            r'(\d+)\s*(?:ans|années?)\s+de\s+banque',
-            r'banque\s*(?:depuis\s+)?(\d+)\s*(?:ans|années?)'
-        ]
-        for pattern in patterns:
-            matches = re.findall(pattern, text_lower, re.IGNORECASE)
-            for match in matches:
-                try:
-                    years = float(match)
-                    if 0 < years <= 40:
-                        total_years += years
-                        logger.info(f"Années bancaires trouvées directement: {years} ans (cumul: {total_years})")
-                        break
-                except:
-                    continue
-            if total_years > 0:
-                break
-    if total_years == 0:
-        date_matches_all = re.findall(r'(20\d{2})\s*[-–—]\s*(20\d{2})', text_lower)
-        for match in date_matches_all:
-            start_year = int(match[0])
-            end_year = int(match[1])
-            delta = end_year - start_year
-            if 0 < delta <= 40:
-                for bank in bank_list:
-                    if bank.lower() in text_lower:
-                        total_years += delta
-                        logger.info(f"Années bancaires trouvées par dates: {delta} ans (cumul: {total_years})")
-                        break
-                if total_years > 0:
-                    break
-    if total_years > 0:
-        logger.info(f"Années bancaires détectées (multi-méthodes): {total_years} ans")
-    else:
-        logger.warning("Aucune année bancaire détectée dans le CV")
-    return total_years
+    return 0.0
 def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="", poste=None, lang='fr'):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1119,207 +935,82 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
     return best_score >= threshold, round(best_score, 2), found_kws
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
-    grille = GRILLE.get(poste, {})
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
-    normalized = normalize_for_matching(raw_full)[0]
-    detected_lang = detect_language(raw_full)
-    logger.info(f"Langue détectée pour l'analyse Chef Division Corporate: {detected_lang}")
-    logger.info(f"Texte CV analysé: {len(cv_text)} caractères, {len(cv_text.split())} mots")
-    banking_years = detect_banking_experience_years(cv_text)
-    logger.info(f"Années bancaires détectées: {banking_years}")
-    def check_crit(crit):
-        ok, _, _ = check_criterion_match_semantic(crit, normalized, raw_full, poste=poste, lang=detected_lang)
-        return ok
-    flags = []
-    has_banking = banking_years >= 1.0
-    if not has_banking:
-        flags.append("Aucune expérience dans le secteur bancaire ou financier réglementé")
-    elif banking_years < 5.0:
-        flags.append(f"Moins de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
-    has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd|diplôme d\'expertise', cv_text.lower()))
-    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maîtrise|master|mba|licence.*professionnelle', cv_text.lower()))
-    if not has_master and not has_bac4:
-        flags.append("Niveau de diplôme inférieur à Bac+4 (Master ou équivalent requis)")
-    has_management = False
-    management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'équipe', 'pilotage', 'responsable']
-    for kw in management_keywords:
+    banking_years = detect_banking_experience_years(raw_full)
+    score = 0
+    points_vigilance = []
+    points_forts = []
+    if banking_years >= 5:
+        score += 4
+        points_forts.append(f"Plus de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
+    elif banking_years >= 3:
+        score += 2
+        points_vigilance.append(f"Expérience bancaire de {banking_years:.1f} ans (idéalement 5 ans+)")
+    else:
+        points_vigilance.append("Expérience bancaire inférieure à 3 ans")
+    if re.search(r'master|mba|ingénieur|doctorat|phd', cv_text, re.IGNORECASE):
+        score += 3
+        points_forts.append("Diplôme Bac+5 ou supérieur")
+    elif re.search(r'bac\+[45]|bac [45]|maîtrise|licence.*professionnelle', cv_text, re.IGNORECASE):
+        score += 2
+        points_forts.append("Diplôme Bac+4")
+    else:
+        points_vigilance.append("Niveau de diplôme inférieur à Bac+4")
+    management_count = 0
+    for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'équipe']:
         if kw in cv_text.lower():
-            has_management = True
-            break
-    if not has_management:
-        flags.append("Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale")
-    has_credit_risk = False
-    credit_keywords = ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']
-    for kw in credit_keywords:
+            management_count += 1
+    if management_count >= 3:
+        score += 3
+        points_forts.append("Expérience managériale forte")
+    elif management_count >= 1:
+        score += 1
+        points_vigilance.append("Expérience managériale à vérifier")
+    credit_count = 0
+    for kw in ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']:
         if kw in cv_text.lower():
-            has_credit_risk = True
-            break
-    if not has_credit_risk:
-        flags.append("Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)")
-    for crit in grille.get('eliminatoire', []):
-        ok, _, _ = check_criterion_match_semantic(crit, normalized, raw_full, poste=poste, lang=detected_lang)
-        if not ok and crit not in flags:
-            if "minimum 5 ans" in crit.lower() and banking_years >= 5.0:
-                continue
-            flags.append(crit)
-    
-    # Continuer l'analyse même en cas de critères éliminatoires non satisfaits
-    management_signals = [
-        "Encadrement d'équipe commerciale ou bancaire",
-        "Supervision d'une équipe ou d'un département",
-        "Management d'équipe ou leadership",
-        "Développement des collaborateurs",
-        "Pilotage d'une activité commerciale",
-        "Objectifs d'équipe atteints"
-    ]
-    management_score = 0
-    for signal in management_signals:
-        if check_crit(signal):
-            management_score += 0.5
-    management_score = min(3, int(management_score))
-    risk_signals = [
-        "Suivi de la qualité du portefeuille de crédit",
-        "NPL ou non-performing loans",
-        "CIR ou coût du risque",
-        "Provisions ou provisionnement",
-        "Gestion du risque de crédit",
-        "Reporting à la direction sur la qualité du portefeuille",
-        "IFRS 9 ou suivi des stages"
-    ]
-    risk_score = 0
-    for signal in risk_signals:
-        if check_crit(signal):
-            risk_score += 0.5
-    risk_score = min(2, int(risk_score))
-    cross_selling_signals = [
-        "Cross-selling ou ventes croisées",
-        "Développement de partenariats interdépartementaux",
-        "Cash Management ou gestion de trésorerie",
-        "Trade Finance ou financement du commerce",
-        "TSG ou solutions de gestion de trésorerie",
-        "Solutions bancaires intégrées"
-    ]
-    cross_score = 0
-    for signal in cross_selling_signals:
-        if check_crit(signal):
-            cross_score += 0.5
-    cross_score = min(2, int(cross_score))
-    coherence_score = 0
-    progression_keywords = [
-        "promotion", "évolution", "progression", "responsabilités accrues",
-        "manager", "chef", "directeur", "senior", "lead"
-    ]
-    progression_count = sum(1 for kw in progression_keywords if kw in raw_full.lower())
-    if progression_count >= 4:
-        coherence_score += 1
-    elif progression_count >= 2:
-        coherence_score += 0.5
-    blocks = split_into_jobs(cv_text)
-    total_years = 0.0
-    short_jobs = 0
-    total_jobs = 0
-    for block in blocks:
-        if is_stage_block(block):
-            continue
-        duration = extract_duration_years_from_block(block)
-        if duration > 0:
-            total_years += duration
-            total_jobs += 1
-            if duration < 2:
-                short_jobs += 1
-    if total_jobs > 0 and short_jobs / total_jobs < 0.3:
-        coherence_score += 0.5
-    if total_years >= 8:
-        coherence_score += 0.5
-    elif total_years >= 5:
-        coherence_score += 0.25
-    coherence_score = min(2, int(coherence_score))
-    quality_score = 0
-    has_quantified = bool(re.search(r'\d+\s*(%|pourcent|millions|milliards|M\$|K\$|€|\$|chiffre d\'affaires|CA|portefeuille|clients)', cv_text.lower()))
-    has_metrics = bool(re.search(r'(augmentation|croissance|réduction|réduction|amélioration|performance|atteint|dépassé)', cv_text.lower()))
-    if has_quantified and has_metrics:
-        quality_score = 1
-    elif has_quantified:
-        quality_score = 0.5
-    if lettre_text and len(lettre_text.strip()) > 80:
-        lettre_has_management = any(word in lettre_text.lower() for word in ['management', 'équipe', 'team', 'leadership', 'pilotage', 'manager'])
-        lettre_has_corporate = any(word in lettre_text.lower() for word in ['corporate', 'grandes entreprises', 'grands comptes', 'entreprise', 'client'])
-        if lettre_has_management and lettre_has_corporate:
-            quality_score = min(1, quality_score + 0.5)
-    quality_score = min(1, int(quality_score))
-    cert_score = 0
-    certification_keywords = [
-        "ITB", "Institut Technique de Banque", "Moody's", "Ecobank",
-        "certification", "certifié", "certificat", "MBA", "Master"
-    ]
-    for kw in certification_keywords:
-        if kw.lower() in raw_full.lower():
-            cert_score += 1
-            break
-    market_keywords = [
-        "CEMAC", "UEMOA", "Tchad", "Chad", "Cameroun", "Cameroon",
-        "Afrique centrale", "Afrique de l'Ouest", "Central Africa", "West Africa"
-    ]
-    for kw in market_keywords:
-        if kw.lower() in raw_full.lower():
-            cert_score += 1
-            break
-    cert_score = min(1, int(cert_score))
-    sous_scores = {
-        "Capacité managériale démontrée": management_score,
-        "Maîtrise du risque de crédit": risk_score,
-        "Exposition au cross-selling": cross_score,
-        "Cohérence et progression": coherence_score,
-        "Qualité CV + Lettre": quality_score,
-        "Certifications et marché": cert_score
-    }
-    total_score = management_score + risk_score + cross_score + coherence_score + quality_score + cert_score
-    total_score = min(14, total_score)
-    if total_score >= 11:
+            credit_count += 1
+    if credit_count >= 4:
+        score += 3
+        points_forts.append("Exposition solide au risque de crédit")
+    elif credit_count >= 2:
+        score += 1
+        points_vigilance.append("Exposition au risque de crédit limitée")
+    jobs = cv_text.split('\n')
+    job_count = 0
+    for j in jobs:
+        if 'chef' in j.lower() or 'manager' in j.lower() or 'responsable' in j.lower():
+            job_count += 1
+    if job_count >= 3:
+        score += 2
+        points_forts.append("Parcours cohérent avec des postes à responsabilité")
+    if len(cv_text) > 500:
+        score += 1
+        points_forts.append("CV détaillé")
+    score = min(score, 14)
+    if score >= 11:
         decision = "Entretien prioritaire"
-    elif total_score >= 7:
+    elif score >= 7:
         decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
-    points_forts = []
-    points_vigilance = []
-    if management_score >= 2:
-        points_forts.append(f"Solide capacité managériale (score: {management_score}/3)")
-    elif management_score < 1.5:
-        points_vigilance.append("Expérience managériale limitée, à approfondir en entretien")
-    if risk_score >= 1.5:
-        points_forts.append(f"Maîtrise du risque crédit et de la qualité du portefeuille (score: {risk_score}/2)")
-    elif risk_score < 1:
-        points_vigilance.append("Exposition limitée à la gestion du risque de crédit")
-    if cross_score >= 1.5:
-        points_forts.append(f"Exposition au cross-selling et solutions bancaires (score: {cross_score}/2)")
-    if coherence_score >= 1.5:
-        points_forts.append(f"Parcours cohérent avec progression (score: {coherence_score}/2)")
-    elif coherence_score < 1:
-        points_vigilance.append("Parcours à stabiliser ou progression à confirmer")
-    if quality_score >= 1:
-        points_forts.append("CV de qualité avec résultats quantifiés")
-    if cert_score >= 1:
-        points_forts.append("Certification professionnelle ou connaissance du marché")
-    synthese = f"Candidat avec un score de {total_score}/14. "
-    if total_score >= 11:
-        synthese += "Profil très solide pour le poste de Chef de Division Corporate. Excellente adéquation avec les exigences du poste. À recommander pour entretien prioritaire."
-    elif total_score >= 7:
-        synthese += "Profil intéressant avec des compétences pertinentes. Certains domaines sont à approfondir mais le potentiel est présent. À convoquer en entretien."
-    else:
-        synthese += "Profil insuffisant pour le poste. Manque de compétences clés en management ou risque crédit."
+    if banking_years < 5 or management_count < 2:
+        points_vigilance.append("Vérifier en entretien : expérience et management")
     return {
-        'score': total_score,
+        'score': score,
         'score_max': 14,
         'decision': decision,
-        'flags_eliminatoires': flags if flags else [],
-        'sous_scores': sous_scores,
-        'checklist': {},
-        'detail': f"Score: {total_score}/14 — {decision}" + (f" - {len(flags)} critère(s) éliminatoire(s) non satisfait(s)" if flags else ""),
+        'flags_eliminatoires': [],
+        'sous_scores': {
+            "Expérience bancaire": min(4, max(0, int(banking_years // 1.5))),
+            "Diplôme": 3 if 'master' in cv_text.lower() else (2 if 'bac+4' in cv_text.lower() else 0),
+            "Management": management_count,
+            "Risque de crédit": credit_count // 2
+        },
         'points_forts': points_forts,
-        'points_vigilance': points_vigilance + flags if flags else points_vigilance,
-        'synthese': synthese
+        'points_vigilance': points_vigilance,
+        'synthese': f"Candidat avec un score de {score}/14. " + (decision if "prioritaire" in decision else "À évaluer.")
     }
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Chargé(e) d'Administration de Crédit"
@@ -1363,8 +1054,6 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             break
     if not tools_ok:
         flags_elim.append("Incapacité à utiliser des outils bureautiques courants")
-    
-    # Continuer l'analyse même en cas de critères éliminatoires non satisfaits
     adequation = 0
     if re.search(r'(économie|gestion|finance|comptabilité|banque|commerce)', cv_text.lower()):
         adequation += 1
@@ -1518,8 +1207,6 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
                 continue
             if crit not in flags:
                 flags.append(crit)
-    
-    # Continuer l'analyse même en cas de critères éliminatoires non satisfaits
     from rapidfuzz import fuzz
     def check_crit(crit):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
