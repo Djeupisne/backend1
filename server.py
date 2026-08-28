@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from werkzeug.exceptions import RequestEntityTooLarge
 import os, hashlib, datetime, uuid, json, re, threading, io, csv, unicodedata, zipfile, time, gc
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from supabase import create_client
@@ -1390,7 +1391,11 @@ def analyze_cv_against_grille_semantic(cv_text, lettre_text, attestation_texts_l
             eliminatoire_failed = True
             flags_elim.append(f"❌ {crit}")
     if eliminatoire_failed:
-        return {'score': 0, 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [], 'details': details, 'score_breakdown': {'bloc1_eliminatoire': True, 'score_final': 0}}
+        # Même si éliminatoire, on continue le scoring pour information
+        logger.info(f"⚠️ Critères éliminatoires non respectés mais calcul du score poursuivi pour {poste}")
+        # On ne retourne pas immédiatement, on continue pour calculer le score complet
+        # Les flags seront conservés pour affichage
+    
     points_bloc2 = 0
     for i, crit in enumerate(grille['a_verifier']):
         key = f"verif_{i}"
@@ -1416,23 +1421,23 @@ def analyze_cv_against_grille_semantic(cv_text, lettre_text, attestation_texts_l
             details['alertes_attention'].append(crit)
     if poste == "Chef de Section Compensation":
         result = calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_texts_list)
-        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'sous_scores': result.get('sous_scores', {}), 'score_final': result['score'], 'score_max': 12, 'decision': result['decision']}}
+        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': eliminatoire_failed, 'sous_scores': result.get('sous_scores', {}), 'score_final': result['score'], 'score_max': 12, 'decision': result['decision']}}
     elif poste == "Chargé(e) d'Administration de Crédit":
         result = calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list)
-        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'sous_scores': result.get('sous_scores', {}), 'score_final': result['score'], 'score_max': 12, 'decision': result['decision']}}
+        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': eliminatoire_failed, 'sous_scores': result.get('sous_scores', {}), 'score_final': result['score'], 'score_max': 12, 'decision': result['decision']}}
     elif poste == "Chef de Division Local Corporate":
         result = calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list)
-        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'sous_scores': result.get('sous_scores', {}), 'score_final': result['score'], 'score_max': 14, 'decision': result['decision'], 'points_forts': result.get('points_forts', []), 'points_vigilance': result.get('points_vigilance', []), 'synthese_recruteur': result.get('synthese_recruteur', '')}}
+        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': eliminatoire_failed, 'sous_scores': result.get('sous_scores', {}), 'score_final': result['score'], 'score_max': 14, 'decision': result['decision'], 'points_forts': result.get('points_forts', []), 'points_vigilance': result.get('points_vigilance', []), 'synthese_recruteur': result.get('synthese_recruteur', '')}}
     elif poste in POSTES_AVEC_SCORING_100:
         result = calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, poste)
-        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'scoring_type': '100_points', 'bloc_cv': result['bloc_cv'], 'bloc_lm': result['bloc_lm'], 'bloc_diplomes': result['bloc_diplomes'], 'score_final': result['score'], 'decision': result['decision']}}
+        return {'score': result['score'], 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': eliminatoire_failed, 'scoring_type': '100_points', 'bloc_cv': result['bloc_cv'], 'bloc_lm': result['bloc_lm'], 'bloc_diplomes': result['bloc_diplomes'], 'score_final': result['score'], 'decision': result['decision']}}
     adequation = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
     coherence = min(2, points_bloc2)
     risque_metier = min(3, len(signaux))
     qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
     lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
     score_final = min(10, adequation + coherence + risque_metier + qualite_cv + lettre_motiv)
-    return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'score_final': score_final}}
+    return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim, 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': eliminatoire_failed, 'score_final': score_final}}
 
 # === FONCTIONS D'EXPORT AVEC FILTRES ===
 def get_filtered_candidats(candidats_data, poste_filter=None, date_start=None, date_end=None, statut_filter=None, min_score=None):
@@ -1734,9 +1739,11 @@ def run_analysis_for_candidat_semantic(token, cv_filename, lettre_filename, atte
                 "analyse_auto_date": datetime.datetime.now().isoformat(),
                 "analyse_status": "completed"
             }
-            # Mise à jour automatique du statut si éliminatoire
+            # Mise à jour automatique du statut - on note toujours le score même si éliminatoire
             if result['score_breakdown'].get('bloc1_eliminatoire'):
-                update_data['statut'] = 'exclu'
+                # Critères éliminatoires non respectés, mais on garde le score calculé
+                update_data['statut'] = 'exclu'  # Statut pour critères éliminatoires
+                logger.info(f"[Exclu] Score {token}: {result['score']}/XX → statut: exclu (critères éliminatoires non respectés)")
                 # Envoyer email d'élimination avec détails
                 candidat_info = supabase.table('candidats').select('email, nom, prenom, poste').eq('token', token).execute()
                 if candidat_info.data:
@@ -1749,12 +1756,15 @@ Nous vous informons que votre candidature au poste de {poste} n'a pas été rete
 Raisons principales :
 {raisons_text}
 
+Score obtenu : {result['score']} points
+
 Merci de l'intérêt porté à notre entreprise.
 Cordialement,
 L'équipe RH"""
                     threading.Thread(target=send_email, args=(cand.get('email'), sujet, corps), daemon=True).start()
             elif result['score_breakdown'].get('decision', '').startswith('❌ Rejet'):
                 update_data['statut'] = 'rejete'
+                logger.info(f"[Rejet] Score {token}: {result['score']}/XX → statut: rejete")
                 # Envoyer email de rejet avec détails
                 candidat_info = supabase.table('candidats').select('email, nom, prenom, poste').eq('token', token).execute()
                 if candidat_info.data:
@@ -1766,6 +1776,8 @@ Nous vous informons que votre candidature au poste de {poste} n'a pas été rete
 
 Raisons principales :
 {raisons_text}
+
+Score obtenu : {result['score']} points
 
 Merci de l'intérêt porté à notre entreprise.
 Cordialement,
@@ -2287,6 +2299,22 @@ def get_uploaded_file(filename):
     except Exception as e:
         logger.error(f"Erreur téléchargement fichier {filename}: {e}")
         return jsonify({'error': f'Erreur lors du téléchargement: {str(e)}'}), 500
+
+# === ERROR HANDLERS ===
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_entity_too_large(error):
+    """Gère les erreurs de fichiers trop volumineux"""
+    logger.warning(f"Fichier trop voluminux: {error}")
+    return jsonify({
+        'error': 'Fichier trop volumineux. La taille maximale autorisée est de 15 Mo.'
+    }), 413
+
+@app.errorhandler(413)
+def handle_413(error):
+    """Gère les erreurs HTTP 413"""
+    return jsonify({
+        'error': 'Fichier trop volumineux. La taille maximale autorisée est de 15 Mo.'
+    }), 413
 
 
 if __name__ == '__main__':
