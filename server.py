@@ -941,18 +941,22 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     score = 0
     points_vigilance = []
     points_forts = []
-    if banking_years >= 5:
+    checklist = {}
+    has_5_years_banking = banking_years >= 5
+    checklist["elim_0"] = has_5_years_banking
+    if has_5_years_banking:
         score += 4
         points_forts.append(f"Plus de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
-    elif banking_years >= 3:
-        score += 2
-        points_vigilance.append(f"Expérience bancaire de {banking_years:.1f} ans (idéalement 5 ans+)")
     else:
-        points_vigilance.append("Expérience bancaire inférieure à 3 ans")
-    if re.search(r'master|mba|ingénieur|doctorat|phd', cv_text, re.IGNORECASE):
+        points_vigilance.append(f"Expérience bancaire de {banking_years:.1f} ans (idéalement 5 ans+)")
+    has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd', cv_text, re.IGNORECASE))
+    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maîtrise|licence.*professionnelle', cv_text, re.IGNORECASE))
+    has_bac4_or_more = has_master or has_bac4
+    checklist["elim_1"] = has_bac4_or_more
+    if has_master:
         score += 3
         points_forts.append("Diplôme Bac+5 ou supérieur")
-    elif re.search(r'bac\+[45]|bac [45]|maîtrise|licence.*professionnelle', cv_text, re.IGNORECASE):
+    elif has_bac4:
         score += 2
         points_forts.append("Diplôme Bac+4")
     else:
@@ -961,16 +965,22 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'équipe']:
         if kw in cv_text.lower():
             management_count += 1
+    has_management = management_count >= 2
+    checklist["elim_2"] = has_management
     if management_count >= 3:
         score += 3
         points_forts.append("Expérience managériale forte")
     elif management_count >= 1:
         score += 1
         points_vigilance.append("Expérience managériale à vérifier")
+    else:
+        points_vigilance.append("Aucune expérience managériale détectée")
     credit_count = 0
     for kw in ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']:
         if kw in cv_text.lower():
             credit_count += 1
+    has_credit_risk = credit_count >= 3
+    checklist["elim_3"] = has_credit_risk
     if credit_count >= 4:
         score += 3
         points_forts.append("Exposition solide au risque de crédit")
@@ -982,6 +992,8 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     for j in jobs:
         if 'chef' in j.lower() or 'manager' in j.lower() or 'responsable' in j.lower():
             job_count += 1
+    has_coherent_jobs = job_count >= 3
+    checklist["elim_4"] = has_coherent_jobs
     if job_count >= 3:
         score += 2
         points_forts.append("Parcours cohérent avec des postes à responsabilité")
@@ -1002,6 +1014,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'score_max': 14,
         'decision': decision,
         'flags_eliminatoires': [],
+        'checklist': checklist,
         'sous_scores': {
             "Expérience bancaire": min(4, max(0, int(banking_years // 1.5))),
             "Diplôme": 3 if 'master' in cv_text.lower() else (2 if 'bac+4' in cv_text.lower() else 0),
