@@ -169,7 +169,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': 'RecrutBank API is running',
-        'version': 'v6.1-regex-direct',
+        'version': 'v6.2-cumulative',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -185,7 +185,8 @@ def health_check():
             'date_pattern_fixed': True,
             'advanced_date_detection': True,
             'multi_detection_methods': True,
-            'regex_direct_extraction': True
+            'regex_direct_extraction': True,
+            'cumulative_years': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -887,8 +888,8 @@ def extract_all_banking_years_direct(text):
                     if 0 < delta <= 40:
                         if bank not in found_banks:
                             found_banks.append(bank)
-                        total_years = max(total_years, float(delta))
-                        logger.info(f"Date trouvée pour {bank}: {start_year}->{end_year} = {delta} ans")
+                        total_years += delta
+                        logger.info(f"Date trouvée pour {bank}: {start_year}->{end_year} = {delta} ans (cumul: {total_years})")
                 years_direct = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience|dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', context, re.IGNORECASE)
                 if years_direct:
                     try:
@@ -896,8 +897,8 @@ def extract_all_banking_years_direct(text):
                         if 0 < years <= 40:
                             if bank not in found_banks:
                                 found_banks.append(bank)
-                            total_years = max(total_years, float(years))
-                            logger.info(f"Années directes pour {bank}: {years} ans")
+                            total_years += years
+                            logger.info(f"Années directes pour {bank}: {years} ans (cumul: {total_years})")
                     except:
                         pass
     if total_years == 0:
@@ -914,8 +915,8 @@ def extract_all_banking_years_direct(text):
                 try:
                     years = float(match)
                     if 0 < years <= 40:
-                        total_years = max(total_years, float(years))
-                        logger.info(f"Pattern générique trouvé: {years} ans")
+                        total_years += years
+                        logger.info(f"Pattern générique trouvé: {years} ans (cumul: {total_years})")
                         break
                 except:
                     continue
@@ -930,8 +931,8 @@ def extract_all_banking_years_direct(text):
             if 0 < delta <= 40:
                 for bank in bank_list:
                     if bank.lower() in text_lower:
-                        total_years = max(total_years, float(delta))
-                        logger.info(f"Date générique trouvée: {delta} ans (banque: {bank})")
+                        total_years += delta
+                        logger.info(f"Date générique trouvée: {delta} ans (banque: {bank}) (cumul: {total_years})")
                         break
                 if total_years > 0:
                     break
@@ -979,7 +980,7 @@ def detect_banking_experience_years(text):
             if duration > 0:
                 total_years += duration
                 banking_blocks.append({'block': block[:200], 'years': duration, 'bank': matched_bank})
-                logger.info(f"Bloc bancaire détecté: {matched_bank} - {duration} ans")
+                logger.info(f"Bloc bancaire détecté: {matched_bank} - {duration} ans (cumul: {total_years})")
             else:
                 years_match = re.search(r'(\d+)\s*(?:ans|années?)', block_lower)
                 if years_match:
@@ -988,7 +989,7 @@ def detect_banking_experience_years(text):
                         if 0 < years <= 40:
                             total_years += years
                             banking_blocks.append({'block': block[:200], 'years': years, 'bank': matched_bank})
-                            logger.info(f"Bloc bancaire (années directes): {matched_bank} - {years} ans")
+                            logger.info(f"Bloc bancaire (années directes): {matched_bank} - {years} ans (cumul: {total_years})")
                     except:
                         pass
     if total_years > 0:
@@ -1018,8 +1019,8 @@ def detect_banking_experience_years(text):
                                 continue
                         delta = end_year - start_year
                         if 0 < delta <= 40:
-                            total_years = max(total_years, float(delta))
-                            logger.info(f"Années bancaires trouvées pour {bank}: {delta} ans")
+                            total_years += delta
+                            logger.info(f"Années bancaires trouvées pour {bank}: {delta} ans (cumul: {total_years})")
                             break
                 if total_years == 0:
                     years_direct = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience|dans\s+la\s+banque)', context, re.IGNORECASE)
@@ -1027,8 +1028,8 @@ def detect_banking_experience_years(text):
                         try:
                             years = float(years_direct.group(1))
                             if 0 < years <= 40:
-                                total_years = max(total_years, float(years))
-                                logger.info(f"Années directes trouvées pour {bank}: {years} ans")
+                                total_years += years
+                                logger.info(f"Années directes trouvées pour {bank}: {years} ans (cumul: {total_years})")
                         except:
                             pass
     if total_years == 0:
@@ -1044,8 +1045,8 @@ def detect_banking_experience_years(text):
                 try:
                     years = float(match)
                     if 0 < years <= 40:
-                        total_years = max(total_years, float(years))
-                        logger.info(f"Années bancaires trouvées directement: {years} ans")
+                        total_years += years
+                        logger.info(f"Années bancaires trouvées directement: {years} ans (cumul: {total_years})")
                         break
                 except:
                     continue
@@ -1060,8 +1061,8 @@ def detect_banking_experience_years(text):
             if 0 < delta <= 40:
                 for bank in bank_list:
                     if bank.lower() in text_lower:
-                        total_years = max(total_years, float(delta))
-                        logger.info(f"Années bancaires trouvées par dates: {delta} ans")
+                        total_years += delta
+                        logger.info(f"Années bancaires trouvées par dates: {delta} ans (cumul: {total_years})")
                         break
                 if total_years > 0:
                     break
@@ -3236,7 +3237,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v6.1-regex-direct",
+        "version": "v6.2-cumulative",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3250,6 +3251,7 @@ def health_version():
         "advanced_date_detection": True,
         "multi_detection_methods": True,
         "regex_direct_extraction": True,
+        "cumulative_years": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3257,7 +3259,7 @@ if __name__ == '__main__':
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
-    logger.info(f"RecrutBank API v6.1-regex-direct demarree sur le port {port}")
+    logger.info(f"RecrutBank API v6.2-cumulative demarree sur le port {port}")
     logger.info(f"Workers suggeres: {suggested_workers} (configurable via GUNICORN_WORKERS)")
     logger.info(f"Threads par worker: 4 (configurable via GUNICORN_THREADS)")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
@@ -3269,7 +3271,7 @@ if __name__ == '__main__':
     logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
     logger.info(f"Download retry: Active (max {DOWNLOAD_MAX_RETRIES} tentatives, backoff exponentiel)")
     logger.info(f"Download concurrent: max {DOWNLOAD_MAX_CONCURRENT} telechargements simultanes")
-    logger.info(f"Regex directe pour extraction des annees bancaires: Active")
+    logger.info(f"Regex directe avec cumul des annees bancaires: Active")
     try:
         import gunicorn
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
