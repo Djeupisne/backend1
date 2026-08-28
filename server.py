@@ -1163,26 +1163,8 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             if "minimum 5 ans" in crit.lower() and banking_years >= 5.0:
                 continue
             flags.append(crit)
-    if flags:
-        return {
-            'score': 0,
-            'score_max': 14,
-            'decision': 'Rejet',
-            'flags_eliminatoires': flags,
-            'sous_scores': {
-                "Capacité managériale démontrée": 0,
-                "Maîtrise du risque de crédit": 0,
-                "Exposition au cross-selling": 0,
-                "Cohérence et progression": 0,
-                "Qualité CV + Lettre": 0,
-                "Certifications et marché": 0
-            },
-            'checklist': {},
-            'detail': f"REJET IMMÉDIAT - {len(flags)} critère(s) éliminatoire(s) non satisfait(s)",
-            'points_forts': [],
-            'points_vigilance': flags,
-            'synthese': f"Rejet immédiat : {', '.join(flags[:3])}"
-        }
+    
+    # Continuer l'analyse même en cas de critères éliminatoires non satisfaits
     management_signals = [
         "Encadrement d'équipe commerciale ou bancaire",
         "Supervision d'une équipe ou d'un département",
@@ -1331,12 +1313,12 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'score': total_score,
         'score_max': 14,
         'decision': decision,
-        'flags_eliminatoires': [],
+        'flags_eliminatoires': flags if flags else [],
         'sous_scores': sous_scores,
         'checklist': {},
-        'detail': f"Score: {total_score}/14 — {decision}",
+        'detail': f"Score: {total_score}/14 — {decision}" + (f" - {len(flags)} critère(s) éliminatoire(s) non satisfait(s)" if flags else ""),
         'points_forts': points_forts,
-        'points_vigilance': points_vigilance,
+        'points_vigilance': points_vigilance + flags if flags else points_vigilance,
         'synthese': synthese
     }
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
@@ -1381,8 +1363,8 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             break
     if not tools_ok:
         flags_elim.append("Incapacité à utiliser des outils bureautiques courants")
-    if flags_elim:
-        return {'score': 0, 'score_max': 12, 'decision': 'Rejet', 'flags_eliminatoires': flags_elim, 'sous_scores': {"Adéquation formation/expérience au crédit": 0, "Exposition IFRS 9 / gestion portefeuille": 0, "Maîtrise outils bancaires": 0, "Cohérence et sérieux du parcours": 0, "Qualité CV + Lettre de motivation": 0}, 'checklist': {}, 'detail': f"REJET IMMÉDIAT - {len(flags_elim)} critère(s) éliminatoire(s) non satisfait(s)", 'points_forts': [], 'points_vigilance': flags_elim, 'synthese': f"Rejet immédiat : {', '.join(flags_elim[:3])}"}
+    
+    # Continuer l'analyse même en cas de critères éliminatoires non satisfaits
     adequation = 0
     if re.search(r'(économie|gestion|finance|comptabilité|banque|commerce)', cv_text.lower()):
         adequation += 1
@@ -1470,7 +1452,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         points_vigilance.append("CV/lettre à enrichir")
     sous_scores = {"Adéquation formation/expérience au crédit": adequation, "Exposition IFRS 9 / gestion portefeuille": ifrs_score, "Maîtrise outils bancaires": tools_score, "Cohérence et sérieux du parcours": coherence, "Qualité CV + Lettre de motivation": qualite}
     synthese = _generate_synthese_rac(cv_text, lettre_text, total_score, points_forts, points_vigilance)
-    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}", 'points_forts': points_forts, 'points_vigilance': points_vigilance, 'synthese': synthese}
+    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags_elim if flags_elim else [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags_elim)} critère(s) éliminatoire(s) non satisfait(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
 def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vigilance):
     synthese = ""
     has_experience = bool(re.search(r'Express Union|Coris Bank|Ecobank|banque|bancaire|\d+\s*ans', cv_text.lower()))
@@ -1536,8 +1518,8 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
                 continue
             if crit not in flags:
                 flags.append(crit)
-    if flags:
-        return {'score': 0, 'score_max': 12, 'decision': 'Rejet', 'flags_eliminatoires': flags, 'sous_scores': {"Adéquation de l'expérience (compensation interbancaire)": 0, "Exposition BEAC / GIMAC / SYSTAC": 0, "Capacité d'encadrement": 0, "Cohérence du parcours": 0, "Qualité CV + Lettre": 0}, 'checklist': {}, 'detail': f"REJET IMMÉDIAT - {len(flags)} critère(s) éliminatoire(s)", 'points_forts': [], 'points_vigilance': flags, 'synthese': f"Rejet immédiat : {', '.join(flags[:2])}"}
+    
+    # Continuer l'analyse même en cas de critères éliminatoires non satisfaits
     from rapidfuzz import fuzz
     def check_crit(crit):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
