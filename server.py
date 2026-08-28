@@ -682,9 +682,30 @@ def get_statut_from_decision(decision):
     else:
         return "rejete"
 def split_into_jobs(raw_text):
-    separators = re.compile(r"(?:^|\n)(?=\s*(?:(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(?:20\d{2}|19\d{2})|\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|(?:depuis|de |from |since |desde |a partir de |starting |beginning)))", re.IGNORECASE | re.MULTILINE)
-    blocks = separators.split(raw_text)
-    return [b.strip() for b in blocks if b.strip()]
+    if not raw_text:
+        return []
+    text = re.sub(r'\s+', ' ', raw_text)
+    patterns = [
+        r'(?:^|\n)(?=\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2})\s*[-–—])',
+        r'(?:^|\n)(?=\s*(?:de|du|d[eu]|from|since)\s+(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}))',
+        r'(?:^|\n)(?=\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2})\s*[-–—]\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}|présent|present|current))',
+        r'(?:^|\n)(?=\s*(?:[A-Z][A-Z\s]+)\s*(?:-|–|—)\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}))',
+    ]
+    blocks = []
+    positions = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            positions.append(match.start())
+    positions = sorted(set(positions))
+    if not positions:
+        return [text.strip()] if text.strip() else []
+    for i, pos in enumerate(positions):
+        start = pos
+        end = positions[i + 1] if i + 1 < len(positions) else len(text)
+        block = text[start:end].strip()
+        if block:
+            blocks.append(block)
+    return blocks
 def is_stage_block(block_text):
     block_lower = block_text.lower()
     stage_markers = [
@@ -693,17 +714,19 @@ def is_stage_block(block_text):
         r'\bstage de fin\b', r'\bstage academique\b',
         r'\bstage professionnel\b', r'\bstage de formation\b',
         r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b',
-        r'\bvolontariat\b', r'\btrainee\b', r'\bpremier emploi\b'
+        r'\bvolontariat\b', r'\btrainee\b'
     ]
     for marker in stage_markers:
         if re.search(marker, block_lower):
             return True
-    duration_patterns = [
-        r'(\d+)\s*(?:mois|semaines|jours)',
-        r'(\d+)\s+mois\s+de\s+stage'
-    ]
-    for pattern in duration_patterns:
-        if re.search(pattern, block_lower):
+    mois_match = re.search(r'(\d+)\s*(?:mois|semaines|jours)', block_lower)
+    if mois_match:
+        months = int(mois_match.group(1))
+        if months < 12:
+            return True
+    if re.search(r'stage|stagiaire|internship|intern', block_lower):
+        duration = re.search(r'(\d+)\s*(?:mois|semaines|jours)', block_lower)
+        if duration:
             return True
     return False
 def extract_duration_years_from_block(block_text):
@@ -756,6 +779,16 @@ def extract_duration_years_from_block(block_text):
     if depuis:
         try:
             start_year = int(depuis.group(1))
+            current_year = datetime.datetime.now().year
+            delta = current_year - start_year
+            if 0 < delta <= 40:
+                return round(float(delta), 1)
+        except (ValueError, IndexError):
+            pass
+    de_anos = re.search(r'(?:de|from)\s+(20\d{2})\s*(?:[àa]|au|to|until)\s*(?:nos\s+jours|aujourd\'hui|ce\s+jour)', text, re.IGNORECASE)
+    if de_anos:
+        try:
+            start_year = int(de_anos.group(1))
             current_year = datetime.datetime.now().year
             delta = current_year - start_year
             if 0 < delta <= 40:
@@ -820,6 +853,9 @@ def detect_banking_experience_years(text):
     blocks = split_into_jobs(text)
     total_years = 0.0
     bank_found = False
+    if not blocks:
+        logger.info("Aucun bloc d'expérience détecté")
+        return 0.0
     for block in blocks:
         if is_stage_block(block):
             logger.info(f"Bloc ignoré (stage): {block[:100]}...")
