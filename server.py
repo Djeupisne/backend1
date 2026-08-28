@@ -1079,18 +1079,228 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         decision = "❌ Rejet"
     return {'score': score_total, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {score_total}/12"}
 
+# === SECTION: EXTRACTION ET CALCUL DES ANNÉES D'EXPÉRIENCE ===
+# Cette section contient les fonctions pour extraire et calculer précisément
+# les années d'expérience professionnelle à partir des CV et documents
+
+def extract_years_of_experience(text):
+    """
+    Extrait et calcule le nombre total d'années d'expérience professionnelle.
+    
+    Stratégies utilisées :
+    1. Détection explicite : "X ans d'expérience", "X années dans..."
+    2. Extraction de périodes : dates de début/fin (2018-2023, depuis 2020, etc.)
+    3. Calcul automatique à partir des intervalles de temps
+    
+    Args:
+        text (str): Le texte complet (CV + lettre + attestations)
+    
+    Returns:
+        dict: {
+            'total_years': float, # Total des années d'expérience calculées
+            'explicit_mentions': list, # Mentions explicites trouvées
+            'periods': list, # Périodes extraites avec dates
+            'method': str # Méthode principale utilisée
+        }
+    """
+    if not text or len(text.strip()) < 10:
+        return {'total_years': 0, 'explicit_mentions': [], 'periods': [], 'method': 'none'}
+    
+    total_years = 0.0
+    explicit_mentions = []
+    periods = []
+    current_year = datetime.datetime.now().year
+    
+    # === STRATÉGIE 1: Mentions explicites d'années d'expérience ===
+    explicit_patterns = [
+        # "X ans d'expérience", "X années d'expérience"
+        r'(\d+[,.]?\d*)\s*(?:ans|années)\s*(?:d\'expérience|de pratique|dans)',
+        # "plus de X ans", "moins de X ans"
+        r'(?:plus|moins|environ)\s*(?:de|d\')?\s*(\d+[,.]?\d*)\s*(?:ans|années)',
+        # "expérience de X ans"
+        r'expérience\s*(?:de|d\')?\s*(\d+[,.]?\d*)\s*(?:ans|années)',
+        # "X ans dans le secteur", "X ans en banque"
+        r'(\d+[,.]?\d*)\s*(?:ans|années)\s*(?:dans|en|au sein|pour)',
+        # English patterns
+        r'(\d+[,.]?\d*)\s*(?:years?|yrs?)\s*(?:of)?\s*(?:experience|in)',
+    ]
+    
+    for pattern in explicit_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for match in matches:
+            try:
+                # Remplacer virgule par point pour les décimales
+                years_str = match.replace(',', '.')
+                years_val = float(years_str)
+                # Sanity check: entre 0 et 50 ans
+                if 0 < years_val <= 50:
+                    explicit_mentions.append({
+                        'value': years_val,
+                        'context': match,
+                        'pattern': pattern
+                    })
+            except (ValueError, TypeError):
+                pass
+    
+    # Si on a des mentions explicites, prendre la plus cohérente (médiane ou max raisonnable)
+    if explicit_mentions:
+        values = [m['value'] for m in explicit_mentions]
+        # Filtrer les valeurs aberrantes (> 3x la médiane)
+        if len(values) > 1:
+            median_val = sorted(values)[len(values)//2]
+            filtered_values = [v for v in values if v <= median_val * 3]
+            if filtered_values:
+                total_years = max(filtered_values)  # Prendre le maximum raisonnable
+            else:
+                total_years = median_val
+        else:
+            total_years = values[0]
+        
+        return {
+            'total_years': round(total_years, 1),
+            'explicit_mentions': explicit_mentions,
+            'periods': [],
+            'method': 'explicit'
+        }
+    
+    # === STRATÉGIE 2: Extraction de périodes (dates) ===
+    # Patterns pour extraire les périodes de travail
+    
+    period_patterns = [
+        # "2018-2023", "2018 - 2023", "2018–2023" (en dash)
+        r'(\d{4})\s*[-–—]\s*(\d{4}|présent|actuel|aujourd\'hui|now)',
+        # "depuis 2018", "since 2018"
+        r'(?:depuis|since)\s*(\d{4})',
+        # "Jan 2018 - Déc 2023", "01/2018 - 12/2023"
+        r'(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2})\s*(\d{4})\s*[-–—]\s*(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2})?\s*(\d{4}|présent|actuel|aujourd\'hui|now)',
+        # "2018 à 2023", "from 2018 to 2023"
+        r'(\d{4})\s*(?:à|to|au|jusqu\'en)\s*(\d{4}|présent|actuel|aujourd\'hui|now)',
+        # MM/YYYY - MM/YYYY format
+        r'(\d{1,2})/(\d{4})\s*[-–—]?\s*(\d{1,2})?/(\d{4}|présent|actuel)',
+    ]
+    
+    # Extraire toutes les périodes
+    for pattern in period_patterns:
+        matches = re.finditer(pattern, text, re.IGNORECASE)
+        for match in matches:
+            groups = match.groups()
+            try:
+                start_year = None
+                end_year = None
+                
+                # Cas: YYYY-YYYY ou YYYY-présent
+                if len(groups) >= 2 and groups[0].isdigit() and len(groups[0]) == 4:
+                    start_year = int(groups[0])
+                    end_str = groups[1].lower() if groups[1] else ''
+                    if end_str in ['présent', 'actuel', 'aujourd\'hui', 'now', '']:
+                        end_year = current_year
+                    elif end_str.isdigit() and len(end_str) == 4:
+                        end_year = int(end_str)
+                
+                # Cas: depuis YYYY
+                elif len(groups) == 1 and groups[0].isdigit() and len(groups[0]) == 4:
+                    start_year = int(groups[0])
+                    end_year = current_year
+                
+                # Cas: Mois YYYY - Mois YYYY
+                elif len(groups) >= 4 and groups[1].isdigit() and len(groups[1]) == 4:
+                    start_year = int(groups[1])
+                    end_str = groups[3].lower() if groups[3] else ''
+                    if end_str in ['présent', 'actuel', 'aujourd\'hui', 'now']:
+                        end_year = current_year
+                    elif end_str.isdigit() and len(end_str) == 4:
+                        end_year = int(end_str)
+                
+                # Cas: MM/YYYY-MM/YYYY
+                elif len(groups) >= 4 and groups[1].isdigit() and len(groups[1]) == 4:
+                    start_year = int(groups[1])
+                    end_str = groups[3].lower() if groups[3] else ''
+                    if end_str in ['présent', 'actuel', 'aujourd\'hui', 'now']:
+                        end_year = current_year
+                    elif end_str.isdigit() and len(end_str) == 4:
+                        end_year = int(end_str)
+                
+                if start_year and end_year and start_year <= end_year:
+                    duration = end_year - start_year
+                    # Ajouter au moins 1 an si même année (expérience partielle)
+                    if duration == 0:
+                        duration = 0.5
+                    periods.append({
+                        'start': start_year,
+                        'end': end_year,
+                        'duration': duration,
+                        'context': match.group(0)[:50]
+                    })
+            except (ValueError, TypeError, IndexError):
+                pass
+    
+    # Calculer le total à partir des périodes
+    if periods:
+        # Trier par année de début
+        periods_sorted = sorted(periods, key=lambda x: x['start'])
+        
+        # Éviter les doublons (périodes qui se chevauchent)
+        merged_periods = []
+        for period in periods_sorted:
+            if not merged_periods:
+                merged_periods.append(period.copy())
+            else:
+                last = merged_periods[-1]
+                # Si chevauchement significatif, fusionner
+                if period['start'] <= last['end']:
+                    last['end'] = max(last['end'], period['end'])
+                    last['duration'] = last['end'] - last['start']
+                else:
+                    merged_periods.append(period.copy())
+        
+        total_years = sum(p['duration'] for p in merged_periods)
+        
+        # Plafonner à 50 ans maximum
+        total_years = min(total_years, 50)
+        
+        return {
+            'total_years': round(total_years, 1),
+            'explicit_mentions': [],
+            'periods': merged_periods,
+            'method': 'periods'
+        }
+    
+    # === STRATÉGIE 3: Fallback - Recherche de mots-clés approximatifs ===
+    fallback_keywords = {
+        'débutant|junior|première expérience': 0.5,
+        'confirmé|intermédiaire': 3,
+        'senior|expérimenté': 7,
+        'très expérimenté|expert': 12,
+    }
+    
+    for keywords, years in fallback_keywords.items():
+        if re.search(keywords, text, re.IGNORECASE):
+            return {
+                'total_years': years,
+                'explicit_mentions': [],
+                'periods': [],
+                'method': 'fallback_keyword'
+            }
+    
+    return {
+        'total_years': 0,
+        'explicit_mentions': [],
+        'periods': [],
+        'method': 'none'
+    }
+
+
 def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, poste):
     score_cv = {'CV_Exp': 0, 'CV_Niveau': 0, 'CV_Secteur': 0, 'CV_Tech': 0, 'CV_Progression': 0, 'CV_Management': 0, 'CV_Stabilite': 0}
     score_lm = {'LM_Comprehension': 0, 'LM_Coherence': 0, 'LM_Motivation': 0, 'LM_Qualite': 0}
     score_diplomes = {'D_Niveau': 0, 'D_Specialisation': 0, 'D_Certif': 0}
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + "\n".join(attestation_texts_list or [])
-    years_found = 0
-    for pattern in [r'(\d+)\s*(?:années|ans|years)', r'plus\s+de\s+(\d+)\s*(?:années|ans)']:
-        for m in re.findall(pattern, raw_full, re.IGNORECASE):
-            try:
-                years_found = max(years_found, int(m))
-            except:
-                pass
+    
+    # Utilisation de la nouvelle fonction d'extraction d'expérience
+    experience_data = extract_years_of_experience(raw_full)
+    years_found = experience_data['total_years']
+    
+    # Score basé sur les années d'expérience
     if years_found >= 10:
         score_cv['CV_Niveau'] = 10
     elif years_found >= 7:
@@ -1099,6 +1309,7 @@ def calculate_detailed_score_100(cv_text, lettre_text, attestation_texts_list, p
         score_cv['CV_Niveau'] = 6
     elif years_found >= 3:
         score_cv['CV_Niveau'] = 4
+    
     score_cv['CV_Exp'] = 20 if years_found >= 5 else (10 if years_found >= 3 else 5)
     has_bank = any(re.search(r'\b' + re.escape(b) + r'\b', raw_full, re.IGNORECASE) for b in ['banque', 'bank', 'finance', 'credit'])
     if has_bank:
