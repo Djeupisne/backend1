@@ -167,8 +167,8 @@ def after_request(response):
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
     return jsonify({
-        'status': 'ok', 
-        'message': 'RecrutBank API is running', 
+        'status': 'ok',
+        'message': 'RecrutBank API is running',
         'version': 'v5.8-fixed',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
@@ -777,11 +777,11 @@ def extract_duration_years_from_block(block_text):
 def detect_institution_type(text):
     text_lower = text.lower()
     commercial_banks = [
-        'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct', 
-        'société générale', 'standard chartered', 'nsia banque', 
-        'commercial bank', 'banque commerciale', 'investment bank', 
-        'banque d affaires', 'credit institution', 'financial institution', 
-        'banque', 'express union', 'coris bank', 'orabank tchad', 
+        'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
+        'société générale', 'standard chartered', 'nsia banque',
+        'commercial bank', 'banque commerciale', 'investment bank',
+        'banque d affaires', 'credit institution', 'financial institution',
+        'banque', 'express union', 'coris bank', 'orabank tchad',
         'uba tchad', 'commercial bank tchad', 'cbt', 'finadev',
         'united bank for africa', 'banque islamique', 'microfinance',
         'orabank tchad', 'commercial bank tchad'
@@ -931,7 +931,8 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             break
     if not has_management:
         flags.append("Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale")
-    has_credit_risk = False    credit_keywords = ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']
+    has_credit_risk = False
+    credit_keywords = ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']
     for kw in credit_keywords:
         if kw in cv_text.lower():
             has_credit_risk = True
@@ -2326,7 +2327,8 @@ def get_statut(token):
             data = response.data[0]
             hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown'}
             return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
-    return jsonify({'error': 'Candidature introuvable'}), 404@app.route('/api/recruteur/stats', methods=['GET'])
+    return jsonify({'error': 'Candidature introuvable'}), 404
+@app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
     if not supabase:
