@@ -850,43 +850,53 @@ def extract_quantified_results(text):
 def detect_banking_experience_years(text):
     if not text:
         return 0.0
-    text_lower = text.lower()
-    years = re.findall(r'\b(19|20)\d{2}\b', text)
-    if years:
-        years_int = sorted([int(y) for y in years])
-        total_years = years_int[-1] - years_int[0]
-        if total_years > 0 and total_years < 50:
-            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
-            for kw in bank_keywords:
-                if kw in text_lower:
-                    return total_years
-    match = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', text, re.IGNORECASE)
-    if match:
-        return float(match.group(1))
-    match = re.search(r'depuis\s+(19|20)\d{2}', text, re.IGNORECASE)
-    if match:
-        start_year = int(match.group(1))
-        current_year = datetime.datetime.now().year
-        return current_year - start_year
     blocks = split_into_jobs(text)
     total_years = 0.0
+    bank_found = False
     for block in blocks:
         if is_stage_block(block):
             continue
         block_lower = block.lower()
-        is_banking = False
-        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
-        for kw in banking_keywords:
+        bank_keywords = ['ecobank', 'orabank', 'uba', 'united bank', 'banque', 'bank', 'bancaire', 'financial institution', 'credit institution', 'commercial bank', 'finadev', 'societe generale', 'sogé', 'bicec', 'sgbc', 'cbc', 'bct', 'standard chartered', 'nsia banque', 'express union', 'coris bank']
+        is_bank = False
+        for kw in bank_keywords:
             if kw in block_lower:
-                is_banking = True
+                is_bank = True
+                bank_found = True
                 break
-        if is_banking:
+        if is_bank:
             duration = extract_duration_years_from_block(block)
             if duration > 0:
                 total_years += duration
-    if total_years > 0:
-        return total_years
-    return 0.0
+                logger.info(f"Expérience bancaire détectée: {duration} ans")
+            else:
+                years = re.findall(r'(20\d{2})', block)
+                if years:
+                    years_int = sorted([int(y) for y in years])
+                    if len(years_int) >= 2:
+                        total_years += years_int[-1] - years_int[0]
+                        logger.info(f"Durée estimée: {years_int[-1] - years_int[0]} ans")
+    if not bank_found:
+        bank_mentions = re.findall(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire)', text, re.IGNORECASE)
+        if bank_mentions:
+            try:
+                total_years = float(bank_mentions[0])
+                logger.info(f"Expérience bancaire mentionnée explicitement: {total_years} ans")
+            except:
+                pass
+    finance_keywords = ['microfinance', 'institution financière', 'financial institution']
+    for kw in finance_keywords:
+        if kw in text.lower():
+            finance_duration = re.search(r'(\d+)\s*(?:ans|années?)', text.lower())
+            if finance_duration:
+                try:
+                    finance_years = float(finance_duration.group(1))
+                    total_years += finance_years * 0.5
+                    logger.info(f"Expérience en finance non bancaire: {finance_years} ans (pondéré à {finance_years * 0.5})")
+                except:
+                    pass
+    logger.info(f"Total années bancaires strict: {total_years} ans")
+    return total_years
 def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="", poste=None, lang='fr'):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -938,12 +948,43 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     banking_years = detect_banking_experience_years(raw_full)
+    MIN_BANKING_YEARS = 3.0
+    if banking_years < MIN_BANKING_YEARS:
+        return {
+            'score': 0,
+            'score_max': 14,
+            'decision': 'Rejet - Expérience bancaire insuffisante',
+            'flags_eliminatoires': [
+                f"Moins de {MIN_BANKING_YEARS} ans d'expérience bancaire ({banking_years:.1f} ans détectés) - Critère éliminatoire non satisfait",
+                "L'expérience bancaire est un prérequis obligatoire pour ce poste"
+            ],
+            'checklist': {
+                "elim_0": banking_years >= 5,
+                "elim_1": False,
+                "elim_2": False,
+                "elim_3": False,
+                "elim_4": False
+            },
+            'sous_scores': {
+                "Expérience bancaire": 0,
+                "Diplôme": 0,
+                "Management": 0,
+                "Risque de crédit": 0,
+                "Cohérence": 0,
+                "Qualité CV": 0
+            },
+            'points_forts': [],
+            'points_vigilance': [
+                f"⚠️ CRITÈRE ÉLIMINATOIRE NON SATISFAIT : {banking_years:.1f} ans d'expérience bancaire détectés (minimum {MIN_BANKING_YEARS} ans requis)",
+                "Le candidat ne remplit pas le prérequis fondamental d'expérience bancaire",
+                "Recommandation : Ne pas retenir la candidature"
+            ],
+            'synthese': f"REJET IMMÉDIAT - Le candidat ne remplit pas le critère éliminatoire d'expérience bancaire. {banking_years:.1f} ans détectés, {MIN_BANKING_YEARS} ans requis."
+        }
     if banking_years >= 5:
         exp_bancaire = 4
     elif banking_years >= 3:
         exp_bancaire = 2
-    elif banking_years >= 1:
-        exp_bancaire = 1
     else:
         exp_bancaire = 0
     has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd', cv_text, re.IGNORECASE))
@@ -1017,6 +1058,8 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_forts.append("CV détaillé")
     if banking_years < 5 or management < 2:
         points_vigilance.append("Vérifier en entretien : expérience et management")
+    if banking_years < 5:
+        points_vigilance.append(f"⚠️ Expérience bancaire limitée à {banking_years:.1f} ans (5 ans recommandés)")
     return {
         'score': score,
         'score_max': 14,
