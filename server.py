@@ -86,12 +86,26 @@ except ImportError:
 try:
     from openai import OpenAI
     DEEPSEEK_AVAILABLE = True
-except ImportError:
+    logger.info("✅ OpenAI importe avec succes pour DeepSeek")
+except ImportError as e:
     DEEPSEEK_AVAILABLE = False
+    logger.error(f"❌ Erreur import OpenAI: {e}")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+logger.info(f"🔑 DEEPSEEK_API_KEY: {'✅ Presente' if DEEPSEEK_API_KEY else '❌ Manquant'}")
+logger.info(f"📦 DEEPSEEK_AVAILABLE: {'✅ True' if DEEPSEEK_AVAILABLE else '❌ False'}")
 IA_ANALYSE_ACTIVE = DEEPSEEK_AVAILABLE and bool(DEEPSEEK_API_KEY)
-_deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if IA_ANALYSE_ACTIVE else None
+logger.info(f"🧠 IA_ANALYSE_ACTIVE: {'✅ Active' if IA_ANALYSE_ACTIVE else '❌ Inactive'}")
+try:
+    if IA_ANALYSE_ACTIVE:
+        _deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+        logger.info("✅ Client DeepSeek initialise avec succes")
+    else:
+        _deepseek_client = None
+        logger.warning("⚠️ Client DeepSeek non initialise (cle manquante ou import echoue)")
+except Exception as e:
+    _deepseek_client = None
+    logger.error(f"❌ Erreur initialisation client DeepSeek: {e}")
 _ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "5")))
 _Nlp_fr = None
 _Nlp_en = None
@@ -153,6 +167,22 @@ def _get_spacy_model(lang='fr'):
             except OSError:
                 return None
         return _Nlp_en
+def test_deepseek_connection():
+    if not IA_ANALYSE_ACTIVE or not _deepseek_client:
+        logger.warning("⚠️ DeepSeek non actif, impossible de tester")
+        return False
+    try:
+        response = _deepseek_client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            messages=[{"role": "user", "content": "Test de connexion"}],
+            max_tokens=5,
+            temperature=0
+        )
+        logger.info("✅ Connexion DeepSeek OK")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Erreur connexion DeepSeek: {e}")
+        return False
 app = Flask(__name__)
 ALLOWED_ORIGINS = ["https://recrutment.onrender.com", "https://backend1-fiq5.onrender.com", "http://localhost:5000", "http://localhost:3000"]
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"], "supports_credentials": True, "max_age": 600}})
@@ -184,7 +214,8 @@ def health_check():
             'max_concurrent_downloads': DOWNLOAD_MAX_CONCURRENT,
             'zip_max_workers': _ZIP_MAX_WORKERS,
             'intelligent_scoring': True,
-            'advanced_reasoning': True
+            'advanced_reasoning': True,
+            'deepseek_model': DEEPSEEK_MODEL if IA_ANALYSE_ACTIVE else 'N/A'
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -1011,7 +1042,7 @@ ATTESTATIONS/CERTIFICATS :
                 response_format={"type": "json_object"}
             )
         result_text = response.choices[0].message.content
-        logger.info(f"Analyse DeepSeek terminee: {len(result_text)} caracteres")
+        logger.info(f"✅ Analyse DeepSeek terminee: {len(result_text)} caracteres")
         try:
             analyse = json.loads(result_text)
         except json.JSONDecodeError:
@@ -1020,7 +1051,7 @@ ATTESTATIONS/CERTIFICATS :
             if json_match:
                 analyse = json.loads(json_match.group())
             else:
-                logger.error("Impossible de parser la reponse DeepSeek")
+                logger.error("❌ Impossible de parser la reponse DeepSeek")
                 return None
         flags_elim = analyse.get('flags_eliminatoires', [])
         if isinstance(flags_elim, list):
@@ -1060,7 +1091,7 @@ ATTESTATIONS/CERTIFICATS :
             'details': details
         }
     except Exception as e:
-        logger.error(f"Erreur analyse DeepSeek: {e}")
+        logger.error(f"❌ Erreur analyse DeepSeek: {e}")
         return None
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
@@ -2225,15 +2256,15 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         logger.info(f"Analyse pour {token} - poste: {poste}, CV: {len(cv_text)} caracteres")
         gc.collect()
         if IA_ANALYSE_ACTIVE and poste in GRILLE:
-            logger.info(f"Utilisation de DeepSeek pour l'analyse du poste: {poste}")
+            logger.info(f"🚀 Utilisation de DeepSeek pour l'analyse du poste: {poste}")
             result = analyze_cv_with_deepseek_reasoning(cv_text, lm_text, att_texts, poste)
             if result:
-                logger.info(f"Analyse DeepSeek reussie pour {token} - Score: {result.get('score', 0)}/{result.get('score_max', 0)}")
+                logger.info(f"✅ Analyse DeepSeek reussie pour {token} - Score: {result.get('score', 0)}/{result.get('score_max', 0)}")
             else:
-                logger.warning(f"DeepSeek a echoue, fallback vers scoring specifique pour {poste}")
+                logger.warning(f"⚠️ DeepSeek a echoue, fallback vers scoring specifique pour {poste}")
                 result = None
         else:
-            logger.info(f"Fallback vers scoring specifique pour {poste}")
+            logger.info(f"📌 Fallback vers scoring specifique pour {poste}")
             result = None
         if result is None:
             if poste == "Charge(e) d'Administration de Credit":
@@ -3102,6 +3133,7 @@ def health_version():
         "advanced_reasoning": True,
         "ia_provider": "DeepSeek" if IA_ANALYSE_ACTIVE else "Fallback",
         "ia_model": DEEPSEEK_MODEL if IA_ANALYSE_ACTIVE else "N/A",
+        "deepseek_status": "Active" if IA_ANALYSE_ACTIVE else "Inactive",
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3110,16 +3142,20 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(" RecrutBank API v7.0 - DeepSeek Reasoning Engine")
+    logger.info("🚀 RecrutBank API v7.0 - DeepSeek Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
     logger.info(f"Threads par worker: 4")
-    logger.info(f"IA Provider: {'DeepSeek ' if IA_ANALYSE_ACTIVE else ' Aucune'}")
+    logger.info(f"IA Provider: {'DeepSeek ✅' if IA_ANALYSE_ACTIVE else '❌ Aucune'}")
     if IA_ANALYSE_ACTIVE:
         logger.info(f"Modele DeepSeek: {DEEPSEEK_MODEL}")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
-    logger.info(f"Mode raisonnement avance: {'ACTIF ' if IA_ANALYSE_ACTIVE else 'INACTIF '}")
+        test_deepseek_connection()
+    else:
+        logger.warning("⚠️ MODE FALLBACK UNIQUEMENT - DeepSeek non disponible")
+        logger.warning("Vérifiez DEEPSEEK_API_KEY et l'installation de openai")
+    logger.info(f"Mode raisonnement avance: {'ACTIF ✅' if IA_ANALYSE_ACTIVE else 'INACTIF ❌'}")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
     logger.info(f"Workers ZIP max: {_ZIP_MAX_WORKERS}")
     logger.info("=" * 60)
