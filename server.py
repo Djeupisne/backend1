@@ -91,12 +91,14 @@ except ImportError as e:
     OPENAI_AVAILABLE = False
     logger.error(f"❌ Erreur import OpenAI: {e}")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat:free")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "inclusionai/ling-3.0-flash-fin:free")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_REASONING_ENABLED = os.getenv("OPENROUTER_REASONING_ENABLED", "true").lower() == "true"
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 logger.info(f"🔑 OPENROUTER_API_KEY: {'✅ Presente' if OPENROUTER_API_KEY else '❌ Manquante'}")
 logger.info(f"📦 OPENROUTER_MODEL: {OPENROUTER_MODEL}")
+logger.info(f"🧠 OPENROUTER_REASONING: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
 logger.info(f"🔑 DEEPSEEK_API_KEY: {'✅ Presente' if DEEPSEEK_API_KEY else '❌ Manquante'}")
 _client = None
 _PROVIDER = "None"
@@ -106,11 +108,12 @@ if OPENAI_AVAILABLE and OPENROUTER_API_KEY:
     try:
         _client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
         _MODEL = OPENROUTER_MODEL
-        _PROVIDER = "OpenRouter"
+        _PROVIDER = "OpenRouter (Ling-3.0 Flash Fin)"
         IA_ANALYSE_ACTIVE = True
         logger.info("✅ Client OpenRouter initialise avec succes (GRATUIT)")
         logger.info(f"   Modele: {_MODEL}")
         logger.info(f"   Base URL: {OPENROUTER_BASE_URL}")
+        logger.info(f"   Reasoning: {'Active' if OPENROUTER_REASONING_ENABLED else 'Desactive'}")
     except Exception as e:
         logger.error(f"❌ Erreur initialisation OpenRouter: {e}")
         _client = None
@@ -203,7 +206,7 @@ def test_ia_connection():
             extra_headers={
                 "HTTP-Referer": "https://recrutment.onrender.com",
                 "X-Title": "RecrutBank CV Analyzer"
-            } if _PROVIDER == "OpenRouter" else {}
+            } if "OpenRouter" in _PROVIDER else {}
         )
         logger.info(f"✅ Connexion {_PROVIDER} OK")
         return True
@@ -226,7 +229,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v7.1-openrouter-reasoning',
+        'version': 'v7.2-openrouter-ling-reasoning',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -235,7 +238,7 @@ def health_check():
             'ia_available': IA_ANALYSE_ACTIVE,
             'ia_provider': _PROVIDER,
             'ia_model': _MODEL,
-            'reasoning_mode': True,
+            'reasoning_mode': OPENROUTER_REASONING_ENABLED,
             'scoring_strict': True,
             'manual_status_priority': True,
             'auto_width_excel': True,
@@ -243,7 +246,7 @@ def health_check():
             'zip_max_workers': _ZIP_MAX_WORKERS,
             'intelligent_scoring': True,
             'advanced_reasoning': True,
-            'free_ia': _PROVIDER == "OpenRouter"
+            'free_ia': "OpenRouter" in _PROVIDER
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -1059,22 +1062,28 @@ ATTESTATIONS/CERTIFICATS :
 6. Utilise le format JSON attendu."""
     try:
         with _ia_semaphore:
-            headers = {}
-            if _PROVIDER == "OpenRouter":
-                headers = {"HTTP-Referer": "https://recrutment.onrender.com", "X-Title": "RecrutBank CV Analyzer"}
-            response = _client.chat.completions.create(
-                model=_MODEL,
-                messages=[
+            api_params = {
+                "model": _MODEL,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=0.1,
-                max_tokens=4096,
-                response_format={"type": "json_object"},
-                extra_headers=headers
-            )
+                "temperature": 0.1,
+                "max_tokens": 4096,
+                "response_format": {"type": "json_object"},
+                "extra_headers": {
+                    "HTTP-Referer": "https://recrutment.onrender.com",
+                    "X-Title": "RecrutBank CV Analyzer"
+                } if "OpenRouter" in _PROVIDER else {}
+            }
+            if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
+                api_params["reasoning"] = {"enabled": True}
+                logger.info("🧠 Reasoning active pour l'analyse")
+            response = _client.chat.completions.create(**api_params)
         result_text = response.choices[0].message.content
         logger.info(f"✅ Analyse {_PROVIDER} terminee: {len(result_text)} caracteres")
+        if hasattr(response.choices[0].message, 'reasoning_details') and response.choices[0].message.reasoning_details:
+            logger.info(f"🧠 Reasoning details disponibles")
         try:
             analyse = json.loads(result_text)
         except json.JSONDecodeError:
@@ -1107,7 +1116,8 @@ ATTESTATIONS/CERTIFICATS :
             'points_forts': points_forts,
             'points_vigilance': points_vigilance,
             'synthese_recruteur': synthese,
-            'raisonnement_detaille': analyse.get('raisonnement', '')
+            'raisonnement_detaille': analyse.get('raisonnement', ''),
+            'reasoning_enabled': OPENROUTER_REASONING_ENABLED
         }
         return {
             'score': score_total,
@@ -1748,17 +1758,20 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     Lettre : {lettre_text[:3000] if lettre_text else '(aucune)'}
     Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list else '(aucune)'}"""
         with _ia_semaphore:
-            response = _client.chat.completions.create(
-                model=_MODEL,
-                messages=[
+            api_params = {
+                "model": _MODEL,
+                "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT_RECRUTEUR},
                     {"role": "user", "content": user_msg}
                 ],
-                temperature=0.1,
-                max_tokens=4096,
-                response_format={"type": "json_object"},
-                extra_headers={"HTTP-Referer": "https://recrutment.onrender.com", "X-Title": "RecrutBank CV Analyzer"} if _PROVIDER == "OpenRouter" else {}
-            )
+                "temperature": 0.1,
+                "max_tokens": 4096,
+                "response_format": {"type": "json_object"},
+                "extra_headers": {"HTTP-Referer": "https://recrutment.onrender.com", "X-Title": "RecrutBank CV Analyzer"} if "OpenRouter" in _PROVIDER else {}
+            }
+            if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
+                api_params["reasoning"] = {"enabled": True}
+            response = _client.chat.completions.create(**api_params)
         result_text = response.choices[0].message.content
         try:
             analyse = json.loads(result_text)
@@ -3153,7 +3166,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v7.1-openrouter-reasoning",
+        "version": "v7.2-openrouter-ling-reasoning",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3166,7 +3179,8 @@ def health_version():
         "advanced_reasoning": True,
         "ia_provider": _PROVIDER,
         "ia_model": _MODEL,
-        "ia_free": _PROVIDER == "OpenRouter",
+        "ia_free": "OpenRouter" in _PROVIDER,
+        "reasoning_enabled": OPENROUTER_REASONING_ENABLED,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3175,7 +3189,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v7.1 - {_PROVIDER} Reasoning Engine")
+    logger.info(f"🚀 RecrutBank API v7.2 - {_PROVIDER} Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3183,7 +3197,8 @@ if __name__ == '__main__':
     logger.info(f"IA Provider: {'✅ ' + _PROVIDER if IA_ANALYSE_ACTIVE else '❌ Aucune'}")
     if IA_ANALYSE_ACTIVE:
         logger.info(f"Modele: {_MODEL}")
-        logger.info(f"Gratuit: {'✅ Oui' if _PROVIDER == 'OpenRouter' else '❌ Non (payant)'}")
+        logger.info(f"Gratuit: {'✅ Oui' if 'OpenRouter' in _PROVIDER else '❌ Non (payant)'}")
+        logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         test_ia_connection()
     else:
