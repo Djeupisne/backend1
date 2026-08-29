@@ -277,10 +277,10 @@ def extract_json_fallback(text):
     flags = []
     flag_patterns = [
         (r'Aucune experience.*?bancaire|pas d\'experience.*?bancaire|sans experience.*?bancaire', 'Aucune experience dans le secteur bancaire ou financier reglemente'),
-        (r'Moins de.*?ans.*?banque|experience.*?inferieure.*?ans', 'Moins de 5 ans d\'experience professionnelle dans une banque ou institution financiere'),
-        (r'Aucune experience manageriale|pas d\'experience manageriale|sans management', 'Aucune experience manageriale demontree'),
-        (r'Diplome.*?inferieur|niveau.*?diplome.*?insuffisant', 'Niveau de diplome inferieur a Bac+4'),
-        (r'Aucune exposition.*?risque|pas d\'exposition.*?risque', 'Aucune exposition a la gestion du risque de credit')
+        (r'Moins de.*?ans.*?banque|experience.*?inferieure.*?ans|moins de 5 ans', 'Moins de 5 ans d\'experience professionnelle dans une banque ou institution financiere'),
+        (r'Aucune experience manageriale|pas d\'experience manageriale|sans management|pas de management', 'Aucune experience manageriale demontree'),
+        (r'Diplome.*?inferieur|niveau.*?diplome.*?insuffisant|pas de diplome', 'Niveau de diplome inferieur a Bac+4'),
+        (r'Aucune exposition.*?risque|pas d\'exposition.*?risque|sans risque', 'Aucune exposition a la gestion du risque de credit')
     ]
     for pattern, default in flag_patterns:
         if re_json.search(pattern, text, re_json.IGNORECASE):
@@ -294,11 +294,15 @@ def extract_json_fallback(text):
         points_forts.append("Exposition au risque de credit detectee")
     if re_json.search(r'certification|certificat|formation.*?bancaire', text, re_json.IGNORECASE):
         points_forts.append("Certifications professionnelles detectees")
+    if re_json.search(r'resultats|chiffres|\d+\s*%|\d+\s*millions', text, re_json.IGNORECASE):
+        points_forts.append("Resultats quantifies detectes")
     points_vigilance = []
-    if re_json.search(r'manque|insuffisant|faible|limite', text, re_json.IGNORECASE):
+    if re_json.search(r'manque|insuffisant|faible|limite|peu', text, re_json.IGNORECASE):
         points_vigilance.append("⚠️ Certains criteres ne sont pas satisfaits")
-    if re_json.search(r'sans.*?experience|experience.*?limitee|experience.*?courte', text, re_json.IGNORECASE):
+    if re_json.search(r'sans.*?experience|experience.*?limitee|experience.*?courte|stage', text, re_json.IGNORECASE):
         points_vigilance.append("⚠️ Experience professionnelle limitee")
+    if re_json.search(r'pas de diplome|diplome.*?manquant', text, re_json.IGNORECASE):
+        points_vigilance.append("⚠️ Niveau de diplome insuffisant")
     sous_scores = {}
     exp_match = re_json.search(r'experience\s*(?:bancaire|professionnelle)\s*(?:de|:)?\s*(\d+)', text, re_json.IGNORECASE)
     if exp_match:
@@ -350,14 +354,7 @@ def extract_json_fallback(text):
     else:
         sous_scores["qualite_cv"] = 0
     total_sous_score = sum(sous_scores.values())
-    if total_sous_score >= 14:
-        score = 12
-    elif total_sous_score >= 10:
-        score = 8
-    elif total_sous_score >= 6:
-        score = 4
-    else:
-        score = 0
+    score = total_sous_score
     if flags:
         score = 0
     synthese = "Analyse automatique: "
@@ -366,7 +363,8 @@ def extract_json_fallback(text):
     if points_vigilance:
         synthese += "Points de vigilance: " + ", ".join(points_vigilance) + ". "
     if flags:
-        synthese += "Criteres eliminatoires: " + ", ".join(flags) + ". "
+        synthese += "❌ CRITERES ELIMINATOIRES NON SATISFAITS: " + ", ".join(flags) + ". "
+        synthese += "Candidat REJETE immediatement."
     if len(text) > 50:
         synthese += text[:300] + "..."
     else:
@@ -403,7 +401,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v7.6-minimax-sous-scores-complets',
+        'version': 'v7.7-minimax-scores-corrects',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -422,7 +420,8 @@ def health_check():
             'advanced_reasoning': True,
             'free_ia': "OpenRouter" in _PROVIDER,
             'json_robust_parsing': True,
-            'sous_scores_complets': True
+            'sous_scores_complets': True,
+            'eliminatoire_rejet': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -908,7 +907,9 @@ def get_recommandation_from_score(score, poste=None):
         return "Potentiel a evaluer en entretien"
     else:
         return "Rejet"
-def get_statut_from_decision(decision):
+def get_statut_from_decision(decision, flags_elim=None):
+    if flags_elim and len(flags_elim) > 0:
+        return "rejete"
     if not decision:
         return 'en_attente'
     if "Entretien prioritaire" in decision or "Shortlist" in decision:
@@ -1202,20 +1203,22 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
     4. Les stages, benefolats et formations NE COMPTENT PAS comme experience pro.
     5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
     6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
+    7. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE immediatement, meme si le score est eleve.
     METHODE DE RAISONNEMENT :
     Etape 1: Analyser la structure du CV (qualite, clarte, professionnalisme)
-    Etape 2: Verifier les criteres eliminatoires UN PAR UN (avec justifications)
-    Etape 3: Evaluer la coherence du parcours (progression, stabilite, logique)
-    Etape 4: Identifier les competences techniques et manageriales
-    Etape 5: Detecter les signaux de qualite (resultats quantifies, certifications)
-    Etape 6: Synthetiser et donner une recommandation argumentee
+    Etape 2: Verifier les criteres eliminatoires UN PAR UN (avec justifications) - CRITIQUE
+    Etape 3: Si un critere eliminatoire est manquant -> REJET, score_total = 0
+    Etape 4: Evaluer la coherence du parcours (progression, stabilite, logique)
+    Etape 5: Identifier les competences techniques et manageriales
+    Etape 6: Detecter les signaux de qualite (resultats quantifies, certifications)
+    Etape 7: Synthetiser et donner une recommandation argumentee
     FORMAT DE SORTIE : UNIQUEMENT du JSON valide, sans texte explicatif avant ou apres.
     Le JSON doit contenir les champs suivants:
     {
         "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
         "points_forts": ["liste des points forts du candidat"],
         "points_vigilance": ["liste des points de vigilance"],
-        "score_total": 0-14,
+        "score_total": 0-14 (0 si flags_eliminatoires non vide),
         "synthese_recruteur": "synthese pour le recruteur",
         "sous_scores": {
             "experience_bancaire": 0-3,
@@ -1256,10 +1259,12 @@ ATTESTATIONS/CERTIFICATS :
 === INSTRUCTIONS ===
 1. Analyse le CV comme un expert RH.
 2. RAISONNE ETAPE PAR ETAPE avant de conclure.
-3. Donne des SCORES JUSTIFIES sur chaque critere.
-4. Identifie les FORCES et FAIBLESSES du profil.
-5. Produis une SYNTHESE claire et actionable pour le recruteur.
-6. Utilise le format JSON attendu avec les sous-scores."""
+3. Verifie CHAQUE critere eliminatoire.
+4. Si UN SEUL critere eliminatoire n'est pas satisfait -> REJET, score_total = 0.
+5. Donne des SCORES JUSTIFIES sur chaque critere.
+6. Identifie les FORCES et FAIBLESSES du profil.
+7. Produis une SYNTHESE claire et actionable pour le recruteur.
+8. Utilise le format JSON attendu avec les sous-scores."""
     try:
         with _ia_semaphore:
             api_params = {
@@ -1314,9 +1319,13 @@ ATTESTATIONS/CERTIFICATS :
         score_total = 0 if flags_elim else int(analyse.get('score_total', sum(sous_scores.values())))
         score_max = get_score_max_for_poste(poste)
         decision = get_recommandation_from_score(score_total, poste)
+        if flags_elim:
+            decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
         points_forts = analyse.get('points_forts', [])
         points_vigilance = analyse.get('points_vigilance', [])
         synthese = analyse.get('synthese_recruteur', '')
+        if flags_elim:
+            synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". " + synthese
         details = {
             'moteur': f'{_PROVIDER} v2',
             'model': _MODEL,
@@ -1349,6 +1358,27 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     banking_years = detect_banking_experience_years(raw_full)
+    flags_elim = []
+    if banking_years < 5:
+        flags_elim.append("Moins de 5 ans d'experience bancaire")
+    if banking_years < 1:
+        flags_elim.append("Aucune experience bancaire")
+    has_master = bool(re.search(r'master|mba|ingenieur|doctorat|phd', cv_text, re.IGNORECASE))
+    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maitrise|licence.*professionnelle', cv_text, re.IGNORECASE))
+    if not (has_master or has_bac4):
+        flags_elim.append("Niveau de diplome inferieur a Bac+4")
+    management_count = 0
+    for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe']:
+        if kw in cv_text.lower():
+            management_count += 1
+    if management_count < 2:
+        flags_elim.append("Experience manageriale insuffisante")
+    credit_count = 0
+    for kw in ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye']:
+        if kw in cv_text.lower():
+            credit_count += 1
+    if credit_count < 3:
+        flags_elim.append("Exposition au risque de credit insuffisante")
     if banking_years >= 5:
         exp_bancaire = 3
     elif banking_years >= 3:
@@ -1357,31 +1387,14 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         exp_bancaire = 1
     else:
         exp_bancaire = 0
-    has_master = bool(re.search(r'master|mba|ingenieur|doctorat|phd', cv_text, re.IGNORECASE))
-    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maitrise|licence.*professionnelle', cv_text, re.IGNORECASE))
     if has_master:
         diplome = 3
     elif has_bac4:
         diplome = 2
     else:
         diplome = 0
-    management_count = 0
-    for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe']:
-        if kw in cv_text.lower():
-            management_count += 1
     management = min(3, management_count)
-    credit_count = 0
-    for kw in ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye']:
-        if kw in cv_text.lower():
-            credit_count += 1
-    if credit_count >= 4:
-        risque_credit = 3
-    elif credit_count >= 2:
-        risque_credit = 2
-    elif credit_count >= 1:
-        risque_credit = 1
-    else:
-        risque_credit = 0
+    risque_credit = min(3, credit_count)
     jobs = cv_text.split('\n')
     job_count = 0
     for j in jobs:
@@ -1397,21 +1410,16 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv
     }
-    score = sum(sous_scores.values())
+    score = 0 if flags_elim else sum(sous_scores.values())
     score = min(14, score)
-    checklist = {
-        "elim_0": banking_years >= 5,
-        "elim_1": has_master or has_bac4,
-        "elim_2": management_count >= 2,
-        "elim_3": credit_count >= 3,
-        "elim_4": job_count >= 3
-    }
     if score >= 11:
         decision = "Entretien prioritaire"
     elif score >= 7:
         decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
+    if flags_elim:
+        decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
     points_forts = []
     points_vigilance = []
     if banking_years >= 5:
@@ -1438,16 +1446,23 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_forts.append("CV detaille")
     if banking_years < 5 or management < 2:
         points_vigilance.append("Verifier en entretien : experience et management")
+    synthese = f"Candidat avec un score de {score}/14. "
+    if flags_elim:
+        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". "
+    elif "prioritaire" in decision:
+        synthese += "Profil tres solide, recommande pour entretien prioritaire."
+    else:
+        synthese += "Profil a evaluer en entretien."
     return {
         'score': score,
         'score_max': 14,
         'decision': decision,
-        'flags_eliminatoires': [],
-        'checklist': checklist,
+        'flags_eliminatoires': flags_elim,
+        'checklist': {},
         'sous_scores': sous_scores,
         'points_forts': points_forts,
-        'points_vigilance': points_vigilance,
-        'synthese': f"Candidat avec un score de {score}/14. " + (decision if "prioritaire" in decision else "A evaluer.")
+        'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance,
+        'synthese': synthese
     }
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Charge(e) d'Administration de Credit"
@@ -1556,7 +1571,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         "coherence_parcours": coherence,
         "qualite_cv": qualite
     }
-    total_score = sum(sous_scores.values())
+    total_score = 0 if flags_elim else sum(sous_scores.values())
     total_score = min(12, total_score)
     if total_score >= 10:
         decision = "Entretien prioritaire"
@@ -1564,6 +1579,8 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
+    if flags_elim:
+        decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
     points_forts = []
     points_vigilance = []
     if adequation >= 2:
@@ -1585,6 +1602,8 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if qualite < 2:
         points_vigilance.append("CV/lettre a enrichir")
     synthese = _generate_synthese_rac(cv_text, lettre_text, total_score, points_forts, points_vigilance)
+    if flags_elim:
+        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". " + synthese
     return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags_elim if flags_elim else [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
 def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vigilance):
     synthese = ""
@@ -1684,7 +1703,7 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv + lettre_score
     }
-    total_score = sum(sous_scores.values())
+    total_score = 0 if flags else sum(sous_scores.values())
     total_score = min(12, total_score)
     if total_score >= 10:
         decision = "Entretien prioritaire"
@@ -1692,7 +1711,12 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
-    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}", 'points_forts': ["Experience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""], 'synthese': f"Candidat avec un score de {total_score}/12"}
+    if flags:
+        decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
+    synthese = f"Candidat avec un score de {total_score}/12"
+    if flags:
+        synthese = f"❌ REJET IMMEDIAT - {len(flags)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags) + ". " + synthese
+    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags)} critere(s) eliminatoire(s)" if flags else ""), 'points_forts': ["Experience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""] + flags, 'synthese': synthese}
 def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts_list):
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
@@ -1722,16 +1746,6 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     comptab_ok = any(kw in cv_text.lower() for kw in comptab_keywords)
     if not comptab_ok:
         flags_elim.append("Connaissances en comptabilite et en etats financiers (P&L, bilan, flux de tresorerie)")
-    if flags_elim:
-        sous_scores = {
-            "experience_bancaire": 0,
-            "diplome": 0,
-            "management": 0,
-            "risque_credit": 0,
-            "coherence_parcours": 0,
-            "qualite_cv": 0
-        }
-        return {'score': 0, 'score_max': 14, 'decision': 'Rejet', 'flags_eliminatoires': flags_elim, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s)", 'points_forts': [], 'points_vigilance': flags_elim, 'synthese': f"Rejet immediat : {', '.join(flags_elim[:3])}"}
     exp_score = 0
     reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'budget', 'realise', 'realise', 'ecart', 'ecart', 'analyse', 'prevision', 'prevision', 'forecast', 'controle de gestion', 'controle de gestion', 'data analyst', 'analyste de donnees']
     found_exp = sum(1 for kw in reporting_keywords if kw in cv_text.lower())
@@ -1809,7 +1823,7 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     sous_scores["experience_bancaire"] = exp_score + bi_score + sql_score
     if sous_scores["experience_bancaire"] > 3:
         sous_scores["experience_bancaire"] = 3
-    total_score = sum(sous_scores.values())
+    total_score = 0 if flags_elim else sum(sous_scores.values())
     total_score = min(14, total_score)
     if total_score >= 11:
         decision = "Entretien prioritaire"
@@ -1817,6 +1831,8 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
         decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
+    if flags_elim:
+        decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
     points_forts = []
     points_vigilance = []
     if exp_score >= 2:
@@ -1840,13 +1856,15 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     if bank_score < 1:
         points_vigilance.append("Exposition au secteur bancaire limitee")
     synthese = f"Candidat avec un score de {total_score}/14. "
-    if total_score >= 11:
+    if flags_elim:
+        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". "
+    elif total_score >= 11:
         synthese += "Profil tres solide pour le poste de Data Analyst Finance. Excellente adequation avec les exigences du poste. A recommander pour entretien prioritaire."
     elif total_score >= 7:
         synthese += "Profil interessant avec des competences pertinentes. Certains domaines sont a approfondir mais le potentiel est present. A convoquer en entretien."
     else:
         synthese += "Profil insuffisant pour le poste. Manque de competences cles en analyse financiere et outils BI."
-    return {'score': total_score, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/14 — {decision}", 'points_forts': points_forts, 'points_vigilance': points_vigilance, 'synthese': synthese}
+    return {'score': total_score, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': flags_elim, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/14 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
         return {'score': 0, 'checklist': {}, 'flags_eliminatoires': ['CV non analysable'], 'signaux_detectes': [], 'details': {'error': 'CV vide'}, 'score_breakdown': {'bloc1_eliminatoire': True, 'score_final': 0, 'note': 'CV non analysable'}}
@@ -1903,10 +1921,10 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv + lettre_motiv
     }
-    score_final = sum(sous_scores.values())
+    score_final = 0 if flags_elim else sum(sous_scores.values())
     score_final = min(10, score_final)
     nb_elim_manquants = len(flags_elim)
-    return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'sous_scores': sous_scores, 'score_breakdown': {'bloc1_eliminatoire': False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'score_final': score_final, 'note': f"Score: {score_final}/10"}}
+    return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'sous_scores': sous_scores, 'score_breakdown': {'bloc1_eliminatoire': True if flags_elim else False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'score_final': score_final, 'note': f"Score: {score_final}/10" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else "")}}
 KEYWORD_MAPPING = {
     "Experience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
     "Minimum 3 ans en credit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
@@ -1991,7 +2009,8 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     3. Tu ne fais AUCUNE supposition, AUCUNE interpretation excessive.
     4. Les stages, benefolats et formations NE COMPTENT PAS comme experience professionnelle.
     5. Tu justifies CHAQUE evaluation avec une citation courte du document concerne.
-    6. Tu suis STRICTEMENT la grille fournie."""
+    6. Tu suis STRICTEMENT la grille fournie.
+    7. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE."""
     try:
         grille = GRILLE.get(poste, {})
         def fmt_list(items):
@@ -2049,6 +2068,8 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
             }
         score_total = 0 if flags_elim else int(analyse.get('score_total', sum(sous_scores.values())))
         decision = get_recommandation_from_score(score_total, poste)
+        if flags_elim:
+            decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
         score_max = get_score_max_for_poste(poste)
         return {'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'sous_scores': sous_scores, 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': sous_scores, 'score_final': score_total, 'score_max': score_max, 'decision': decision}}
     except Exception as e:
@@ -2080,9 +2101,20 @@ def generate_detailed_reason(candidat, poste, score, score_max):
     sous_scores = candidat.get('score_breakdown_parsed', {}).get('sous_scores', {})
     note = candidat.get('note', '')
     decision_auto = get_recommandation_from_score(score, poste)
+    if flags and len(flags) > 0:
+        lines = ["❌ CRITERES ELIMINATOIRES NON SATISFAITS :"]
+        for flag in flags[:5]:
+            clean = str(flag).replace('', '').replace('', '').strip()
+            if clean and len(clean) > 3:
+                lines.append(f"  • {clean}")
+        if len(flags) > 5:
+            lines.append(f"  • +{len(flags)-5} autre(s)")
+        if note and "Decision" not in note and len(note) > 5:
+            lines.append(f"\nNOTE RECRUTEUR : {note}")
+        return "\n".join(lines)
     if statut == "retenu":
         if strengths:
-            lines = ["POINTS FORTS :"]
+            lines = ["✅ POINTS FORTS :"]
             for s in strengths[:4]:
                 lines.append(f"  • {s}")
             if sous_scores:
@@ -2093,10 +2125,10 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                 lines.append(f"\nNOTE RECRUTEUR : {note}")
             return "\n".join(lines)
         if note and "Decision" not in note and len(note) > 5:
-            return f"RETENU - {note}"
-        return "RETENU - Candidature retenue"
+            return f"✅ RETENU - {note}"
+        return "✅ RETENU - Candidature retenue"
     if statut == "entretien":
-        lines = ["POTENTIEL A EVALUER :"]
+        lines = ["🔄 POTENTIEL A EVALUER :"]
         if strengths:
             for s in strengths[:2]:
                 lines.append(f"  • {s}")
@@ -2108,41 +2140,30 @@ def generate_detailed_reason(candidat, poste, score, score_max):
             lines.append(f"\nNOTE RECRUTEUR : {note}")
         return "\n".join(lines)
     if statut == "rejete":
-        if flags:
-            lines = ["CRITERES ELIMINATOIRES NON SATISFAITS :"]
-            for flag in flags[:4]:
-                clean = str(flag).replace('', '').replace('', '').strip()
-                if clean and len(clean) > 3:
-                    lines.append(f"  • {clean}")
-            if len(flags) > 4:
-                lines.append(f"  • +{len(flags)-4} autre(s)")
-            if note and "Decision" not in note and len(note) > 5:
-                lines.append(f"\nNOTE RECRUTEUR : {note}")
-            return "\n".join(lines)
         if weaknesses:
-            lines = ["POINTS DE VIGILANCE :"]
+            lines = ["❌ POINTS DE VIGILANCE :"]
             for w in weaknesses[:4]:
                 lines.append(f"  • {w}")
             if note and "Decision" not in note and len(note) > 5:
                 lines.append(f"\nNOTE RECRUTEUR : {note}")
             return "\n".join(lines)
         if note and "Decision" not in note and len(note) > 5:
-            return f"REJETE - {note}"
+            return f"❌ REJETE - {note}"
         if score == 0:
-            return "REJETE - Analyse automatique : le candidat ne repond pas aux criteres eliminatoires du poste"
+            return "❌ REJETE - Analyse automatique : le candidat ne repond pas aux criteres eliminatoires du poste"
         if score < 7:
-            return f"REJETE - Score insuffisant ({score}/{score_max}) - Profil ne correspond pas aux exigences du poste"
-        return "REJETE - Profil ne correspond pas aux exigences du poste"
+            return f"❌ REJETE - Score insuffisant ({score}/{score_max}) - Profil ne correspond pas aux exigences du poste"
+        return "❌ REJETE - Profil ne correspond pas aux exigences du poste"
     else:
         if flags:
-            lines = ["CRITERES ELIMINATOIRES :"]
+            lines = ["❌ CRITERES ELIMINATOIRES :"]
             for flag in flags[:3]:
                 clean = str(flag).replace('', '').replace('', '').strip()
                 if clean and len(clean) > 5:
                     lines.append(f"  • {clean}")
             return "\n".join(lines)
         if "Entretien prioritaire" in decision_auto or "Shortlist" in decision_auto:
-            lines = ["PROFIL RECOMMANDE :"]
+            lines = ["✅ PROFIL RECOMMANDE :"]
             if strengths:
                 for s in strengths[:4]:
                     lines.append(f"  • {s}")
@@ -2152,7 +2173,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                         lines.append(f"  • {key}: {value}/3")
             return "\n".join(lines)
         elif "Potentiel" in decision_auto:
-            lines = ["POTENTIEL A EVALUER :"]
+            lines = ["🔄 POTENTIEL A EVALUER :"]
             if strengths:
                 for s in strengths[:2]:
                     lines.append(f"  • {s}")
@@ -2162,7 +2183,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                     lines.append(f"  • {w}")
             return "\n".join(lines)
         else:
-            lines = ["NON RETENU - Raisons :"]
+            lines = ["❌ NON RETENU - Raisons :"]
             if weaknesses:
                 for w in weaknesses[:3]:
                     lines.append(f"  • {w}")
@@ -2231,7 +2252,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
         candidats_poste.sort(key=lambda x: -int(x.get('score', 0)))
         sheet_name = poste[:31] if len(poste) > 31 else poste
         ws = wb.create_sheet(title=sheet_name)
-        ws.merge_cells('A1:I1')
+        ws.merge_cells('A1:J1')
         title_cell = ws['A1']
         title_cell.value = f"CANDIDATURES - {poste}"
         title_cell.font = Font(bold=True, size=14, color="FFFFFF")
@@ -2242,11 +2263,11 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
         scores = [int(c.get('score', 0)) for c in candidats_poste]
         meilleur = max(scores) if scores else 0
         moyenne = sum(scores) / len(scores) if scores else 0
-        ws.merge_cells('A2:I2')
+        ws.merge_cells('A2:J2')
         ws['A2'] = f"{len(candidats_poste)} candidat(s) | Score max: {meilleur}/{score_max} | Moyenne: {moyenne:.1f}/{score_max}"
         ws['A2'].font = Font(italic=True, size=10, color="333333")
         ws['A2'].alignment = Alignment(horizontal='center')
-        headers = ['Rang', 'N° Dossier', 'Candidat', 'Email', f'Score /{score_max}', 'Decision', 'Exp Bancaire', 'Diplome', 'Analyse detaillee']
+        headers = ['Rang', 'N° Dossier', 'Candidat', 'Email', f'Score /{score_max}', 'Decision', 'Exp Bancaire', 'Diplome', 'Management', 'Analyse detaillee']
         header_fill = PatternFill(start_color="1F4E79", end_color="4472C4", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True, size=10)
         header_border = Border(left=Side(style='medium', color='1F4E79'), right=Side(style='medium', color='1F4E79'), top=Side(style='medium', color='1F4E79'), bottom=Side(style='medium', color='1F4E79'))
@@ -2257,7 +2278,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             cell.border = header_border
             cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         ws.row_dimensions[3].height = 40
-        col_widths = [6, 14, 30, 35, 12, 18, 14, 12, 70]
+        col_widths = [6, 14, 30, 35, 12, 18, 14, 12, 12, 70]
         for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[get_column_letter(col)].width = w
         cell_border = Border(left=Side(style='thin', color='CCCCCC'), right=Side(style='thin', color='CCCCCC'), top=Side(style='thin', color='CCCCCC'), bottom=Side(style='thin', color='CCCCCC'))
@@ -2267,7 +2288,11 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             decision_final = ""
             rec_color = ""
             statut = c.get('statut', 'en_attente')
-            if statut == "rejete":
+            flags = c.get('flags_eliminatoires_parsed', [])
+            if flags and len(flags) > 0:
+                decision_final = "Rejete (eliminatoire)"
+                rec_color = "8B0000"
+            elif statut == "rejete":
                 decision_final = "Rejete"
                 rec_color = "FF0000"
             elif statut == "retenu":
@@ -2289,7 +2314,8 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             sous_scores = c.get('score_breakdown_parsed', {}).get('sous_scores', {})
             exp_bancaire = sous_scores.get('experience_bancaire', 0)
             diplome = sous_scores.get('diplome', 0)
-            row_data = [row_i - 3, c.get('numero_dossier', '') or '–', nom_complet, c.get('email', '') or '–', f"{score}/{score_max_local}", decision_final, f"{exp_bancaire}/3", f"{diplome}/3", motif]
+            management = sous_scores.get('management', 0)
+            row_data = [row_i - 3, c.get('numero_dossier', '') or '–', nom_complet, c.get('email', '') or '–', f"{score}/{score_max_local}", decision_final, f"{exp_bancaire}/3", f"{diplome}/3", f"{management}/3", motif]
             for col, val in enumerate(row_data, 1):
                 cell = ws.cell(row=row_i, column=col, value=val if val is not None else '')
                 cell.border = cell_border
@@ -2299,20 +2325,20 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
                 elif col == 6:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                     cell.fill = PatternFill(start_color=rec_color, end_color=rec_color, fill_type="solid")
-                    cell.font = Font(color="FFFFFF" if rec_color != "FFC000" else "000000", bold=True, size=10)
-                elif col == 9:
+                    cell.font = Font(color="FFFFFF" if rec_color not in ["FFC000", "8B0000"] else "000000", bold=True, size=10)
+                elif col == 10:
                     cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
                     cell.font = Font(size=9)
-                elif col in [7, 8]:
+                elif col in [7, 8, 9]:
                     cell.alignment = Alignment(horizontal='center', vertical='center')
                 else:
                     cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-                if row_i % 2 == 0 and col not in [6, 9]:
+                if row_i % 2 == 0 and col not in [6, 10]:
                     if cell.fill.start_color.rgb == "00000000" or not cell.fill:
                         cell.fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")
             motif_lines = len(motif.split('\n')) if motif else 1
             ws.row_dimensions[row_i].height = max(40, min(150, motif_lines * 15))
-        for col in range(1, 10):
+        for col in range(1, 11):
             column_letter = get_column_letter(col)
             max_length = 0
             for row in range(1, ws.max_row + 1):
@@ -2324,7 +2350,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             adjusted_width = min(max_length + 2, 80)
             ws.column_dimensions[column_letter].width = adjusted_width
         for row in range(4, ws.max_row + 1):
-            cell = ws.cell(row=row, column=9)
+            cell = ws.cell(row=row, column=10)
             if cell.value:
                 line_count = len(str(cell.value).split('\n'))
                 ws.row_dimensions[row].height = max(40, min(150, line_count * 15))
@@ -2367,7 +2393,10 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
             score = int(c.get('score', 0))
             score_max_local = get_score_max_for_poste(poste)
             statut = c.get('statut', 'en_attente')
-            if statut == "rejete":
+            flags = c.get('flags_eliminatoires_parsed', [])
+            if flags and len(flags) > 0:
+                decision = "Rejete (eliminatoire)"
+            elif statut == "rejete":
                 decision = "Rejete"
             elif statut == "retenu":
                 decision = "Retenu"
@@ -2397,7 +2426,7 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(0.8, 1, 0.8)))
             elif decision_val == "Entretien":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.95, 0.6)))
-            elif decision_val == "Rejete":
+            elif "eliminatoire" in decision_val or decision_val == "Rejete":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.85, 0.85)))
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
@@ -2411,7 +2440,7 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
 def generate_csv_report(candidats_data, poste_filter=None):
     out = io.StringIO()
     w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL, quotechar='"')
-    headers = ['Rang', 'N° Dossier', 'Email', 'Nom', 'Prenom', 'Telephone', 'Poste', 'Date candidature', 'Score', 'Statut', 'Decision', 'Exp Bancaire', 'Diplome', 'Analyse']
+    headers = ['Rang', 'N° Dossier', 'Email', 'Nom', 'Prenom', 'Telephone', 'Poste', 'Date candidature', 'Score', 'Statut', 'Decision', 'Exp Bancaire', 'Diplome', 'Management', 'Analyse']
     w.writerow(headers)
     if poste_filter:
         candidats_filtered = [c for c in candidats_data if c.get('poste') == poste_filter]
@@ -2422,12 +2451,16 @@ def generate_csv_report(candidats_data, poste_filter=None):
         score = int(c.get('score', 0))
         poste = c.get('poste', '')
         decision = get_recommandation_from_score(score, poste)
+        flags = c.get('flags_eliminatoires_parsed', [])
+        if flags and len(flags) > 0:
+            decision = "Rejete (eliminatoire)"
         motif = generate_detailed_reason(c, poste, score, get_score_max_for_poste(poste))
         statut = get_display_status(c)
         sous_scores = c.get('score_breakdown_parsed', {}).get('sous_scores', {})
         exp_bancaire = sous_scores.get('experience_bancaire', 0)
         diplome = sous_scores.get('diplome', 0)
-        w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), statut, decision, f"{exp_bancaire}/3", f"{diplome}/3", motif.replace('\n', ' | ')])
+        management = sous_scores.get('management', 0)
+        w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), statut, decision, f"{exp_bancaire}/3", f"{diplome}/3", f"{management}/3", motif.replace('\n', ' | ')])
     out.seek(0)
     return out.getvalue()
 def generate_word_report(candidats_data, poste_filter=None):
@@ -2452,7 +2485,7 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.add_paragraph()
     doc.add_heading('2. Liste Complete', level=1)
     if candidats_data:
-        table_all = doc.add_table(rows=1, cols=10)
+        table_all = doc.add_table(rows=1, cols=11)
         table_all.style = 'Table Grid'
         table_all.columns[0].width = Inches(0.5)
         table_all.columns[1].width = Inches(1.0)
@@ -2463,9 +2496,10 @@ def generate_word_report(candidats_data, poste_filter=None):
         table_all.columns[6].width = Inches(1.2)
         table_all.columns[7].width = Inches(1.0)
         table_all.columns[8].width = Inches(1.2)
-        table_all.columns[9].width = Inches(2.5)
+        table_all.columns[9].width = Inches(1.2)
+        table_all.columns[10].width = Inches(2.5)
         hdr_cells_all = table_all.rows[0].cells
-        for i, h in enumerate(['Rang', 'Dossier', 'Nom', 'Prenom', 'Email', 'Poste', 'Statut', 'Score', 'Exp', 'Recommandation']):
+        for i, h in enumerate(['Rang', 'Dossier', 'Nom', 'Prenom', 'Email', 'Poste', 'Statut', 'Score', 'Exp', 'Mgmt', 'Recommandation']):
             hdr_cells_all[i].text = h
             hdr_cells_all[i].paragraphs[0].runs[0].bold = True
         sorted_data = sorted(candidats_data, key=lambda x: -int(x.get('score', 0)))
@@ -2473,7 +2507,10 @@ def generate_word_report(candidats_data, poste_filter=None):
             score = int(c.get('score', 0))
             score_max = get_score_max_for_poste(c.get('poste', ''))
             statut = c.get('statut', 'en_attente')
-            if statut == "rejete":
+            flags = c.get('flags_eliminatoires_parsed', [])
+            if flags and len(flags) > 0:
+                recommandation = "Rejete (eliminatoire)"
+            elif statut == "rejete":
                 recommandation = "Rejete"
             elif statut == "retenu":
                 recommandation = "Retenu"
@@ -2483,6 +2520,7 @@ def generate_word_report(candidats_data, poste_filter=None):
                 recommandation = get_recommandation_from_score(score, c.get('poste', ''))
             sous_scores = c.get('score_breakdown_parsed', {}).get('sous_scores', {})
             exp_bancaire = sous_scores.get('experience_bancaire', 0)
+            management = sous_scores.get('management', 0)
             row_cells = table_all.add_row().cells
             row_cells[0].text = str(idx)
             row_cells[1].text = str(c.get('numero_dossier', '') or '–')
@@ -2493,7 +2531,8 @@ def generate_word_report(candidats_data, poste_filter=None):
             row_cells[6].text = get_display_status(c)
             row_cells[7].text = f"{score}/{score_max}"
             row_cells[8].text = f"{exp_bancaire}/3"
-            row_cells[9].text = recommandation
+            row_cells[9].text = f"{management}/3"
+            row_cells[10].text = recommandation
             for cell in row_cells:
                 cell.paragraphs[0].paragraph_format.space_after = Pt(2)
                 cell.paragraphs[0].paragraph_format.space_before = Pt(2)
@@ -2604,7 +2643,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         score = result.get('score', 0)
         score_max = result.get('score_max', get_score_max_for_poste(poste))
         decision = result.get('decision') or get_recommandation_from_score(score, poste)
-        statut = get_statut_from_decision(decision)
+        flags_elim = result.get('flags_eliminatoires', [])
+        statut = get_statut_from_decision(decision, flags_elim)
         if score > score_max:
             score = score_max
         details = result.get('details', {})
@@ -2627,8 +2667,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             update_data = {"score": str(score), "decision": decision, "statut": statut, "analyse_status": "completed", "analyse_auto_date": datetime.datetime.now().isoformat()}
             if result.get('checklist'):
                 update_data["checklist"] = json.dumps(result.get('checklist', {}), ensure_ascii=False)
-            if result.get('flags_eliminatoires'):
-                update_data["flags_eliminatoires"] = json.dumps(result.get('flags_eliminatoires', []), ensure_ascii=False)
+            if flags_elim:
+                update_data["flags_eliminatoires"] = json.dumps(flags_elim, ensure_ascii=False)
             if result.get('signaux_detectes'):
                 update_data["signaux_detectes"] = json.dumps(result.get('signaux_detectes', []), ensure_ascii=False)
             update_data["analyse_details"] = json.dumps(details, ensure_ascii=False)
@@ -3445,7 +3485,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v7.6-minimax-sous-scores-complets",
+        "version": "v7.7-minimax-scores-corrects",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3462,6 +3502,7 @@ def health_version():
         "reasoning_enabled": OPENROUTER_REASONING_ENABLED,
         "json_robust_parsing": True,
         "sous_scores_complets": True,
+        "eliminatoire_rejet": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3470,7 +3511,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v7.6 - {_PROVIDER} Reasoning Engine")
+    logger.info(f"🚀 RecrutBank API v7.7 - {_PROVIDER} Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3482,6 +3523,7 @@ if __name__ == '__main__':
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
         logger.info(f"JSON Robust Parsing: ✅ Active")
         logger.info(f"Sous-scores complets: ✅ 6 dimensions")
+        logger.info(f"Eliminatoire = Rejet immediat: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         test_ia_connection()
     else:
