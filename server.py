@@ -266,17 +266,17 @@ def parse_json_robust(result_text):
                 logger.error("❌ Aucun JSON trouve dans la reponse")
                 return None
 def normalize_scores_by_grille(sous_scores, poste):
-    """Normalise les sous-scores selon la grille de scoring pour assurer la cohérence"""
     grille_max = {
         "Chef de Division Local Corporate": {
             "experience_bancaire": 3,
             "diplome": 3,
             "management": 3,
             "risque_credit": 2,
-            "experience_corporate": 2,
+            "experience_corporate": 3,
             "coherence_parcours": 2,
             "qualite_cv": 1,
-            "certification": 1
+            "certification": 1,
+            "cross_selling": 2
         },
         "Data Analyst Finance": {
             "experience_bancaire": 3,
@@ -286,7 +286,8 @@ def normalize_scores_by_grille(sous_scores, poste):
             "experience_corporate": 0,
             "coherence_parcours": 2,
             "qualite_cv": 2,
-            "certification": 0
+            "certification": 0,
+            "cross_selling": 0
         }
     }
     if not sous_scores:
@@ -298,17 +299,19 @@ def normalize_scores_by_grille(sous_scores, poste):
             "experience_corporate": 0,
             "coherence_parcours": 0,
             "qualite_cv": 0,
-            "certification": 0
+            "certification": 0,
+            "cross_selling": 0
         }
     max_scores = grille_max.get(poste, {
         "experience_bancaire": 3,
         "diplome": 3,
         "management": 3,
         "risque_credit": 2,
-        "experience_corporate": 2,
+        "experience_corporate": 3,
         "coherence_parcours": 2,
         "qualite_cv": 1,
-        "certification": 1
+        "certification": 1,
+        "cross_selling": 2
     })
     for key, max_val in max_scores.items():
         if key in sous_scores:
@@ -336,7 +339,8 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
             "experience_corporate": 0,
             "coherence_parcours": 0,
             "qualite_cv": 0,
-            "certification": 0
+            "certification": 0,
+            "cross_selling": 0
         }
     if is_chef_agence:
         sous_scores["management"] = 3
@@ -348,7 +352,9 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
             sous_scores["risque_credit"] = 2
         if sous_scores["experience_corporate"] < 2:
             sous_scores["experience_corporate"] = 2
-        logger.info("✅ Regle metier: Gestionnaire de portefeuille -> risque_credit=2, experience_corporate=2")
+        if sous_scores["cross_selling"] < 1:
+            sous_scores["cross_selling"] = 1
+        logger.info("✅ Regle metier: Gestionnaire de portefeuille -> risque_credit=2, experience_corporate=2, cross_selling=1")
     if has_local_corporate:
         if sous_scores["experience_corporate"] < 2:
             sous_scores["experience_corporate"] = 2
@@ -417,6 +423,8 @@ def extract_json_fallback(text):
         points_forts.append("Exposition au risque de credit / NPL detectee")
     if re_json.search(r'local corporate|corporate|sme|pme|petites et moyennes entreprises|pm|portefeuille.*?entreprise|gestion.*?portefeuille.*?client|chef d\'agence', text, re_json.IGNORECASE):
         points_forts.append("Experience en gestion de portefeuille SME/Local Corporate detectee")
+    if re_json.search(r'cross[- ]?selling|ventes croisees|cash management|tsg|trade finance', text, re_json.IGNORECASE):
+        points_forts.append("Exposition au cross-selling / Cash Management / TSG detectee")
     if is_chef_agence:
         points_forts.append("✅ Chef d'agence - Management et risque de credit confirmes")
     if is_gestionnaire_portefeuille:
@@ -477,19 +485,25 @@ def extract_json_fallback(text):
     else:
         sous_scores["risque_credit"] = 0
     if is_chef_agence:
-        sous_scores["experience_corporate"] = 2
+        sous_scores["experience_corporate"] = 3
     elif is_gestionnaire_portefeuille or has_portfolio_management:
-        sous_scores["experience_corporate"] = 2
+        sous_scores["experience_corporate"] = 3
     elif has_local_corporate:
-        sous_scores["experience_corporate"] = 2
+        sous_scores["experience_corporate"] = 3
     elif re_json.search(r'local corporate|sme|pme|portefeuille.*?entreprise|gestion.*?portefeuille.*?client|acquisition.*?client|developpement.*?portefeuille|chef d\'agence', text, re_json.IGNORECASE):
-        sous_scores["experience_corporate"] = 2
+        sous_scores["experience_corporate"] = 3
     elif re_json.search(r'corporate|entreprise|client.*?entreprise|gestion.*?client', text, re_json.IGNORECASE):
-        sous_scores["experience_corporate"] = 1
+        sous_scores["experience_corporate"] = 2
     elif re_json.search(r'commercial|relation client|client', text, re_json.IGNORECASE):
         sous_scores["experience_corporate"] = 1
     else:
         sous_scores["experience_corporate"] = 0
+    if re_json.search(r'cross[- ]?selling|ventes croisees|cash management|tsg|trade finance', text, re_json.IGNORECASE):
+        sous_scores["cross_selling"] = 2
+    elif re_json.search(r'partenariat|synergie commerciale|collaboration', text, re_json.IGNORECASE):
+        sous_scores["cross_selling"] = 1
+    else:
+        sous_scores["cross_selling"] = 0
     if re_json.search(r'\d+\s*(?:ans|annees).*?(?:progression|evolution|promotion|carriere|responsabilites.*?croissantes)', text, re_json.IGNORECASE):
         sous_scores["coherence_parcours"] = 2
     elif re_json.search(r'\d+\s*(?:ans|annees).*?experience|poste.*?responsable|poste.*?chef', text, re_json.IGNORECASE):
@@ -531,7 +545,7 @@ def extract_json_fallback(text):
             'diplome_suffisant': sous_scores["diplome"] >= 2,
             'management_detecte': sous_scores["management"] >= 2,
             'risque_credit_detecte': sous_scores["risque_credit"] >= 1,
-            'experience_corporate': sous_scores["experience_corporate"] >= 1,
+            'experience_corporate': sous_scores["experience_corporate"] >= 2,
             'coherence_parcours': sous_scores["coherence_parcours"] >= 1
         }
     }
@@ -551,7 +565,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v9.1-grille-stable-scoring-fixed',
+        'version': 'v9.2-grille-complete-7-criteres',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -587,11 +601,13 @@ def health_check():
                 'diplome': 3,
                 'management': 3,
                 'risque_credit': 2,
-                'experience_corporate': 2,
+                'experience_corporate': 3,
                 'coherence_parcours': 2,
                 'qualite_cv': 1,
-                'certification': 1
-            }
+                'certification': 1,
+                'cross_selling': 2
+            },
+            'nb_criteres_notes': 7
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -968,10 +984,11 @@ GRILLE = {
             "diplome": 3,
             "management": 3,
             "risque_credit": 2,
-            "experience_corporate": 2,
+            "experience_corporate": 3,
             "coherence_parcours": 2,
             "qualite_cv": 1,
-            "certification": 1
+            "certification": 1,
+            "cross_selling": 2
         }
     },
     "Data Analyst Finance": {
@@ -1018,7 +1035,8 @@ GRILLE = {
             "experience_corporate": 0,
             "coherence_parcours": 2,
             "qualite_cv": 2,
-            "certification": 0
+            "certification": 0,
+            "cross_selling": 0
         }
     }
 }
@@ -1034,10 +1052,11 @@ for poste in ["Auditeur interne", "Chef service controle des engagements", "Chef
                 "diplome": 3,
                 "management": 3,
                 "risque_credit": 2,
-                "experience_corporate": 2,
+                "experience_corporate": 3,
                 "coherence_parcours": 2,
                 "qualite_cv": 1,
-                "certification": 1
+                "certification": 1,
+                "cross_selling": 2
             }
         }
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service controle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marche", "Chef service reporting reglementaire"]
@@ -1333,7 +1352,7 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
         return False, 0.5, []
     semantic_expansions = {
         "management": ["manager", "leadership", "supervision", "coordination", "direction", "pilotage", "encadrement", "gestion d'equipe", "management d'equipe", "team management", "team lead", "superviseur", "chef d'agence", "directeur d'agence", "responsable d'agence", "branch manager", "acting branch manager", "profit center manager"],
-        "cross-selling": ["ventes croisees", "cross selling", "cross-selling", "synergie commerciale", "commercial synergy", "partenariat", "partnership", "collaboration commerciale"],
+        "cross-selling": ["ventes croisees", "cross selling", "cross-selling", "synergie commerciale", "commercial synergy", "partenariat", "partnership", "collaboration commerciale", "cash management", "tsg", "trade finance"],
         "risk": ["risque", "risk", "NPL", "non performing", "provisions", "IFRS 9", "credit", "credit", "portefeuille", "portfolio", "CIR", "cout du risque", "creances douteuses", "creances impayees", "impayes"],
         "corporate": ["local corporate", "corporate", "sme", "pme", "petites et moyennes entreprises", "pm", "moyennes entreprises", "grandes entreprises", "entreprises", "corporate local", "local corporate banking", "chef d'agence", "directeur d'agence", "gestionnaire de portefeuille", "gestionnaire de compte"],
         "certification": ["certification", "certificat", "certified", "ITB", "Moody's", "Ecobank", "MBA", "Master", "formation", "frankfurt school", "financement des pme"]
@@ -1382,10 +1401,11 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
         "diplome": 3,
         "management": 3,
         "risque_credit": 2,
-        "experience_corporate": 2,
+        "experience_corporate": 3,
         "coherence_parcours": 2,
         "qualite_cv": 1,
-        "certification": 1
+        "certification": 1,
+        "cross_selling": 2
     })
     system_prompt = f"""Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
 REGLES ABSOLUES D'ANALYSE :
@@ -1397,11 +1417,10 @@ REGLES ABSOLUES D'ANALYSE :
 6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
 7. Les NPL (Non-Performing Loans) sont des creances douteuses ou impayees.
 GRILLE DE SCORING POUR CE POSTE (MAX 14):
-- experience_bancaire: 0-3
-- diplome: 0-3
+- experience_corporate (SME/Local Corporate): 0-3
 - management: 0-3
-- risque_credit: 0-2 (max 2)
-- experience_corporate: 0-2 (max 2)
+- risque_credit: 0-2
+- cross_selling (Cash Management/TSG/Trade Finance): 0-2
 - coherence_parcours: 0-2
 - qualite_cv: 0-1
 - certification: 0-1
@@ -1425,10 +1444,11 @@ Le JSON doit contenir:
         "diplome": 0-3,
         "management": 0-3,
         "risque_credit": 0-2,
-        "experience_corporate": 0-2,
+        "experience_corporate": 0-3,
         "coherence_parcours": 0-2,
         "qualite_cv": 0-1,
-        "certification": 0-1
+        "certification": 0-1,
+        "cross_selling": 0-2
     }},
     "checklist": {{
         "experience_bancaire": true/false,
@@ -1567,6 +1587,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     is_gestionnaire_portefeuille = bool(re.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit', cv_text, re.IGNORECASE))
     has_portfolio_management = bool(re.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises', cv_text, re.IGNORECASE))
     has_local_corporate = bool(re.search(r'local corporate|sme|pme|petites et moyennes entreprises|pm|moyennes entreprises|grandes entreprises|entreprises|corporate local|local corporate banking|portefeuille.*?entreprise|gestion.*?portefeuille.*?client|acquisition.*?client|developpement.*?portefeuille', cv_text, re.IGNORECASE))
+    has_cross_selling = bool(re.search(r'cross[- ]?selling|ventes croisees|cash management|tsg|trade finance', cv_text, re.IGNORECASE))
     flags_elim = []
     if banking_years < 5:
         flags_elim.append("Moins de 5 ans d'experience bancaire (minimum 5 ans requis)")
@@ -1618,13 +1639,14 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     else:
         risque_credit = 0
     if is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management:
-        corporate_exp = 2
+        corporate_exp = 3
     elif has_local_corporate_exp:
-        corporate_exp = 2
+        corporate_exp = 3
     elif re.search(r'commercial|relation client|client.*?entreprise', cv_text.lower()):
-        corporate_exp = 1
+        corporate_exp = 2
     else:
         corporate_exp = 0
+    cross_selling = 2 if has_cross_selling else 0
     coherence = 2 if re.search(r'\d+\s*(?:ans|annees).*?(?:progression|evolution|promotion|carriere|responsabilites.*?croissantes)', cv_text.lower()) else (1 if re.search(r'\d+\s*(?:ans|annees).*?experience|poste.*?responsable|poste.*?chef', cv_text.lower()) else 0)
     qualite_cv = 1 if re.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*rapports|\d+\s*millions|\d+\s*clients|chiffres|resultats|objectifs.*?atteints', cv_text.lower()) else 0
     certification = 1 if re.search(r'itb|moody|ecobank.*?certification|certification.*?bancaire|cemac|uemoa|tchad|frankfurt school|financement des pme', cv_text.lower()) else 0
@@ -1636,7 +1658,8 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         "experience_corporate": corporate_exp,
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv,
-        "certification": certification
+        "certification": certification,
+        "cross_selling": cross_selling
     }
     sous_scores = normalize_scores_by_grille(sous_scores, poste)
     score = sum(sous_scores.values())
@@ -1670,9 +1693,13 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     else:
         points_vigilance.append("Exposition au risque de credit / NPL a verifier")
     if corporate_exp >= 2:
-        points_forts.append(f"Experience en SME/Local Corporate (score: {corporate_exp}/2)")
+        points_forts.append(f"Experience en SME/Local Corporate (score: {corporate_exp}/3)")
     else:
         points_vigilance.append("Experience en SME/Local Corporate a renforcer")
+    if cross_selling >= 2:
+        points_forts.append("Exposition au cross-selling / Cash Management / TSG")
+    else:
+        points_vigilance.append("Exposition au cross-selling a verifier")
     if is_chef_agence:
         points_forts.append("✅ Chef d'agence - Management et risque de credit confirmes")
     if is_gestionnaire_portefeuille:
@@ -1681,6 +1708,8 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_forts.append("✅ Gestion de portefeuille detectee - Exposition au risque de credit confirmee")
     if has_local_corporate_exp:
         points_forts.append("✅ Experience Local Corporate/SME detectee")
+    if has_cross_selling:
+        points_forts.append("✅ Cross-selling / Cash Management / TSG detecte")
     if coherence >= 1:
         points_forts.append("Parcours coherent avec progression")
     if qualite_cv >= 1:
@@ -1704,7 +1733,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             'diplome_suffisant': diplome >= 2,
             'management_detecte': management >= 2,
             'risque_credit_detecte': risque_credit >= 1,
-            'experience_corporate': corporate_exp >= 1,
+            'experience_corporate': corporate_exp >= 2,
             'coherence_parcours': coherence >= 1
         },
         'sous_scores': sous_scores,
@@ -1826,7 +1855,8 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         "experience_corporate": 0,
         "coherence_parcours": coherence,
         "qualite_cv": qualite,
-        "certification": 0
+        "certification": 0,
+        "cross_selling": 0
     }
     sous_scores = normalize_scores_by_grille(sous_scores, poste)
     total_score = 0 if flags_elim else sum(sous_scores.values())
@@ -1928,7 +1958,8 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         "experience_corporate": 0,
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv + lettre_score,
-        "certification": 0
+        "certification": 0,
+        "cross_selling": 0
     }
     sous_scores = normalize_scores_by_grille(sous_scores, poste)
     total_score = 0 if flags else sum(sous_scores.values())
@@ -2050,7 +2081,8 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
         "experience_corporate": 0,
         "coherence_parcours": coher_score,
         "qualite_cv": qualite_score + avance_score,
-        "certification": 0
+        "certification": 0,
+        "cross_selling": 0
     }
     sous_scores["experience_bancaire"] = exp_score + bi_score + sql_score
     if sous_scores["experience_bancaire"] > 3:
@@ -2144,8 +2176,9 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
             details['signaux_valides_bloc3'].append(f"{crit}")
     adequation = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and v]))
     coherence = min(2, points_bloc2)
-    risque_metier = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and 'risque' in k.lower() or 'npl' in k.lower()]))
+    risque_metier = min(2, len([k for k, v in checklist.items() if k.startswith('elim_') and 'risque' in k.lower() or 'npl' in k.lower()]))
     corporate_exp = min(3, len([k for k, v in checklist.items() if k.startswith('elim_') and ('corporate' in k.lower() or 'sme' in k.lower() or 'pme' in k.lower() or 'local' in k.lower())]))
+    cross_selling = min(2, len([k for k, v in checklist.items() if k.startswith('elim_') and ('cross' in k.lower() or 'cash' in k.lower() or 'tsg' in k.lower())]))
     qualite_cv = 1 if (points_bloc2 + points_bloc3) >= 5 else 0
     lettre_motiv = 1 if lettre_text and len(lettre_text.strip()) > 50 else 0
     certification = 1 if any('certification' in k.lower() or 'itb' in k.lower() or 'moody' in k.lower() for k in checklist if checklist[k]) else 0
@@ -2157,13 +2190,14 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         "experience_corporate": corporate_exp,
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv + lettre_motiv,
-        "certification": certification
+        "certification": certification,
+        "cross_selling": cross_selling
     }
     sous_scores = normalize_scores_by_grille(sous_scores, poste)
     score_final = 0 if flags_elim else sum(sous_scores.values())
     score_final = min(14, score_final)
     nb_elim_manquants = len(flags_elim)
-    result = {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'sous_scores': sous_scores, 'score_breakdown': {'bloc1_eliminatoire': True if flags_elim else False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'experience_corporate': corporate_exp, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'certification': certification, 'score_final': score_final, 'note': f"Score: {score_final}/14" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else "")}}
+    result = {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'sous_scores': sous_scores, 'score_breakdown': {'bloc1_eliminatoire': True if flags_elim else False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'experience_corporate': corporate_exp, 'cross_selling': cross_selling, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'certification': certification, 'score_final': score_final, 'note': f"Score: {score_final}/14" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else "")}}
     return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
 KEYWORD_MAPPING = {
     "Experience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
@@ -2174,7 +2208,8 @@ KEYWORD_MAPPING = {
     "A une connaissance des normes comptables bancaires ou de la reglementation COBAC": ["cobac", "reglementation bancaire", "ifrs 9", "normes ifrs", "comptabilite bancaire", "syscohada", "bale ii", "bale iii"],
     "Exposition au risque de credit / NPL": ["npl", "non performing", "creances douteuses", "creances impayees", "impayes", "provision", "risque de credit", "credit risk", "portefeuille", "portfolio", "cir", "cout du risque", "chef d'agence", "directeur d'agence", "gestionnaire de portefeuille", "gestionnaire de compte", "account manager", "relationship manager"],
     "Experience Local Corporate / SME": ["local corporate", "corporate", "sme", "pme", "petites et moyennes entreprises", "pm", "moyennes entreprises", "grandes entreprises", "entreprises", "corporate local", "local corporate banking", "chef d'agence", "directeur d'agence", "responsable d'agence", "gestionnaire de portefeuille"],
-    "Management": ["manager", "directeur", "chef", "superviseur", "encadrement", "management", "leadership", "gestion d'equipe", "pilotage", "responsable", "chef d'agence", "directeur d'agence", "branch manager", "acting branch manager", "profit center manager"]
+    "Management": ["manager", "directeur", "chef", "superviseur", "encadrement", "management", "leadership", "gestion d'equipe", "pilotage", "responsable", "chef d'agence", "directeur d'agence", "branch manager", "acting branch manager", "profit center manager"],
+    "Cross-selling / Cash Management / TSG": ["cross-selling", "cross selling", "ventes croisees", "cash management", "tsg", "trade finance", "partenariat", "synergie commerciale"]
 }
 EXP_MIN_YEARS_MAP = {"EXP_CREDIT_3ANS": 3.0, "EXP_BANK_1ANS": 1.0, "EXP_BACKOFFICE_3ANS": 3.0}
 DOMAIN_KEYWORDS_MAP = {"EXP_CREDIT_3ANS": ["credit", "risque", "banque", "bancaire", "institution financiere", "analyste", "charge", "gestionnaire", "loan", "credit analysis"], "EXP_BANK_1ANS": ["credit", "banque", "bancaire", "administration credit", "back office", "back-office", "risque", "risk", "analyse credit", "credit analysis", "loan", "institution financiere", "financial institution", "banking", "credit officer", "credit analyst", "credit administrator", "charge de credit", "gestionnaire credit", "analyste credit", "operations bancaires", "banking operations", "portfolio", "portefeuille", "garantie", "collateral"], "EXP_BACKOFFICE_3ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire", "banque", "bancaire", "middle office", "moyens de paiement", "traitement des operations", "chambre de compensation"]}
@@ -2910,7 +2945,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "experience_corporate": 0,
                 "coherence_parcours": 0,
                 "qualite_cv": 0,
-                "certification": 0
+                "certification": 0,
+                "cross_selling": 0
             }
         score_breakdown = {'score_final': score, 'score_max': score_max, 'decision': decision, 'moteur_analyse': details['moteur'], 'sous_scores': sous_scores}
         if supabase:
@@ -3784,7 +3820,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v9.1-grille-stable-scoring-fixed",
+        "version": "v9.2-grille-complete-7-criteres",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "Chef Division Corporate: 11/7, Data Analyst: 11/7",
@@ -3817,11 +3853,13 @@ def health_version():
             "diplome": 3,
             "management": 3,
             "risque_credit": 2,
-            "experience_corporate": 2,
+            "experience_corporate": 3,
             "coherence_parcours": 2,
             "qualite_cv": 1,
-            "certification": 1
+            "certification": 1,
+            "cross_selling": 2
         },
+        "nb_criteres_notes": 7,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3830,7 +3868,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v9.1 - Grille Stable Scoring Fixed")
+    logger.info(f"🚀 RecrutBank API v9.2 - Grille Complete 7 Criteres")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3841,13 +3879,22 @@ if __name__ == '__main__':
         logger.info(f"Gratuit: {'✅ Oui' if 'OpenRouter' in _PROVIDER else '❌ Non (payant)'}")
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
         logger.info(f"JSON Robust Parsing: ✅ Active")
-        logger.info(f"Sous-scores: 8 dimensions selon grille")
-        logger.info(f"Grille Chef Division: experience_bancaire 0-3, diplome 0-3, management 0-3, risque_credit 0-2, experience_corporate 0-2, coherence 0-2, qualite_cv 0-1, certification 0-1")
+        logger.info(f"Sous-scores: 9 dimensions selon grille (7 notes)")
+        logger.info(f"Grille Chef Division (7 criteres):")
+        logger.info(f"  - experience_corporate (SME/Local Corporate): 0-3")
+        logger.info(f"  - management: 0-3")
+        logger.info(f"  - risque_credit: 0-2")
+        logger.info(f"  - cross_selling: 0-2")
+        logger.info(f"  - coherence_parcours: 0-2")
+        logger.info(f"  - qualite_cv: 0-1")
+        logger.info(f"  - certification: 0-1")
+        logger.info(f"  TOTAL: 14")
         logger.info(f"Eliminatoire = Rejet, Score conserve: ✅ Active")
         logger.info(f"Score = Somme des sous-scores (max 14): ✅ Active")
-        logger.info(f"Local Corporate / SME: ✅ Active")
+        logger.info(f"Local Corporate / SME: ✅ Active (max 3)")
+        logger.info(f"Cross-selling / Cash Management / TSG: ✅ Active (max 2)")
         logger.info(f"Chef d'agence = auto-scoring management=3, risque_credit=2")
-        logger.info(f"Gestion de portefeuille = auto-scoring risque_credit=2, experience_corporate=2")
+        logger.info(f"Gestionnaire de portefeuille = auto-scoring risque_credit=2, experience_corporate=2")
         logger.info(f"Business Rules avec auto-suppression des flags: ✅ Active")
         logger.info(f"Normalisation automatique des sous-scores selon grille: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
