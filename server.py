@@ -682,83 +682,24 @@ def get_statut_from_decision(decision):
     else:
         return "rejete"
 def split_into_jobs(raw_text):
-    if not raw_text:
-        return []
-    # D'abord, on cherche les positions des débuts de blocs AVANT de normaliser les espaces
-    positions = []
-    
-    # Patterns à chercher dans le texte original (avec les sauts de ligne)
-    patterns_with_newlines = [
-        # Format: Depuis Année (ex: Depuis avril 2023)
-        r'(?:^|\n)(?=\s*(?:Depuis|desde|Since)\s+[A-Z][a-z]+\s+(?:20\d{2}|19\d{2}))',
-        # Format: Mois Année à Mois Année (ex: Mai 2022 à Mars 2023, Décembre 2014 à 2021)
-        r'(?:^|\n)(?=\s*[A-Z][a-z]+\s+(?:20\d{2}|19\d{2})\s+(?:à|au)\s+[A-Z]?[a-z]*\s*(?:20\d{2}|19\d{2}))',
-        # Format: Mois Année - Mois Année (ex: Janvier 2021- Avril 2022, Juin 2013 – Décembre 2013)
-        r'(?:^|\n)(?=\s*[A-Z][a-z]+\s+(?:20\d{2}|19\d{2})\s*[-–—]\s*[A-Z]?[a-z]*\s+(?:20\d{2}|19\d{2}))',
-        # Format: Année - Année (ex: 2010 – Mai 2013, 2009 – 2010)
-        r'(?:^|\n)(?=\s*(?:20\d{2}|19\d{2})\s+[-–—]\s*(?:20\d{2}|19\d{2}))',
-        # Format: de/du/depuis Mois Année
-        r'(?:^|\n)(?=\s*(?:de|du|d[eù]|from|since)\s+[A-Z][a-z]+\s+(?:20\d{2}|19\d{2}))',
-        # Format: Année - Présent
-        r'(?:^|\n)(?=\s*(?:20\d{2}|19\d{2})\s+[-–—]\s*(?:présent|present|current|actuel))',
-    ]
-    
-    for pattern in patterns_with_newlines:
-        for match in re.finditer(pattern, raw_text, re.IGNORECASE | re.MULTILINE):
-            positions.append(match.start())
-    
-    positions = sorted(set(positions))
-    
-    if not positions:
-        return [raw_text.strip()] if raw_text.strip() else []
-    
-    # Maintenant on découpe le texte original selon les positions trouvées
-    blocks = []
-    for i, pos in enumerate(positions):
-        start = pos
-        end = positions[i + 1] if i + 1 < len(positions) else len(raw_text)
-        block = raw_text[start:end].strip()
-        if block:
-            blocks.append(block)
-    
-    return blocks
+    separators = re.compile(r"(?:^|\n)(?=\s*(?:(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(?:20\d{2}|19\d{2})|\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|(?:depuis|de |from |since |desde |a partir de |starting |beginning)))", re.IGNORECASE | re.MULTILINE)
+    blocks = separators.split(raw_text)
+    return [b.strip() for b in blocks if b.strip()]
+STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b', r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b', r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b', r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b']
+STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 def is_stage_block(block_text):
-    block_lower = block_text.lower()
-    stage_markers = [
-        r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b',
-        r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b',
-        r'\bstage de fin\b', r'\bstage academique\b',
-        r'\bstage professionnel\b', r'\bstage de formation\b',
-        r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b',
-        r'\bvolontariat\b', r'\btrainee\b'
-    ]
-    for marker in stage_markers:
-        if re.search(marker, block_lower):
-            return True
-    mois_match = re.search(r'(\d+)\s*(?:mois|semaines|jours)', block_lower)
-    if mois_match:
-        months = int(mois_match.group(1))
-        if months < 12:
-            return True
-    if re.search(r'stage|stagiaire|internship|intern', block_lower):
-        duration = re.search(r'(\d+)\s*(?:mois|semaines|jours)', block_lower)
-        if duration:
-            return True
-    return False
+    return bool(STAGE_PATTERN.search(block_text))
 def extract_duration_years_from_block(block_text):
-    """Extrait la durée en années d'un bloc d'expérience professionnelle."""
     years = 0.0
     text = block_text.lower()
     _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
     text = text.translate(_ACCENT_MAP)
-    
-    # Pattern 1: Durée explicite en ans (ex: 5 ans, 3.5 ans)
     duration_patterns = [
-        r'(\d+[.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)',
-        r'\(\s*(\d+[.,]?\d*)\s*\)\s*(?:ans?|annee?s?|years?)',
-        r'(\d+[.,]?\d*)\s+(?:ans?|annee?s?|years?)\s+(?:d[ée]?expérience)',
-        r'plus\s+de\s+(\d+[.,]?\d*)\s*(?:ans?|annee?s?|years?)',
-        r'depuis\s+(?:plus\s+de\s+)?(\d+[.,]?\d*)\s*(?:ans?|annee?s?)'
+        r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)',
+        r'\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',
+        r'\w+\s+\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',
+        r'plus\s+de\s+(\d+)\s*(?:ans?|annee?s?|years?)',
+        r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:ans?|annee?s?)'
     ]
     for dp in duration_patterns:
         m = re.search(dp, text)
@@ -769,103 +710,101 @@ def extract_duration_years_from_block(block_text):
                     return years
             except (ValueError, IndexError):
                 pass
-    
-    mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
-                'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
-    
-    # Pattern 2: Depuis Mois Année (ex: depuis avril 2023)
-    depuis_mois = re.search(r'depuis\s+([a-z]+)\s+(20\d{2}|19\d{2})', text, re.IGNORECASE)
-    if depuis_mois:
+    date_patterns = [
+        r'(?:de|du|d[eu])\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*(?:[àa]|au|jusqu\'au|-|–|—)\s*(?:ce\s+jour|aujourd\'hui|present|actuel|en\s+cours|nos\s+jours|now|current)',
+        r'(?:de|du|d[eu])\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*(?:[àa]|au|jusqu\'au|-|–|—)\s*(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})',
+        r'(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s*[-–—]\s*(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})',
+        r'(?:de|du|d[eu])\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s+(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})',
+    ]
+    for pattern in date_patterns:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            try:
+                groups = m.groups()
+                start_year = None
+                end_year = None
+                if groups and len(groups) >= 6:
+                    try:
+                        year_positions = []
+                        for idx, g in enumerate(groups):
+                            if g and re.match(r'^\d{4}$', g):
+                                year_positions.append(idx)
+                        if len(year_positions) >= 2:
+                            start_year = int(groups[year_positions[0]])
+                            end_year = int(groups[year_positions[1]])
+                        elif len(year_positions) == 1:
+                            start_year = int(groups[year_positions[0]])
+                            end_year = datetime.datetime.now().year
+                    except (ValueError, IndexError):
+                        pass
+                elif groups and len(groups) >= 3:
+                    try:
+                        for g in groups:
+                            if g and re.match(r'^\d{4}$', g):
+                                start_year = int(g)
+                                end_year = datetime.datetime.now().year
+                                break
+                    except (ValueError, IndexError):
+                        pass
+                if start_year and end_year:
+                    delta = end_year - start_year
+                    if 0 < delta <= 40:
+                        logger.debug(f"Date détectée: {start_year}-{end_year} = {delta} ans")
+                        return round(float(delta), 1)
+            except (ValueError, IndexError, TypeError) as e:
+                logger.debug(f"Erreur parsing date: {e}")
+                continue
+    pattern_present = re.compile(r"(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?(20\d{2}|19\d{2})\s*(?:a|-|–|—|au|jusqu'au|to|until|au\s+)?\s*(?:aujourd'hui|present|actuel|en cours|now|current|actual|hoje|ce jour|nos\s+jours|a\s+nos\s+jours)", re.IGNORECASE)
+    m = pattern_present.search(text)
+    if m:
+        start_year = int(m.group(2))
+        current_year = datetime.datetime.now().year
+        delta = current_year - start_year
+        if 0 < delta <= 40:
+            return round(float(delta), 1)
+    pattern_range = re.compile(r"(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?(20\d{2}|19\d{2})\s*(?:a|-|–|—|au|jusqu'au|to|until)?\s*(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?(20\d{2}|19\d{2})", re.IGNORECASE)
+    m = pattern_range.search(text)
+    if m:
+        start_year = int(m.group(2))
+        end_year = int(m.group(4))
+        delta = end_year - start_year
+        if 0 < delta <= 40:
+            return round(float(delta), 1)
+    m = re.search(r'(\d{1,2})[/\-\.](20\d{2}|19\d{2})\s*[-–—\.]?\s*(?:(\d{1,2})[/\-\.])?(20\d{2}|19\d{2}|present|current|now)', text)
+    if m:
+        start_year = int(m.group(2))
+        end_raw = m.group(4)
+        if re.match(r'\d{4}', str(end_raw)):
+            end_year = int(end_raw)
+        else:
+            end_year = datetime.datetime.now().year
+        delta = end_year - start_year
+        if 0 < delta <= 40:
+            return round(float(delta), 1)
+    m = re.search(r'(20\d{2})\s*[-–—]\s*(20\d{2})', text)
+    if m:
+        start_year = int(m.group(1))
+        end_year = int(m.group(2))
+        delta = end_year - start_year
+        if 0 < delta <= 40:
+            return round(float(delta), 1)
+    m = re.search(r'depuis\s+(20\d{2})', text)
+    if m:
+        start_year = int(m.group(1))
+        current_year = datetime.datetime.now().year
+        delta = current_year - start_year
+        if 0 < delta <= 40:
+            return round(float(delta), 1)
+    m = re.search(r'(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(20\d{2})\s*(?:a|-|–|—|au|jusqu\'au)\s*(?:janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)?\s*(20\d{2})', text, re.IGNORECASE)
+    if m:
         try:
-            start_month = mois_map.get(depuis_mois.group(1).lower(), 1)
-            start_year = int(depuis_mois.group(2))
-            current_year = datetime.datetime.now().year
-            current_month = datetime.datetime.now().month
-            total_months = (current_year - start_year) * 12 + (current_month - start_month)
-            if total_months > 0:
-                return round(max(0.5, total_months / 12.0), 1)
-        except (ValueError, IndexError):
-            pass
-    
-    # Pattern 3: Mois Année à Mois Année (ex: mai 2022 à mars 2023, janvier 2021- avril 2022)
-    mois_annee = re.search(r'([a-z]+)\s+(20\d{2}|19\d{2})\s*[-–—]?\s*(?:à|au|-|–|—)\s*([a-z]+)?\s*(20\d{2}|19\d{2})', text, re.IGNORECASE)
-    if mois_annee:
-        try:
-            start_month = mois_map.get(mois_annee.group(1).lower(), 1)
-            start_year = int(mois_annee.group(2))
-            end_month = mois_map.get(mois_annee.group(3).lower() if mois_annee.group(3) else 'décembre', 12)
-            end_year = int(mois_annee.group(4))
-            
-            total_months = (end_year - start_year) * 12 + (end_month - start_month) + 1
-            if total_months > 0:
-                return round(max(0.5, total_months / 12.0), 1)
-        except (ValueError, IndexError):
-            pass
-    
-    # Pattern 4: Mois Année à Année (ex: décembre 2014 à 2021)
-    mois_a_annee = re.search(r'([a-z]+)\s+(20\d{2}|19\d{2})\s+(?:à|au)\s+(20\d{2}|19\d{2})', text, re.IGNORECASE)
-    if mois_a_annee:
-        try:
-            start_year = int(mois_a_annee.group(2))
-            end_year = int(mois_a_annee.group(3))
+            start_year = int(m.group(2))
+            end_year = int(m.group(3)) if m.group(3) else datetime.datetime.now().year
             delta = end_year - start_year
             if 0 < delta <= 40:
                 return round(float(delta), 1)
         except (ValueError, IndexError):
             pass
-    
-    # Pattern 5: Année - Année (ex: 2009 – 2010, 2010 – Mai 2013)
-    annee_annee = re.search(r'(20\d{2}|19\d{2})\s+[-–—]\s*(?:[a-z]+\s+)?(20\d{2}|19\d{2})', text, re.IGNORECASE)
-    if annee_annee:
-        try:
-            start_year = int(annee_annee.group(1))
-            end_year = int(annee_annee.group(2))
-            delta = end_year - start_year
-            if 0 < delta <= 40:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
-    
-    # Pattern 6: De/From Année à Année/Présent
-    from_to = re.search(r'(?:depuis|de|from)\s+(20\d{2}|19\d{2})\s*(?:[àa]|au|jusqu\'au|to|until|-|–|—)\s*(20\d{2}|19\d{2}|présent|present|current|now)', text, re.IGNORECASE)
-    if from_to:
-        try:
-            start_year = int(from_to.group(1))
-            end_raw = from_to.group(2).lower()
-            if end_raw in ['présent', 'present', 'current', 'now']:
-                end_year = datetime.datetime.now().year
-            else:
-                end_year = int(end_raw)
-            delta = end_year - start_year
-            if 0 < delta <= 40:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
-    
-    # Pattern 7: De/From Année à Présent/Aujourd'hui
-    de_anos = re.search(r'(?:de|from)\s+(20\d{2}|19\d{2})\s*(?:[àa]|au|to|until)\s*(?:nos\s+jours|aujourd\'hui|ce\s+jour)', text, re.IGNORECASE)
-    if de_anos:
-        try:
-            start_year = int(de_anos.group(1))
-            current_year = datetime.datetime.now().year
-            delta = current_year - start_year
-            if 0 < delta <= 40:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
-    
-    # Pattern 8: Extraction fallback - chercher toutes les années dans le bloc
-    all_years = re.findall(r'(20\d{2}|19\d{2})', block_text)
-    if len(all_years) >= 2:
-        try:
-            years_int = sorted([int(y) for y in all_years])
-            # Prendre la première et la dernière année
-            delta = years_int[-1] - years_int[0]
-            if 0 < delta <= 40:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
-    
     return 0.0
 def detect_institution_type(text):
     text_lower = text.lower()
@@ -911,59 +850,43 @@ def extract_quantified_results(text):
 def detect_banking_experience_years(text):
     if not text:
         return 0.0
-    text = re.sub(r'\s+', ' ', text)
-    bank_keywords = [
-        'ecobank', 'orabank', 'uba', 'united bank', 'banque', 'bank',
-        'bancaire', 'commercial bank', 'cbt', 'finadev', 'societe generale',
-        'sogé', 'bicec', 'sgbc', 'cbc', 'bct', 'standard chartered',
-        'nsia banque', 'express union', 'coris bank', 'orabank tchad',
-        'commercial bank tchad', 'uba tchad', 'cbt tchad', 'orabank',
-        'commercial bank', 'united bank for africa', 'banque de l\'habitat',
-        'bht', 'banque atlantique', 'coris bank', 'bank of africa'
-    ]
+    text_lower = text.lower()
+    years = re.findall(r'\b(19|20)\d{2}\b', text)
+    if years:
+        years_int = sorted([int(y) for y in years])
+        total_years = years_int[-1] - years_int[0]
+        if total_years > 0 and total_years < 50:
+            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
+            for kw in bank_keywords:
+                if kw in text_lower:
+                    return total_years
+    match = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', text, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    match = re.search(r'depuis\s+(19|20)\d{2}', text, re.IGNORECASE)
+    if match:
+        start_year = int(match.group(1))
+        current_year = datetime.datetime.now().year
+        return current_year - start_year
     blocks = split_into_jobs(text)
     total_years = 0.0
-    bank_found = False
-    if not blocks:
-        logger.info("Aucun bloc d'expérience détecté")
-        return 0.0
     for block in blocks:
         if is_stage_block(block):
-            logger.info(f"Bloc ignoré (stage): {block[:100]}...")
             continue
         block_lower = block.lower()
-        is_bank = False
-        for kw in bank_keywords:
+        is_banking = False
+        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
+        for kw in banking_keywords:
             if kw in block_lower:
-                is_bank = True
-                bank_found = True
-                logger.info(f"Banque détectée dans le bloc: {kw}")
+                is_banking = True
                 break
-        if not is_bank:
-            continue
-        duration = extract_duration_years_from_block(block)
-        if duration > 0:
-            total_years += duration
-            logger.info(f"Durée extraite: {duration} ans (total: {total_years})")
-            continue
-        year_matches = re.findall(r'(20\d{2})', block)
-        if len(year_matches) >= 2:
-            years_int = sorted([int(y) for y in year_matches])
-            if years_int[-1] - years_int[0] <= 40:
-                duration = years_int[-1] - years_int[0]
+        if is_banking:
+            duration = extract_duration_years_from_block(block)
+            if duration > 0:
                 total_years += duration
-                logger.info(f"Dates trouvées: {years_int[0]}-{years_int[-1]} = {duration} ans")
-    if not bank_found:
-        for kw in bank_keywords:
-            if kw in text.lower():
-                bank_found = True
-                logger.info(f"Banque mentionnée dans le texte: {kw}")
-                break
-    if not bank_found:
-        logger.info("Aucune expérience bancaire détectée")
-        return 0.0
-    logger.info(f"Total années bancaires strict: {total_years} ans")
-    return total_years
+    if total_years > 0:
+        return total_years
+    return 0.0
 def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="", poste=None, lang='fr'):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1011,608 +934,89 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
     threshold = 0.45 if len(normalized_text) < 500 else 0.55
     return best_score >= threshold, round(best_score, 2), found_kws
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
-    """
-    Grille de présélection pour Chef de Division Local Corporate
-    Basée sur: Adéquation structurelle (filtre dur) · Cohérence du parcours · Signaux de qualité
-    
-    CRITÈRES ÉLIMINATOIRES (Rejet immédiat):
-    - Aucune expérience dans le secteur bancaire ou financier réglementé
-    - Niveau de diplôme inférieur à Bac +4 (Master ou équivalent requis)
-    - Moins de 5 ans d'expérience professionnelle, dont une partie significative en banque
-    - Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale
-    - Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)
-    
-    GRILLE DE SCORING (/14):
-    - Capacité managériale démontrée (0-3)
-    - Maîtrise du risque de crédit (0-2)
-    - Exposition cross-selling/Cash Management/TSG/Trade Finance (0-2)
-    - Cohérence et progression du parcours (0-2)
-    - Qualité du CV et lettre de motivation (0-1)
-    - Certification pro ou connaissance marché CEMAC/UEMOA (0-1)
-    
-    DÉCISION:
-    - 11-14: Entretien prioritaire
-    - 7-10: À convoquer
-    - <7: Rejet
-    """
     poste = "Chef de Division Local Corporate"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
-    cv_lower = cv_text.lower()
-    raw_full_lower = raw_full.lower()
-    
-    # =====================================================================
-    # CRITÈRES ÉLIMINATOIRES - REJET IMMÉDIAT
-    # =====================================================================
-    
-    # 1. Expérience bancaire ou financier réglementé
-    banking_keywords = [
-        'banque', 'bancaire', 'banking', 'financial', 'finance', 
-        'crédit', 'credit', 'établissement financier', 'société financière', 
-        'microfinance', 'réglementé', 'cobac', 'beac', 'prudentiel'
-    ]
-    has_banking_sector = any(kw in cv_lower for kw in banking_keywords)
-    
-    if not has_banking_sector:
-        return {
-            'score': 0,
-            'score_max': 14,
-            'decision': 'Rejet - Aucune expérience dans le secteur bancaire ou financier réglementé',
-            'flags_eliminatoires': [
-                "Aucune expérience dans le secteur bancaire ou financier réglementé - Critère éliminatoire non satisfait",
-                "Le secteur bancaire/financier est un prérequis obligatoire pour ce poste"
-            ],
-            'checklist': {
-                "elim_secteur_bancaire": False,
-                "elim_experience_5ans": False,
-                "elim_diplome_bac4": False,
-                "elim_management": False,
-                "elim_risque_credit": False
-            },
-            'sous_scores': {
-                "Capacité managériale": 0,
-                "Risque de crédit": 0,
-                "Cross-selling": 0,
-                "Cohérence du parcours": 0,
-                "Qualité CV/Lettre": 0,
-                "Certification/Market": 0
-            },
-            'points_forts': [],
-            'points_vigilance': [
-                "🔴 CRITÈRE ÉLIMINATOIRE NON SATISFAIT : Aucune expérience dans le secteur bancaire ou financier réglementé",
-                "Le candidat ne remplit pas le prérequis fondamental de secteur d'activité",
-                "Recommandation : Ne pas retenir la candidature"
-            ],
-            'synthese': "REJET IMMÉDIAT - Le candidat ne remplit pas le critère éliminatoire d'expérience dans le secteur bancaire ou financier réglementé."
-        }
-    
-    # 2. Niveau de diplôme Bac+4 minimum (vérifié avant expérience pour message clair)
-    diplome_patterns = [
-        r'master', r'mba', r'ingénieur', r'doctorat', r'phd',
-        r'bac\s*\+\s*[45]', r'bac\s*[45]', r'maîtrise', r'maitrise',
-        r'licence.*professionnelle', r'diplôm[eé].*bac\s*[\+\s]?[45]',
-        r'bac\s*\+\s*4', r'bac\s*4', r'bac\s*\+\s*5', r'bac\s*5',
-        r'master\s*\d+', r'master\s*1', r'master\s*2', r'msc', r'magister'
-    ]
-    has_master = any(re.search(pattern, cv_text, re.IGNORECASE) for pattern in diplome_patterns)
-    
-    if not has_master:
-        return {
-            'score': 0,
-            'score_max': 14,
-            'decision': 'Rejet - Diplôme insuffisant',
-            'flags_eliminatoires': [
-                "Niveau de diplôme inférieur à Bac+4 (Master ou équivalent requis) - Critère éliminatoire non satisfait",
-                "Le diplôme Bac+4 est un prérequis obligatoire pour ce poste"
-            ],
-            'checklist': {
-                "elim_secteur_bancaire": True,
-                "elim_experience_5ans": False,
-                "elim_diplome_bac4": False,
-                "elim_management": False,
-                "elim_risque_credit": False
-            },
-            'sous_scores': {
-                "Capacité managériale": 0,
-                "Risque de crédit": 0,
-                "Cross-selling": 0,
-                "Cohérence du parcours": 0,
-                "Qualité CV/Lettre": 0,
-                "Certification/Market": 0
-            },
-            'points_forts': [],
-            'points_vigilance': [
-                "🔴 CRITÈRE ÉLIMINATOIRE NON SATISFAIT : Niveau de diplôme inférieur à Bac+4",
-                "Le candidat ne remplit pas le prérequis de diplôme (Master ou équivalent requis)",
-                "Recommandation : Ne pas retenir la candidature"
-            ],
-            'synthese': "REJET IMMÉDIAT - Le candidat ne remplit pas le critère éliminatoire de diplôme (Bac+4 minimum requis)."
-        }
-    
-    # 3. Expérience professionnelle : minimum 5 ans dont partie significative en banque
     banking_years = detect_banking_experience_years(raw_full)
-    MIN_BANKING_YEARS = 5.0
-    
-    if banking_years < MIN_BANKING_YEARS:
-        return {
-            'score': 0,
-            'score_max': 14,
-            'decision': 'Rejet - Expérience bancaire insuffisante',
-            'flags_eliminatoires': [
-                f"Moins de {MIN_BANKING_YEARS} ans d'expérience professionnelle dont une partie significative en banque ({banking_years:.1f} ans détectés) - Critère éliminatoire non satisfait",
-                "Minimum 5 ans d'expérience professionnelle requis, dont une partie significative en banque"
-            ],
-            'checklist': {
-                "elim_secteur_bancaire": True,
-                "elim_experience_5ans": False,
-                "elim_diplome_bac4": True,
-                "elim_management": False,
-                "elim_risque_credit": False
-            },
-            'sous_scores': {
-                "Capacité managériale": 0,
-                "Risque de crédit": 0,
-                "Cross-selling": 0,
-                "Cohérence du parcours": 0,
-                "Qualité CV/Lettre": 0,
-                "Certification/Market": 0
-            },
-            'points_forts': [],
-            'points_vigilance': [
-                f"🔴 CRITÈRE ÉLIMINATOIRE NON SATISFAIT : {banking_years:.1f} ans d'expérience bancaire détectés (minimum {MIN_BANKING_YEARS} ans requis)",
-                "Le candidat ne remplit pas le prérequis fondamental d'expérience bancaire",
-                "Recommandation : Ne pas retenir la candidature"
-            ],
-            'synthese': f"REJET IMMÉDIAT - Le candidat ne remplit pas le critère éliminatoire d'expérience. {banking_years:.1f} ans détectés, {MIN_BANKING_YEARS} ans requis."
-        }
-    
-    # 4. Expérience managériale : encadrement d'équipe OU pilotage d'activité commerciale
-    management_team_keywords = [
-        'encadr', 'manager', 'management', 'équipe', 'team', 'supervis',
-        'chef de', 'responsable', 'directeur', 'gestion d\'équipe', 'gestion dequipe',
-        'pilotage d\'équipe', 'pilotage dequipe', 'collaborateurs', 'subordonnés',
-        'hiérarchique', 'reporting', 'évaluation', 'entretien annuel',
-        'montée en compétence', 'développement des collaborateurs',
-        'constitut', 'vivier de talents', 'head of', 'leading'
-    ]
-    management_commercial_keywords = [
-        'pilotage', 'activité commerciale', 'développement commercial',
-        'performance commerciale', 'objectifs commerciaux', 'animation commerciale',
-        'force de vente', 'équipe commerciale', 'portefeuille clients',
-        'grands comptes', 'corporate', 'p&l', 'profit and loss',
-        'compte de résultat', 'responsabilité budgétaire'
-    ]
-    
-    has_management_team = any(kw in cv_lower for kw in management_team_keywords)
-    has_management_commercial = any(kw in cv_lower for kw in management_commercial_keywords)
-    has_management = has_management_team or has_management_commercial
-    
-    if not has_management:
-        return {
-            'score': 0,
-            'score_max': 14,
-            'decision': 'Rejet - Expérience managériale insuffisante',
-            'flags_eliminatoires': [
-                "Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale - Critère éliminatoire non satisfait",
-                "L'expérience managériale est un prérequis obligatoire pour ce poste"
-            ],
-            'checklist': {
-                "elim_secteur_bancaire": True,
-                "elim_experience_5ans": True,
-                "elim_diplome_bac4": True,
-                "elim_management": False,
-                "elim_risque_credit": False
-            },
-            'sous_scores': {
-                "Capacité managériale": 0,
-                "Risque de crédit": 0,
-                "Cross-selling": 0,
-                "Cohérence du parcours": 0,
-                "Qualité CV/Lettre": 0,
-                "Certification/Market": 0
-            },
-            'points_forts': [],
-            'points_vigilance': [
-                "🔴 CRITÈRE ÉLIMINATOIRE NON SATISFAIT : Aucune expérience managériale démontrée",
-                "Le candidat ne remplit pas le prérequis d'encadrement d'équipe ou de pilotage d'activité commerciale",
-                "Recommandation : Ne pas retenir la candidature"
-            ],
-            'synthese': "REJET IMMÉDIAT - Le candidat ne remplit pas le critère éliminatoire d'expérience managériale."
-        }
-    
-    # 5. Exposition au risque de crédit et suivi qualité portefeuille (NPL, provisions)
-    credit_risk_keywords = [
-        'risque de crédit', 'credit risk', 'npl', 'non-performing',
-        'créances douteuses', 'impay', 'provision', 'provisionnement',
-        'qualité du portefeuille', 'qualité portefeuille', 'cir',
-        'cost of risk', 'coût du risque', 'ifrs 9', 'bâle', 'basel',
-        'scoring', 'rating', 'analyse crédit', 'octroi', 'suivi de portefeuille',
-        'recouvrement', 'contentieux', 'garantie', 'garanties',
-        'committee de crédit', 'credit committee', 'classification',
-        'dépréciation', 'perte attendue', 'expected loss', 'ecl'
-    ]
-    credit_count = sum(1 for kw in credit_risk_keywords if kw in cv_lower)
-    has_credit_risk = credit_count >= 2
-    
-    if not has_credit_risk:
-        return {
-            'score': 0,
-            'score_max': 14,
-            'decision': 'Rejet - Exposition au risque de crédit insuffisante',
-            'flags_eliminatoires': [
-                "Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions) - Critère éliminatoire non satisfait",
-                "L'exposition au risque de crédit est un prérequis obligatoire pour ce poste"
-            ],
-            'checklist': {
-                "elim_secteur_bancaire": True,
-                "elim_experience_5ans": True,
-                "elim_diplome_bac4": True,
-                "elim_management": True,
-                "elim_risque_credit": False
-            },
-            'sous_scores': {
-                "Capacité managériale": 0,
-                "Risque de crédit": 0,
-                "Cross-selling": 0,
-                "Cohérence du parcours": 0,
-                "Qualité CV/Lettre": 0,
-                "Certification/Market": 0
-            },
-            'points_forts': [],
-            'points_vigilance': [
-                "🔴 CRITÈRE ÉLIMINATOIRE NON SATISFAIT : Aucune exposition à la gestion du risque de crédit",
-                "Le candidat ne remplit pas le prérequis de suivi de la qualité d'un portefeuille (NPL, provisions)",
-                "Recommandation : Ne pas retenir la candidature"
-            ],
-            'synthese': "REJET IMMÉDIAT - Le candidat ne remplit pas le critère éliminatoire d'exposition au risque de crédit."
-        }
-    
-    # =====================================================================
-    # CALCUL DES SOUS-SCORES (Total /14)
-    # =====================================================================
-    
-    # --- SCORE 1 : Capacité managériale démontrée (0-3 pts) ---
-    # Critères : encadrement, évaluation, développement d'équipe, pilotage P&L
-    management_score = 0
-    
-    # Encadrement et évaluation d'équipe (1 pt)
-    eval_team_patterns = [
-        'évaluation', 'evaluer', 'appréciation', 'entretien annuel',
-        'feedback', 'performance review', 'annual review', 'évaluation de performance',
-        'fixer objectifs', 'définir objectifs', 'revue de performance'
-    ]
-    has_eval_team = any(p in cv_lower for p in eval_team_patterns)
-    
-    # Développement des collaborateurs / vivier de talents (1 pt)
-    develop_team_patterns = [
-        'développement des collaborateurs', 'montée en compétence',
-        'coaching', 'mentoring', 'formation', 'vivier de talents',
-        'talent management', 'succession planning', 'plan de relève',
-        'accompagner', 'faire progresser', 'développer les compétences',
-        'capacité à développer'
-    ]
-    has_develop_team = any(p in cv_lower for p in develop_team_patterns)
-    
-    # Constitution d'équipe (1 pt)
-    build_team_patterns = [
-        'constitution d\'équipe', 'constitution dequipe', 'recrutement',
-        'hiring', 'building team', 'création d\'équipe', 'creation dequipe',
-        'structuration', 'construire une équipe', 'former une équipe'
-    ]
-    has_build_team = any(p in cv_lower for p in build_team_patterns)
-    
-    # Pilotage P&L / responsabilité budgétaire (bonus intégré si mention explicite)
-    pnl_patterns = [
-        'p&l', 'profit and loss', 'compte de résultat', 'budget',
-        'responsabilité budgétaire', 'pilote budgétaire', 'gestion budgétaire',
-        'pilotage de la performance', 'responsabilité financière'
-    ]
-    has_pnl = any(p in cv_lower for p in pnl_patterns)
-    
-    if has_pnl:
-        management_score += 1
-    if has_eval_team or has_develop_team:
-        management_score += 1
-    if has_build_team:
-        management_score += 1
-    
-    # Bonus si mention explicite de leadership démontré (plafonné à 3)
-    leadership_patterns = ['leadership', 'leader', 'capacité à diriger', 'prise de décision', 'autonomie']
-    has_leadership = any(p in cv_lower for p in leadership_patterns)
-    if has_leadership and management_score < 3:
-        management_score += 0.5
-    
-    management_score = min(3, round(management_score * 2) / 2)  # Arrondi à 0.5 près
-    
-    # --- SCORE 2 : Maîtrise du risque de crédit et qualité du portefeuille (0-2 pts) ---
-    credit_score = 0
-    
-    # NPL / créances douteuses / impayés (1 pt)
-    npl_patterns = ['npl', 'non-performing', 'créances douteuses', 'impay', 'contentieux', 'recouvrement', 'douteux', 'dégradé']
-    has_npl = any(p in cv_lower for p in npl_patterns)
-    
-    # Provisions / provisionnement / IFRS 9 (1 pt)
-    provision_patterns = ['provision', 'provisionnement', 'ifrs 9', 'pertes attendues', 'expected loss', 'ecl', 'couverture']
-    has_provision = any(p in cv_lower for p in provision_patterns)
-    
-    # Reporting qualité portefeuille / direction (bonus)
-    reporting_quality_patterns = ['reporting', 'rendre compte', 'tableau de bord', 'indicateur', 'kpi', 'suivi qualité', 'qualité du portefeuille', 'qualité portefeuille', 'direction', 'comité de crédit', 'credit committee']
-    has_reporting_quality = any(p in cv_lower for p in reporting_quality_patterns)
-    
-    if has_npl:
-        credit_score += 1
-    if has_provision:
-        credit_score += 1
-    if has_reporting_quality and credit_score < 2:
-        credit_score = min(2, credit_score + 0.5)
-    
-    credit_score = min(2, int(credit_score) if credit_score == int(credit_score) else int(credit_score) + 1 if credit_score > 1.5 else int(credit_score))
-    if credit_score > 2:
-        credit_score = 2
-    
-    # Recalcul plus simple
-    credit_score = 0
-    if has_npl:
-        credit_score += 1
-    if has_provision:
-        credit_score += 1
-    elif has_reporting_quality:
-        credit_score += 0.5
-    credit_score = min(2, round(credit_score))
-    
-    # --- SCORE 3 : Exposition cross-selling, Cash Management, TSG / Trade Finance (0-2 pts) ---
-    cross_score = 0
-    
-    # Cross-selling / ventes croisées explicites (1 pt)
-    cross_selling_patterns = ['cross-selling', 'vente croisée', 'ventes croisées', 'cross sell', 'upselling', 'vente additionnelle', 'produits multiples', 'offre globale', 'solution globale']
-    has_cross_selling = any(p in cv_lower for p in cross_selling_patterns)
-    
-    # Solutions spécifiques : TSG, Trade Finance, Cash Management (1 pt)
-    specific_solutions_patterns = ['tsg', 'trade finance', 'cash management', 'gestion de trésorerie', 'financement du commerce', 'commerce international', 'documentaire', 'crédit documentaire', 'garantie internationale', 'omni', 'plateforme numérique', 'digital banking', 'banque digitale']
-    has_specific_solutions = any(p in cv_lower for p in specific_solutions_patterns)
-    
-    # Partenariats interdépartementaux (bonus)
-    partnership_patterns = ['partenariat', 'collaboration interdépartementale', 'travail transversal', 'synergie', 'coordination', 'interface']
-    has_partnership = any(p in cv_lower for p in partnership_patterns)
-    
-    if has_cross_selling:
-        cross_score += 1
-    if has_specific_solutions:
-        cross_score += 1
-    elif has_partnership:
-        cross_score += 0.5
-    
-    cross_score = min(2, round(cross_score))
-    
-    # --- SCORE 4 : Cohérence et progression du parcours (0-2 pts) ---
-    coherence_score = 0
-    
-    # Découper le CV en lignes pour analyser les postes
-    lines = cv_text.split('\n')
-    senior_positions = []
-    management_positions = []
-    
-    for line in lines:
-        line_lower = line.lower()
-        # Positions senior / responsabilités croissantes
-        if any(p in line_lower for p in ['senior', 'principal', 'lead', 'chef', 'responsable', 'directeur', 'manager', 'head of', 'coordinateur', 'superviseur']):
-            senior_positions.append(line)
-        # Positions managériales explicites
-        if any(p in line_lower for p in ['manager', 'management', 'encadrement', 'équipe', 'team', 'directeur', 'chef de division', 'chef de département', 'head of']):
-            management_positions.append(line)
-    
-    # Séniorité : au moins 2 postes à responsabilités (1 pt)
-    if len(senior_positions) >= 2:
-        coherence_score += 1
-    
-    # Progression hiérarchique visible (1 pt)
-    progression_indicators = ['promotion', 'évoluer', 'avancement', 'nommé', 'succéder', 'prendre la tête', 'devenir', 'passer de', 'upgrade', 'progresser']
-    has_progression = any(p in cv_lower for p in progression_indicators)
-    
-    # Ou détection de titres progressifs
-    titles_hierarchy = {'assistant': 1, 'chargé': 2, 'senior': 3, 'chef': 4, 'manager': 4, 'responsable': 4, 'directeur': 5, 'head': 5}
-    detected_levels = []
-    for title, level in titles_hierarchy.items():
-        if title in cv_lower:
-            detected_levels.append(level)
-    
-    has_title_progression = len(detected_levels) >= 2 and max(detected_levels) - min(detected_levels) >= 2
-    
-    # Bonus si durées significatives par poste (>= 2 ans)
-    year_patterns = re.findall(r'(20\d{2}|19\d{2})', cv_text)
-    has_stability = len(year_patterns) >= 4  # Au moins 2 périodes complètes
-    
-    if has_progression or has_title_progression:
-        coherence_score += 1
-    elif has_stability and len(senior_positions) >= 1:
-        coherence_score += 0.5
-    
-    coherence_score = min(2, round(coherence_score * 2) / 2)
-    
-    # --- SCORE 5 : Qualité du CV et lettre de motivation (0-1 pt) ---
-    qualite_score = 0
-    
-    # Résultats chiffrés quantifiés dans le CV (0.5 pt)
-    quantified_patterns = [
-        r'\d+\s*(%|pourcent)',
-        r'\d+[\s\.]*millions?',
-        r'\d+[\s\.]*milliards?',
-        r'\d+\s*[kKmMbB]?\s*[\$€£FCFA]',
-        r'chiffre\s*d\'?affaires',
-        r'\bca\b',
-        r'taux\s*de\s*(croissance|progression|augmentation)',
-        r'portefeuille\s*\d+',
-        r'\d+\s*clients',
-        r'nps',
-        r'net\s*promoter\s*score',
-        r'objectif\s*(atteint|dépassé)',
-        r'performance\s*\d+'
-    ]
-    has_quantified_results = any(re.search(p, cv_lower) for p in quantified_patterns)
-    
-    # Indicateurs de performance / livrables (0.5 pt)
-    metrics_patterns = ['augmentation', 'croissance', 'réduction', 'amélioration', 'performance', 'atteint', 'dépassé', 'objectif', 'résultat', 'livrable', 'succès', 'record', 'meilleure performance']
-    has_metrics = any(p in cv_lower for p in metrics_patterns)
-    
-    if has_quantified_results:
-        qualite_score += 0.5
-    if has_metrics:
-        qualite_score += 0.5
-    
-    # Lettre de motivation utile (bonus jusqu'à 0.5 pt supplémentaire, total max 1)
-    if lettre_text and len(lettre_text.strip()) > 80:
-        lettre_lower = lettre_text.lower()
-        # Compréhension du rôle de pilotage corporate
-        lettre_pilotage = any(p in lettre_lower for p in ['pilotage', 'management', 'leadership', 'stratégie', 'développement', 'croissance', 'performance'])
-        # Ambition commerciale et vision
-        lettre_commercial = any(p in lettre_lower for p in ['ambition', 'vision', 'développement commercial', 'portefeuille', 'client', 'entreprise', 'corporate', 'grand compte', 'partenaire'])
-        # Cohérence avec CV
-        lettre_coherent = any(p in lettre_lower for p in ['expérience', 'parcours', 'compétence', 'expertise', 'background'])
-        
-        if lettre_pilotage and lettre_commercial:
-            qualite_score += 0.3
-        if lettre_coherent:
-            qualite_score += 0.2
-    
-    qualite_score = min(1, round(qualite_score * 2) / 2)  # Arrondi à 0.5 près
-    
-    # --- SCORE 6 : Certification professionnelle ou connaissance marché CEMAC/UEMOA (0-1 pt) ---
-    cert_score = 0
-    
-    # Certifications ciblées : ITB, Moody's, Ecobank (0.5 pt)
-    certification_patterns = [
-        'itb', 'institut technique de banque',
-        'moody', 'moody\'s',
-        'ecobank',
-        'certification bancaire',
-        'certificat.*banque',
-        'aci', 'afme', 'icm', 'cambridge'
-    ]
-    has_target_certification = any(re.search(p, raw_full_lower) for p in certification_patterns)
-    
-    # Connaissance marché CEMAC / UEMOA (0.5 pt)
-    market_patterns = ['cemac', 'uemoa', 'beac', 'cobac', 'tchad', 'cameroun', 'gabon', 'congo', 'république centrafricaine', 'guinée équatoriale', 'sénégal', 'côte d\'ivoire', 'mali', 'burkina', 'afrique centrale', 'afrique de l\'ouest', 'zone franc']
-    has_market_knowledge = any(p in raw_full_lower for p in market_patterns)
-    
-    # Plateformes numériques bancaires (OMNI, Cash Management) - signal fort
-    digital_platform_patterns = ['omni', 'cash management', 'digital banking', 'plateforme digitale', 'banque en ligne', 'online banking', 'swift', 'core banking']
-    has_digital_platform = any(p in raw_full_lower for p in digital_platform_patterns)
-    
-    if has_target_certification:
-        cert_score += 0.5
-    if has_market_knowledge:
-        cert_score += 0.5
-    if has_digital_platform and cert_score < 1:
-        cert_score = min(1, cert_score + 0.3)
-    
-    cert_score = min(1, round(cert_score * 2) / 2)  # Arrondi à 0.5 près
-    
-    # =====================================================================
-    # CALCUL DU SCORE TOTAL
-    # =====================================================================
-    score = management_score + credit_score + cross_score + coherence_score + qualite_score + cert_score
-    score = min(14, int(score))
-    
-    # =====================================================================
-    # DÉCISION SELON LE SCORE
-    # =====================================================================
+    if banking_years >= 5:
+        exp_bancaire = 4
+    elif banking_years >= 3:
+        exp_bancaire = 2
+    elif banking_years >= 1:
+        exp_bancaire = 1
+    else:
+        exp_bancaire = 0
+    has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd', cv_text, re.IGNORECASE))
+    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maîtrise|licence.*professionnelle', cv_text, re.IGNORECASE))
+    if has_master:
+        diplome = 3
+    elif has_bac4:
+        diplome = 2
+    else:
+        diplome = 0
+    management_count = 0
+    for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'équipe']:
+        if kw in cv_text.lower():
+            management_count += 1
+    management = min(3, management_count)
+    credit_count = 0
+    for kw in ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']:
+        if kw in cv_text.lower():
+            credit_count += 1
+    if credit_count >= 4:
+        risque_credit = 2
+    elif credit_count >= 2:
+        risque_credit = 1
+    else:
+        risque_credit = 0
+    jobs = cv_text.split('\n')
+    job_count = 0
+    for j in jobs:
+        if 'chef' in j.lower() or 'manager' in j.lower() or 'responsable' in j.lower():
+            job_count += 1
+    coherence = 2 if job_count >= 3 else (1 if job_count >= 1 else 0)
+    qualite_cv = 1 if len(cv_text) > 500 else 0
+    score = exp_bancaire + diplome + management + risque_credit + coherence + qualite_cv
+    score = min(14, score)
+    checklist = {
+        "elim_0": banking_years >= 5,
+        "elim_1": has_master or has_bac4,
+        "elim_2": management_count >= 2,
+        "elim_3": credit_count >= 3,
+        "elim_4": job_count >= 3
+    }
     if score >= 11:
         decision = "Entretien prioritaire"
     elif score >= 7:
-        decision = "À convoquer - potentiel à évaluer en entretien"
+        decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
-    
-    # =====================================================================
-    # CHECKLIST DES CRITÈRES ÉLIMINATOIRES
-    # =====================================================================
-    checklist = {
-        "elim_secteur_bancaire": has_banking_sector,  # Secteur bancaire/financier
-        "elim_experience_5ans": banking_years >= 5,   # 5 ans d'expérience
-        "elim_diplome_bac4": has_master,              # Bac+4 minimum
-        "elim_management": has_management,            # Expérience managériale
-        "elim_risque_credit": has_credit_risk         # Risque de crédit
-    }
-    
-    # =====================================================================
-    # POINTS FORTS ET POINTS DE VIGILANCE
-    # =====================================================================
     points_forts = []
     points_vigilance = []
-    
     if banking_years >= 5:
-        points_forts.append(f"Expérience bancaire significative ({banking_years:.1f} ans)")
-    
-    if management_score >= 2:
-        points_forts.append(f"Capacité managériale démontrée (encadrement, développement d'équipe) - Score: {management_score}/3")
-        if has_pnl:
-            points_forts.append("Pilotage P&L / responsabilité budgétaire identifié")
-        if has_develop_team or 'vivier de talents' in cv_lower:
-            points_forts.append("Développement des collaborateurs / vivier de talents")
+        points_forts.append(f"Plus de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
     else:
-        points_vigilance.append("⚠ Capacité managériale limitée - Vérifier l'encadrement réel d'équipe")
-    
-    if credit_score >= 2:
-        points_forts.append(f"Maîtrise du risque de crédit et qualité du portefeuille (NPL, provisions) - Score: {credit_score}/2")
-    elif credit_score == 1:
-        points_vigilance.append("⚠ Exposition au risque de crédit partielle - Approfondir en entretien")
-    
-    if cross_score >= 2:
-        points_forts.append(f"Cross-selling et solutions bancaires spécialisées (TSG, Trade Finance, Cash Management) - Score: {cross_score}/2")
-        if has_specific_solutions:
-            points_forts.append("Connaissance des plateformes numériques bancaires")
-    elif cross_score == 1:
-        points_vigilance.append("⚠ Cross-selling limité - Vérifier l'expérience en ventes croisées")
-    
-    if coherence_score >= 2:
-        points_forts.append("Parcours cohérent avec progression hiérarchique visible")
+        points_vigilance.append(f"Expérience bancaire de {banking_years:.1f} ans (idéalement 5 ans+)")
+    if has_master:
+        points_forts.append("Diplôme Bac+5 ou supérieur")
+    elif has_bac4:
+        points_forts.append("Diplôme Bac+4")
     else:
-        points_vigilance.append("⚠ Progression hiérarchique peu visible - Vérifier la cohérence du parcours")
-    
-    if qualite_score >= 1:
-        points_forts.append("CV de qualité avec résultats chiffrés et indicateurs de performance")
-    elif qualite_score >= 0.5:
-        points_vigilance.append("⚠ Résultats peu quantifiés - Demander des exemples concrets en entretien")
+        points_vigilance.append("Niveau de diplôme inférieur à Bac+4")
+    if management >= 2:
+        points_forts.append(f"Expérience managériale (score: {management}/3)")
     else:
-        points_vigilance.append("⚠ CV sans résultats chiffrés - Missions décrites sans indicateurs")
-    
-    if cert_score >= 1:
-        if has_target_certification:
-            points_forts.append("Certification professionnelle bancaire (ITB, Moody's, Ecobank)")
-        if has_market_knowledge:
-            points_forts.append("Connaissance du marché CEMAC / UEMOA")
-        if has_digital_platform:
-            points_forts.append("Exposition aux plateformes numériques bancaires")
-    
-    # Points de vigilance supplémentaires
-    # Vérifier expériences courtes
-    year_patterns = re.findall(r'(20\d{2}|19\d{2})', cv_text)
-    if len(year_patterns) >= 4:
-        # Analyse simplifiée de durée
-        short_experience_warning = False
-        # On pourrait faire une analyse plus poussée ici
-        if short_experience_warning:
-            points_vigilance.append("⚠ Expériences professionnelles courtes détectées (< 2 ans par poste)")
-    
-    # Vérifier trous inexpliqués
-    gaps_warning = False
-    if gaps_warning:
-        points_vigilance.append("⚠ Trous potentiels dans le parcours - À clarifier")
-    
-    # Synthèse personnalisée selon le profil
-    synthese_parts = [f"Candidat pour le poste de {poste}."]
-    synthese_parts.append(f"Score: {score}/14.")
-    synthese_parts.append(f"Décision: {decision}.")
-    
-    if score >= 11:
-        synthese_parts.append("Profil prioritaire correspondant aux attentes du poste.")
-        if management_score == 3 and credit_score == 2:
-            synthese_parts.append("Points forts majeurs: leadership avéré et maîtrise du risque crédit.")
-    elif score >= 7:
-        synthese_parts.append("Profil intéressant mais certains aspects à approfondir en entretien.")
+        points_vigilance.append("Expérience managériale à renforcer")
+    if risque_credit >= 2:
+        points_forts.append(f"Exposition au risque de crédit (score: {risque_credit}/3)")
     else:
-        synthese_parts.append("Profil ne correspondant pas suffisamment aux exigences du poste.")
-    
+        points_vigilance.append("Exposition au risque de crédit limitée")
+    if coherence >= 2:
+        points_forts.append("Parcours cohérent avec des postes à responsabilité")
+    if qualite_cv >= 1:
+        points_forts.append("CV détaillé")
+    if banking_years < 5 or management < 2:
+        points_vigilance.append("Vérifier en entretien : expérience et management")
     return {
         'score': score,
         'score_max': 14,
@@ -1620,16 +1024,16 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'flags_eliminatoires': [],
         'checklist': checklist,
         'sous_scores': {
-            "Capacité managériale": management_score,
-            "Risque de crédit": credit_score,
-            "Cross-selling": cross_score,
-            "Cohérence du parcours": coherence_score,
-            "Qualité CV/Lettre": qualite_score,
-            "Certification/Market": cert_score
+            "Expérience bancaire": exp_bancaire,
+            "Diplôme": diplome,
+            "Management": management,
+            "Risque de crédit": risque_credit,
+            "Cohérence": coherence,
+            "Qualité CV": qualite_cv
         },
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
-        'synthese': " ".join(synthese_parts)
+        'synthese': f"Candidat avec un score de {score}/14. " + (decision if "prioritaire" in decision else "À évaluer.")
     }
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Chargé(e) d'Administration de Crédit"
