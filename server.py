@@ -85,27 +85,50 @@ except ImportError:
     SPACY_AVAILABLE = False
 try:
     from openai import OpenAI
-    DEEPSEEK_AVAILABLE = True
-    logger.info("✅ OpenAI importe avec succes pour DeepSeek")
+    OPENAI_AVAILABLE = True
+    logger.info("✅ OpenAI importe avec succes")
 except ImportError as e:
-    DEEPSEEK_AVAILABLE = False
+    OPENAI_AVAILABLE = False
     logger.error(f"❌ Erreur import OpenAI: {e}")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat:free")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-logger.info(f"🔑 DEEPSEEK_API_KEY: {'✅ Presente' if DEEPSEEK_API_KEY else '❌ Manquant'}")
-logger.info(f"📦 DEEPSEEK_AVAILABLE: {'✅ True' if DEEPSEEK_AVAILABLE else '❌ False'}")
-IA_ANALYSE_ACTIVE = DEEPSEEK_AVAILABLE and bool(DEEPSEEK_API_KEY)
-logger.info(f"🧠 IA_ANALYSE_ACTIVE: {'✅ Active' if IA_ANALYSE_ACTIVE else '❌ Inactive'}")
-try:
-    if IA_ANALYSE_ACTIVE:
-        _deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
-        logger.info("✅ Client DeepSeek initialise avec succes")
-    else:
-        _deepseek_client = None
-        logger.warning("⚠️ Client DeepSeek non initialise (cle manquante ou import echoue)")
-except Exception as e:
-    _deepseek_client = None
-    logger.error(f"❌ Erreur initialisation client DeepSeek: {e}")
+logger.info(f"🔑 OPENROUTER_API_KEY: {'✅ Presente' if OPENROUTER_API_KEY else '❌ Manquante'}")
+logger.info(f"📦 OPENROUTER_MODEL: {OPENROUTER_MODEL}")
+logger.info(f"🔑 DEEPSEEK_API_KEY: {'✅ Presente' if DEEPSEEK_API_KEY else '❌ Manquante'}")
+_client = None
+_PROVIDER = "None"
+_MODEL = None
+IA_ANALYSE_ACTIVE = False
+if OPENAI_AVAILABLE and OPENROUTER_API_KEY:
+    try:
+        _client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+        _MODEL = OPENROUTER_MODEL
+        _PROVIDER = "OpenRouter"
+        IA_ANALYSE_ACTIVE = True
+        logger.info("✅ Client OpenRouter initialise avec succes (GRATUIT)")
+        logger.info(f"   Modele: {_MODEL}")
+        logger.info(f"   Base URL: {OPENROUTER_BASE_URL}")
+    except Exception as e:
+        logger.error(f"❌ Erreur initialisation OpenRouter: {e}")
+        _client = None
+        IA_ANALYSE_ACTIVE = False
+if not IA_ANALYSE_ACTIVE and OPENAI_AVAILABLE and DEEPSEEK_API_KEY:
+    try:
+        _client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+        _MODEL = DEEPSEEK_MODEL
+        _PROVIDER = "DeepSeek (payant)"
+        IA_ANALYSE_ACTIVE = True
+        logger.info("✅ Client DeepSeek initialise avec succes (fallback payant)")
+    except Exception as e:
+        logger.error(f"❌ Erreur initialisation DeepSeek: {e}")
+        _client = None
+        IA_ANALYSE_ACTIVE = False
+if not IA_ANALYSE_ACTIVE:
+    logger.warning("⚠️ AUCUNE IA DISPONIBLE - Mode fallback uniquement")
+    logger.warning("   Verifiez OPENROUTER_API_KEY et l'installation de openai")
 _ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "5")))
 _Nlp_fr = None
 _Nlp_en = None
@@ -167,21 +190,25 @@ def _get_spacy_model(lang='fr'):
             except OSError:
                 return None
         return _Nlp_en
-def test_deepseek_connection():
-    if not IA_ANALYSE_ACTIVE or not _deepseek_client:
-        logger.warning("⚠️ DeepSeek non actif, impossible de tester")
+def test_ia_connection():
+    if not IA_ANALYSE_ACTIVE or not _client:
+        logger.warning("⚠️ IA non active, impossible de tester")
         return False
     try:
-        response = _deepseek_client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
+        response = _client.chat.completions.create(
+            model=_MODEL,
             messages=[{"role": "user", "content": "Test de connexion"}],
             max_tokens=5,
-            temperature=0
+            temperature=0,
+            extra_headers={
+                "HTTP-Referer": "https://recrutment.onrender.com",
+                "X-Title": "RecrutBank CV Analyzer"
+            } if _PROVIDER == "OpenRouter" else {}
         )
-        logger.info("✅ Connexion DeepSeek OK")
+        logger.info(f"✅ Connexion {_PROVIDER} OK")
         return True
     except Exception as e:
-        logger.error(f"❌ Erreur connexion DeepSeek: {e}")
+        logger.error(f"❌ Erreur connexion {_PROVIDER}: {e}")
         return False
 app = Flask(__name__)
 ALLOWED_ORIGINS = ["https://recrutment.onrender.com", "https://backend1-fiq5.onrender.com", "http://localhost:5000", "http://localhost:3000"]
@@ -198,15 +225,16 @@ def after_request(response):
 def health_check():
     return jsonify({
         'status': 'ok',
-        'message': 'RecrutBank API is running with DeepSeek',
-        'version': 'v7.0-deepseek-reasoning',
+        'message': f'RecrutBank API is running with {_PROVIDER}',
+        'version': 'v7.1-openrouter-reasoning',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
             'reportlab_available': REPORTLAB_AVAILABLE,
             'openpyxl_available': OPENPYXL_AVAILABLE,
             'ia_available': IA_ANALYSE_ACTIVE,
-            'ia_provider': 'DeepSeek' if IA_ANALYSE_ACTIVE else 'None',
+            'ia_provider': _PROVIDER,
+            'ia_model': _MODEL,
             'reasoning_mode': True,
             'scoring_strict': True,
             'manual_status_priority': True,
@@ -215,7 +243,7 @@ def health_check():
             'zip_max_workers': _ZIP_MAX_WORKERS,
             'intelligent_scoring': True,
             'advanced_reasoning': True,
-            'deepseek_model': DEEPSEEK_MODEL if IA_ANALYSE_ACTIVE else 'N/A'
+            'free_ia': _PROVIDER == "OpenRouter"
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -983,8 +1011,8 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
                             best_score = max(best_score, 0.75)
     threshold = 0.45 if len(normalized_text) < 500 else 0.55
     return best_score >= threshold, round(best_score, 2), found_kws
-def analyze_cv_with_deepseek_reasoning(cv_text, lettre_text, attestation_texts_list, poste):
-    if not IA_ANALYSE_ACTIVE or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
+def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, poste):
+    if not IA_ANALYSE_ACTIVE or not _client or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
         return None
     grille = GRILLE.get(poste, {})
     system_prompt = """Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
@@ -1031,18 +1059,22 @@ ATTESTATIONS/CERTIFICATS :
 6. Utilise le format JSON attendu."""
     try:
         with _ia_semaphore:
-            response = _deepseek_client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+            headers = {}
+            if _PROVIDER == "OpenRouter":
+                headers = {"HTTP-Referer": "https://recrutment.onrender.com", "X-Title": "RecrutBank CV Analyzer"}
+            response = _client.chat.completions.create(
+                model=_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
                 temperature=0.1,
                 max_tokens=4096,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                extra_headers=headers
             )
         result_text = response.choices[0].message.content
-        logger.info(f"✅ Analyse DeepSeek terminee: {len(result_text)} caracteres")
+        logger.info(f"✅ Analyse {_PROVIDER} terminee: {len(result_text)} caracteres")
         try:
             analyse = json.loads(result_text)
         except json.JSONDecodeError:
@@ -1051,7 +1083,7 @@ ATTESTATIONS/CERTIFICATS :
             if json_match:
                 analyse = json.loads(json_match.group())
             else:
-                logger.error("❌ Impossible de parser la reponse DeepSeek")
+                logger.error(f"❌ Impossible de parser la reponse {_PROVIDER}")
                 return None
         flags_elim = analyse.get('flags_eliminatoires', [])
         if isinstance(flags_elim, list):
@@ -1069,8 +1101,8 @@ ATTESTATIONS/CERTIFICATS :
         synthese = analyse.get('synthese_recruteur', '')
         sous_scores = analyse.get('sous_scores', {})
         details = {
-            'moteur': 'DeepSeek Reasoning v2',
-            'model': DEEPSEEK_MODEL,
+            'moteur': f'{_PROVIDER} Reasoning v2',
+            'model': _MODEL,
             'analyse_raw': analyse,
             'points_forts': points_forts,
             'points_vigilance': points_vigilance,
@@ -1091,7 +1123,7 @@ ATTESTATIONS/CERTIFICATS :
             'details': details
         }
     except Exception as e:
-        logger.error(f"❌ Erreur analyse DeepSeek: {e}")
+        logger.error(f"❌ Erreur analyse {_PROVIDER}: {e}")
         return None
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
@@ -1716,15 +1748,16 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     Lettre : {lettre_text[:3000] if lettre_text else '(aucune)'}
     Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list else '(aucune)'}"""
         with _ia_semaphore:
-            response = _deepseek_client.chat.completions.create(
-                model=DEEPSEEK_MODEL,
+            response = _client.chat.completions.create(
+                model=_MODEL,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT_RECRUTEUR},
                     {"role": "user", "content": user_msg}
                 ],
                 temperature=0.1,
                 max_tokens=4096,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                extra_headers={"HTTP-Referer": "https://recrutment.onrender.com", "X-Title": "RecrutBank CV Analyzer"} if _PROVIDER == "OpenRouter" else {}
             )
         result_text = response.choices[0].message.content
         try:
@@ -1747,7 +1780,7 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
         score_total = 0 if flags_elim else int(analyse.get('score_total', 0))
         decision = get_recommandation_from_score(score_total, poste)
         score_max = get_score_max_for_poste(poste)
-        return {'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'details': {'moteur': 'IA (DeepSeek)', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': analyse.get('sous_scores', {}), 'score_final': score_total, 'score_max': score_max, 'decision': decision}}
+        return {'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': analyse.get('sous_scores', {}), 'score_final': score_total, 'score_max': score_max, 'decision': decision}}
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
         return None
@@ -2256,12 +2289,12 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         logger.info(f"Analyse pour {token} - poste: {poste}, CV: {len(cv_text)} caracteres")
         gc.collect()
         if IA_ANALYSE_ACTIVE and poste in GRILLE:
-            logger.info(f"🚀 Utilisation de DeepSeek pour l'analyse du poste: {poste}")
-            result = analyze_cv_with_deepseek_reasoning(cv_text, lm_text, att_texts, poste)
+            logger.info(f"🚀 Utilisation de {_PROVIDER} pour l'analyse du poste: {poste}")
+            result = analyze_cv_with_ia_reasoning(cv_text, lm_text, att_texts, poste)
             if result:
-                logger.info(f"✅ Analyse DeepSeek reussie pour {token} - Score: {result.get('score', 0)}/{result.get('score_max', 0)}")
+                logger.info(f"✅ Analyse {_PROVIDER} reussie pour {token} - Score: {result.get('score', 0)}/{result.get('score_max', 0)}")
             else:
-                logger.warning(f"⚠️ DeepSeek a echoue, fallback vers scoring specifique pour {poste}")
+                logger.warning(f"⚠️ {_PROVIDER} a echoue, fallback vers scoring specifique pour {poste}")
                 result = None
         else:
             logger.info(f"📌 Fallback vers scoring specifique pour {poste}")
@@ -2296,7 +2329,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         details['points_forts'] = result.get('points_forts', [])
         details['points_vigilance'] = result.get('points_vigilance', [])
         details['synthese_recruteur'] = result.get('synthese', '')
-        details['moteur'] = 'deepseek_reasoning' if IA_ANALYSE_ACTIVE else 'scoring_specifique_v2'
+        details['moteur'] = _PROVIDER if IA_ANALYSE_ACTIVE else 'scoring_specifique_v2'
         score_breakdown = {'score_final': score, 'score_max': score_max, 'decision': decision, 'moteur_analyse': details['moteur'], 'sous_scores': result.get('sous_scores', {})}
         if supabase:
             update_data = {"score": str(score), "decision": decision, "statut": statut, "analyse_status": "completed", "analyse_auto_date": datetime.datetime.now().isoformat()}
@@ -2407,7 +2440,7 @@ def postuler():
         supabase.table('candidats').insert({"token": token, "nom": nom, "prenom": prenom, "email": email, "telephone": telephone, "poste": poste, "numero_dossier": numero_dossier, "cv_filename": cv_filename, "lettre_filename": lettre_filename, "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False), "statut": "en_attente", "note": "", "score": "0", "checklist": "", "flags_eliminatoires": "", "signaux_detectes": "", "score_breakdown": "", "analyse_status": "pending", "date_candidature": datetime.datetime.now().isoformat()}).execute()
         if is_poste_actif(poste):
             threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste, False), daemon=True).start()
-            analyse_msg = 'Analyse automatique en cours avec DeepSeek'
+            analyse_msg = f'Analyse automatique en cours avec {_PROVIDER}'
         else:
             analyse_msg = 'Poste cloture — candidature enregistree sans analyse'
             supabase.table('candidats').update({"analyse_status": "closed_post_no_analysis", "analyse_auto_date": datetime.datetime.now().isoformat()}).eq('token', token).execute()
@@ -2415,7 +2448,7 @@ def postuler():
         sujet_confirmation = f"Confirmation de candidature – {poste}"
         corps_confirmation = f"Bonjour {nom_complet},\nNous accusons reception de votre candidature.\nSans reponse de notre part sous deux (2) semaines, veuillez considerer que votre candidature n'a pas ete retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
         threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
-        return jsonify({'message': 'Candidature soumise avec succes', 'token': token, 'numero_dossier': numero_dossier, 'analyse': analyse_msg, 'poste_statut': 'actif' if is_poste_actif(poste) else 'cloture', 'ia_engine': 'DeepSeek Reasoning' if IA_ANALYSE_ACTIVE else 'Fallback'}), 201
+        return jsonify({'message': 'Candidature soumise avec succes', 'token': token, 'numero_dossier': numero_dossier, 'analyse': analyse_msg, 'poste_statut': 'actif' if is_poste_actif(poste) else 'cloture', 'ia_engine': _PROVIDER}), 201
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2567,7 +2600,7 @@ def trigger_analyze(token):
         return jsonify({'error': f'Le poste "{poste}" est cloture. Utilisez ?force=1 pour forcer l\'analyse.', 'poste': poste, 'statut': 'cloture'}), 403
     supabase.table('candidats').update({"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()}).eq('token', token).execute()
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, force), daemon=True).start()
-    return jsonify({'message': 'Analyse re-declenchee avec DeepSeek', 'token': token, 'ia_engine': 'DeepSeek Reasoning'}), 202
+    return jsonify({'message': f'Analyse re-declenchee avec {_PROVIDER}', 'token': token, 'ia_engine': _PROVIDER}), 202
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
 def get_reanalyze_status():
@@ -3113,14 +3146,14 @@ def test_email():
         to = request.args.get('to', '')
         if not to:
             return jsonify({'error': 'Parametre ?to= requis'}), 400
-        ok = send_email(to, 'Test RecrutBank', 'Ceci est un email de test depuis RecrutBank avec DeepSeek.')
+        ok = send_email(to, 'Test RecrutBank', f'Ceci est un email de test depuis RecrutBank avec {_PROVIDER}.')
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v7.0-deepseek-reasoning",
+        "version": "v7.1-openrouter-reasoning",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3131,9 +3164,9 @@ def health_version():
         "zip_max_workers": _ZIP_MAX_WORKERS,
         "intelligent_scoring": True,
         "advanced_reasoning": True,
-        "ia_provider": "DeepSeek" if IA_ANALYSE_ACTIVE else "Fallback",
-        "ia_model": DEEPSEEK_MODEL if IA_ANALYSE_ACTIVE else "N/A",
-        "deepseek_status": "Active" if IA_ANALYSE_ACTIVE else "Inactive",
+        "ia_provider": _PROVIDER,
+        "ia_model": _MODEL,
+        "ia_free": _PROVIDER == "OpenRouter",
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3142,19 +3175,21 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info("🚀 RecrutBank API v7.0 - DeepSeek Reasoning Engine")
+    logger.info(f"🚀 RecrutBank API v7.1 - {_PROVIDER} Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
     logger.info(f"Threads par worker: 4")
-    logger.info(f"IA Provider: {'DeepSeek ✅' if IA_ANALYSE_ACTIVE else '❌ Aucune'}")
+    logger.info(f"IA Provider: {'✅ ' + _PROVIDER if IA_ANALYSE_ACTIVE else '❌ Aucune'}")
     if IA_ANALYSE_ACTIVE:
-        logger.info(f"Modele DeepSeek: {DEEPSEEK_MODEL}")
+        logger.info(f"Modele: {_MODEL}")
+        logger.info(f"Gratuit: {'✅ Oui' if _PROVIDER == 'OpenRouter' else '❌ Non (payant)'}")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
-        test_deepseek_connection()
+        test_ia_connection()
     else:
-        logger.warning("⚠️ MODE FALLBACK UNIQUEMENT - DeepSeek non disponible")
-        logger.warning("Vérifiez DEEPSEEK_API_KEY et l'installation de openai")
+        logger.warning("⚠️ MODE FALLBACK UNIQUEMENT - Aucune IA disponible")
+        logger.warning("Vérifiez OPENROUTER_API_KEY ou DEEPSEEK_API_KEY")
+        logger.warning("Assurez-vous que openai est installe")
     logger.info(f"Mode raisonnement avance: {'ACTIF ✅' if IA_ANALYSE_ACTIVE else 'INACTIF ❌'}")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
     logger.info(f"Workers ZIP max: {_ZIP_MAX_WORKERS}")
