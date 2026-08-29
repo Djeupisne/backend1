@@ -1,23 +1,54 @@
+# Framework Web
 flask>=2.3.0
 flask-cors>=4.0.0
 flask-jwt-extended>=4.5.0
+gunicorn>=21.2.0
+
+# Client Supabase
 supabase>=2.3.0
+
+# Extraction PDF
 pdfplumber>=0.10.0
 PyPDF2>=3.0.0
+
+# Extraction DOCX
 python-docx>=0.8.11
+
+# Détection d'encodage
 chardet>=5.2.0
+
+# Détection de langue
 langdetect>=1.0.9
+
+# Fuzzy matching
 rapidfuzz>=3.0.0
+
+# Génération PDF
 reportlab>=4.0.0
+
+# Génération Excel
 openpyxl>=3.1.0
-gunicorn>=21.2.0
+
+# Traitement d'images
 pillow>=10.0.0
 pytesseract>=0.3.10
 pdf2image>=1.17.0
+
+# Analyse de données
 pandas>=2.2.0
 numpy>=1.26.0
+
+# NLP
 spacy>=3.7.0
+
+# Utilitaires
 python-magic>=0.4.27
-requests==2.33.1
+requests>=2.33.1
 python-dotenv>=1.0.0
-anthropic>=0.18.0
+
+# ✅ DEEPSEEK - REMPLACE ANTHROPIC
+# Client OpenAI pour DeepSeek (API compatible)
+openai>=1.0.0
+
+# Optionnel - si vous voulez garder Anthropic en fallback
+# anthropic>=0.18.0
