@@ -277,7 +277,7 @@ def extract_json_fallback(text):
         (r'Moins de.*?ans.*?banque|experience.*?inferieure.*?ans|moins de 5 ans', 'Moins de 5 ans d\'experience professionnelle dans une banque ou institution financiere'),
         (r'Aucune experience manageriale|pas d\'experience manageriale|sans management|pas de management', 'Aucune experience manageriale demontree'),
         (r'Diplome.*?inferieur|niveau.*?diplome.*?insuffisant|pas de diplome', 'Niveau de diplome inferieur a Bac+4'),
-        (r'Aucune exposition.*?risque|pas d\'exposition.*?risque|sans risque', 'Aucune exposition a la gestion du risque de credit')
+        (r'Aucune exposition.*?risque|pas d\'exposition.*?risque|sans risque|pas de npl|pas de creances douteuses', 'Aucune exposition a la gestion du risque de credit ou aux NPL')
     ]
     for pattern, default in flag_patterns:
         if re_json.search(pattern, text, re_json.IGNORECASE):
@@ -287,8 +287,8 @@ def extract_json_fallback(text):
         points_forts.append("Experience bancaire detectee")
     if re_json.search(r'management|manager|encadrement|supervision|leadership', text, re_json.IGNORECASE):
         points_forts.append("Experience manageriale detectee")
-    if re_json.search(r'credit|risque|npl|provision|portefeuille', text, re_json.IGNORECASE):
-        points_forts.append("Exposition au risque de credit detectee")
+    if re_json.search(r'credit|risque|npl|provision|portefeuille|creances douteuses|creances impayees|impayes', text, re_json.IGNORECASE):
+        points_forts.append("Exposition au risque de credit / NPL detectee")
     if re_json.search(r'certification|certificat|formation.*?bancaire', text, re_json.IGNORECASE):
         points_forts.append("Certifications professionnelles detectees")
     if re_json.search(r'resultats|chiffres|\d+\s*%|\d+\s*millions', text, re_json.IGNORECASE):
@@ -300,6 +300,8 @@ def extract_json_fallback(text):
         points_vigilance.append("⚠️ Experience professionnelle limitee")
     if re_json.search(r'pas de diplome|diplome.*?manquant', text, re_json.IGNORECASE):
         points_vigilance.append("⚠️ Niveau de diplome insuffisant")
+    if re_json.search(r'pas de npl|pas de creances douteuses|pas de risque credit', text, re_json.IGNORECASE):
+        points_vigilance.append("⚠️ Absence d'exposition aux NPL / creances douteuses")
     sous_scores = {}
     exp_match = re_json.search(r'experience\s*(?:bancaire|professionnelle)\s*(?:de|:)?\s*(\d+)', text, re_json.IGNORECASE)
     if exp_match:
@@ -328,9 +330,9 @@ def extract_json_fallback(text):
         sous_scores["management"] = 1
     else:
         sous_scores["management"] = 0
-    if re_json.search(r'credit|risque.*?credit|npl|provision.*?portefeuille|ifrs 9|risk management', text, re_json.IGNORECASE):
+    if re_json.search(r'npl|creances douteuses|creances impayees|impayes|provision.*?portefeuille|ifrs 9.*?stage|risk management.*?credit', text, re_json.IGNORECASE):
         sous_scores["risque_credit"] = 3
-    elif re_json.search(r'credit|risque|analyse financiere|gestion de portefeuille', text, re_json.IGNORECASE):
+    elif re_json.search(r'credit|risque|analyse financiere|gestion de portefeuille|portefeuille.*?credit', text, re_json.IGNORECASE):
         sous_scores["risque_credit"] = 2
     elif re_json.search(r'finance|comptabilite|economie', text, re_json.IGNORECASE):
         sous_scores["risque_credit"] = 1
@@ -1148,7 +1150,7 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
     semantic_expansions = {
         "management": ["manager", "leadership", "supervision", "coordination", "direction", "pilotage", "encadrement", "gestion d'equipe", "management d'equipe", "team management", "team lead", "superviseur"],
         "cross-selling": ["ventes croisees", "cross selling", "cross-selling", "synergie commerciale", "commercial synergy", "partenariat", "partnership", "collaboration commerciale"],
-        "risk": ["risque", "risk", "NPL", "non performing", "provisions", "IFRS 9", "credit", "credit", "portefeuille", "portfolio", "CIR", "cout du risque"],
+        "risk": ["risque", "risk", "NPL", "non performing", "provisions", "IFRS 9", "credit", "credit", "portefeuille", "portfolio", "CIR", "cout du risque", "creances douteuses", "creances impayees", "impayes"],
         "corporate": ["corporate", "grandes entreprises", "large entreprises", "entreprises", "clients corporate", "corporate clients", "grands comptes", "key accounts"],
         "certification": ["certification", "certificat", "certified", "ITB", "Moody's", "Ecobank", "MBA", "Master", "formation"]
     }
@@ -1192,47 +1194,48 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
         return None
     grille = GRILLE.get(poste, {})
     system_prompt = """Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
-    REGLES ABSOLUES D'ANALYSE :
-    1. Tu DOIS raisonner etape par etape comme un expert humain.
-    2. Tu ne JAMAIS inventer des faits qui ne sont PAS dans les documents.
-    3. Si une information n'est PAS mentionnee, tu la consideres comme ABSENTE.
-    4. Les stages, benefolats et formations NE COMPTENT PAS comme experience pro.
-    5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
-    6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
-    7. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE immediatement, mais le score total est conserve (il ne doit pas etre mis a 0).
-    METHODE DE RAISONNEMENT :
-    Etape 1: Analyser la structure du CV (qualite, clarte, professionnalisme)
-    Etape 2: Verifier les criteres eliminatoires UN PAR UN (avec justifications) - CRITIQUE
-    Etape 3: Si un critere eliminatoire est manquant -> REJET, mais score_total conserve
-    Etape 4: Evaluer la coherence du parcours (progression, stabilite, logique)
-    Etape 5: Identifier les competences techniques et manageriales
-    Etape 6: Detecter les signaux de qualite (resultats quantifies, certifications)
-    Etape 7: Synthetiser et donner une recommandation argumentee
-    FORMAT DE SORTIE : UNIQUEMENT du JSON valide, sans texte explicatif avant ou apres.
-    Le JSON doit contenir les champs suivants:
-    {
-        "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
-        "points_forts": ["liste des points forts du candidat"],
-        "points_vigilance": ["liste des points de vigilance"],
-        "score_total": SOMME_DES_SOUS_SCORES (0-14),
-        "synthese_recruteur": "synthese pour le recruteur",
-        "sous_scores": {
-            "experience_bancaire": 0-3,
-            "diplome": 0-3,
-            "management": 0-3,
-            "risque_credit": 0-3,
-            "coherence_parcours": 0-3,
-            "qualite_cv": 0-3
-        },
-        "checklist": {
-            "experience_bancaire": true/false,
-            "diplome_suffisant": true/false,
-            "management_detecte": true/false,
-            "risque_credit_detecte": true/false,
-            "coherence_parcours": true/false
-        }
+REGLES ABSOLUES D'ANALYSE :
+1. Tu DOIS raisonner etape par etape comme un expert humain.
+2. Tu ne JAMAIS inventer des faits qui ne sont PAS dans les documents.
+3. Si une information n'est PAS mentionnee, tu la consideres comme ABSENTE.
+4. Les stages, benefolats et formations NE COMPTENT PAS comme experience pro.
+5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
+6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
+7. Les NPL (Non-Performing Loans) sont des creances douteuses ou impayees. La gestion des NPL est un critere important pour les postes a risque.
+8. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE immediatement, mais le score total est conserve (il ne doit pas etre mis a 0).
+METHODE DE RAISONNEMENT :
+Etape 1: Analyser la structure du CV (qualite, clarte, professionnalisme)
+Etape 2: Verifier les criteres eliminatoires UN PAR UN (avec justifications) - CRITIQUE
+Etape 3: Si un critere eliminatoire est manquant -> REJET, mais score_total conserve
+Etape 4: Evaluer la coherence du parcours (progression, stabilite, logique)
+Etape 5: Identifier les competences techniques et manageriales
+Etape 6: Detecter les signaux de qualite (resultats quantifies, certifications)
+Etape 7: Synthetiser et donner une recommandation argumentee
+FORMAT DE SORTIE : UNIQUEMENT du JSON valide, sans texte explicatif avant ou apres.
+Le JSON doit contenir les champs suivants:
+{
+    "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
+    "points_forts": ["liste des points forts du candidat"],
+    "points_vigilance": ["liste des points de vigilance"],
+    "score_total": SOMME_DES_SOUS_SCORES (0-14),
+    "synthese_recruteur": "synthese pour le recruteur",
+    "sous_scores": {
+        "experience_bancaire": 0-3,
+        "diplome": 0-3,
+        "management": 0-3,
+        "risque_credit": 0-3 (0=pas d'exposition, 1=exposition limitee, 2=exposition significative, 3=exposition forte avec NPL/IFRS9),
+        "coherence_parcours": 0-3,
+        "qualite_cv": 0-3
+    },
+    "checklist": {
+        "experience_bancaire": true/false,
+        "diplome_suffisant": true/false,
+        "management_detecte": true/false,
+        "risque_credit_detecte": true/false,
+        "coherence_parcours": true/false
     }
-    NE METS PAS de texte avant ou apres le JSON. Reponds UNIQUEMENT avec le JSON."""
+}
+NE METS PAS de texte avant ou apres le JSON. Reponds UNIQUEMENT avec le JSON."""
     def fmt_list(items):
         return "\n".join(f"  {i+1}. {c}" for i, c in enumerate(items)) if items else "  (aucun)"
     user_message = f"""POSTE : {poste}
@@ -1373,11 +1376,12 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     if management_count < 2:
         flags_elim.append("Experience manageriale insuffisante")
     credit_count = 0
-    for kw in ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye']:
+    credit_keywords = ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
+    for kw in credit_keywords:
         if kw in cv_text.lower():
             credit_count += 1
     if credit_count < 3:
-        flags_elim.append("Exposition au risque de credit insuffisante")
+        flags_elim.append("Exposition au risque de credit / NPL insuffisante")
     if banking_years >= 5:
         exp_bancaire = 3
     elif banking_years >= 3:
@@ -1436,9 +1440,9 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     else:
         points_vigilance.append("Experience manageriale a renforcer")
     if risque_credit >= 2:
-        points_forts.append(f"Exposition au risque de credit (score: {risque_credit}/3)")
+        points_forts.append(f"Exposition au risque de credit / NPL (score: {risque_credit}/3)")
     else:
-        points_vigilance.append("Exposition au risque de credit limitee")
+        points_vigilance.append("Exposition au risque de credit / NPL limitee")
     if coherence >= 2:
         points_forts.append("Parcours coherent avec des postes a responsabilite")
     if qualite_cv >= 1:
@@ -1930,7 +1934,8 @@ KEYWORD_MAPPING = {
     "Minimum 1 an d'experience dans une fonction bancaire": ["EXP_BANK_1ANS"],
     "Minimum 3 ans en operations bancaires ou back-office (hors stage)": ["EXP_BACKOFFICE_3ANS"],
     "A une exposition au cycle de vie du credit bancaire": ["cycle de credit", "mise en place credit", "suivi credit", "garantie", "echeances credit", "credit administration", "administration de credit"],
-    "A une connaissance des normes comptables bancaires ou de la reglementation COBAC": ["cobac", "reglementation bancaire", "ifrs 9", "normes ifrs", "comptabilite bancaire", "syscohada", "bale ii", "bale iii"]
+    "A une connaissance des normes comptables bancaires ou de la reglementation COBAC": ["cobac", "reglementation bancaire", "ifrs 9", "normes ifrs", "comptabilite bancaire", "syscohada", "bale ii", "bale iii"],
+    "Exposition au risque de credit / NPL": ["npl", "non performing", "creances douteuses", "creances impayees", "impayes", "provision", "risque de credit", "credit risk", "portefeuille", "portfolio", "cir", "cout du risque", "creances douteuses", "creances impayees"]
 }
 EXP_MIN_YEARS_MAP = {"EXP_CREDIT_3ANS": 3.0, "EXP_BANK_1ANS": 1.0, "EXP_BACKOFFICE_3ANS": 3.0}
 DOMAIN_KEYWORDS_MAP = {"EXP_CREDIT_3ANS": ["credit", "risque", "banque", "bancaire", "institution financiere", "analyste", "charge", "gestionnaire", "loan", "credit analysis"], "EXP_BANK_1ANS": ["credit", "banque", "bancaire", "administration credit", "back office", "back-office", "risque", "risk", "analyse credit", "credit analysis", "loan", "institution financiere", "financial institution", "banking", "credit officer", "credit analyst", "credit administrator", "charge de credit", "gestionnaire credit", "analyste credit", "operations bancaires", "banking operations", "portfolio", "portefeuille", "garantie", "collateral"], "EXP_BACKOFFICE_3ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire", "banque", "bancaire", "middle office", "moyens de paiement", "traitement des operations", "chambre de compensation"]}
