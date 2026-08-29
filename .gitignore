@@ -1,3 +1,40 @@
-(server.py has been modified, but it's a source file and should not be ignored)
+```gitignore
+# Compiled and build artifacts
+*.pyc
+__pycache__/
 
-Nothing to output.
+# Dependencies
+.venv/
+venv/
+pip-tools/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Python specific
+*.py[cod]
+*$py.class
+*.so
+.Python
+```
