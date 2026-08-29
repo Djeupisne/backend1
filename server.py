@@ -84,15 +84,15 @@ try:
 except ImportError:
     SPACY_AVAILABLE = False
 try:
-    import anthropic
-    ANTHROPIC_AVAILABLE = True
+    from openai import OpenAI
+    DEEPSEEK_AVAILABLE = True
 except ImportError:
-    ANTHROPIC_AVAILABLE = False
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-IA_ANALYSE_ACTIVE = ANTHROPIC_AVAILABLE and bool(ANTHROPIC_API_KEY)
-_claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if IA_ANALYSE_ACTIVE else None
-_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "2")))
+    DEEPSEEK_AVAILABLE = False
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+IA_ANALYSE_ACTIVE = DEEPSEEK_AVAILABLE and bool(DEEPSEEK_API_KEY)
+_deepseek_client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if IA_ANALYSE_ACTIVE else None
+_ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "5")))
 _Nlp_fr = None
 _Nlp_en = None
 DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "3"))
@@ -112,22 +112,22 @@ def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BAS
                 try:
                     result = func(*args, **kwargs)
                     if attempt > 0:
-                        logger.info(f"Tentative {attempt + 1}/{max_retries} réussie pour {func.__name__}")
+                        logger.info(f"Tentative {attempt + 1}/{max_retries} reussie pour {func.__name__}")
                     return result
                 except Exception as e:
                     last_exception = e
                     error_str = str(e).lower()
                     retryable_keywords = ["errno 11", "resource temporarily unavailable", "timeout", "connection", "temporarily unavailable", "rate limit", "too many requests", "503", "502", "504", "connection refused", "connection reset"]
                     if not any(kw in error_str for kw in retryable_keywords):
-                        logger.error(f"Erreur non réessayable dans {func.__name__}: {e}")
+                        logger.error(f"Erreur non reessayable dans {func.__name__}: {e}")
                         raise
                     if attempt == max_retries - 1:
-                        logger.error(f"Échec après {max_retries} tentatives pour {func.__name__}: {e}")
+                        logger.error(f"Echec apres {max_retries} tentatives pour {func.__name__}: {e}")
                         raise
                     delay = min(base_delay * (2 ** attempt), max_delay)
                     jitter = random.uniform(0, delay * 0.3)
                     total_delay = delay + jitter
-                    logger.warning(f"Tentative {attempt + 1}/{max_retries} échouée pour {func.__name__}: {e}. Nouvel essai dans {total_delay:.2f}s")
+                    logger.warning(f"Tentative {attempt + 1}/{max_retries} echouee pour {func.__name__}: {e}. Nouvel essai dans {total_delay:.2f}s")
                     time.sleep(total_delay)
             raise last_exception
         return wrapper
@@ -168,25 +168,23 @@ def after_request(response):
 def health_check():
     return jsonify({
         'status': 'ok',
-        'message': 'RecrutBank API is running',
-        'version': 'v6.2-cumulative',
+        'message': 'RecrutBank API is running with DeepSeek',
+        'version': 'v7.0-deepseek-reasoning',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
             'reportlab_available': REPORTLAB_AVAILABLE,
             'openpyxl_available': OPENPYXL_AVAILABLE,
             'ia_available': IA_ANALYSE_ACTIVE,
+            'ia_provider': 'DeepSeek' if IA_ANALYSE_ACTIVE else 'None',
+            'reasoning_mode': True,
             'scoring_strict': True,
             'manual_status_priority': True,
             'auto_width_excel': True,
             'max_concurrent_downloads': DOWNLOAD_MAX_CONCURRENT,
             'zip_max_workers': _ZIP_MAX_WORKERS,
             'intelligent_scoring': True,
-            'date_pattern_fixed': True,
-            'advanced_date_detection': True,
-            'multi_detection_methods': True,
-            'regex_direct_extraction': True,
-            'cumulative_years': True
+            'advanced_reasoning': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -225,7 +223,7 @@ def download_file_from_supabase_robust(blob_name):
             response = supabase.storage.from_(SUPABASE_STORAGE_BUCKET).download(blob_name)
             return response
         except Exception as e:
-            logger.error(f"Erreur téléchargement {blob_name}: {e}")
+            logger.error(f"Erreur telechargement {blob_name}: {e}")
             raise
 def download_file_from_supabase(blob_name):
     if not supabase:
@@ -236,7 +234,7 @@ def download_file_from_supabase(blob_name):
     except Exception as e:
         error_str = str(e).lower()
         if any(kw in error_str for kw in ["errno 11", "resource temporarily unavailable", "timeout", "connection"]):
-            logger.warning(f"Erreur temporaire détectée, activation du mode robuste pour {blob_name}")
+            logger.warning(f"Erreur temporaire detectee, activation du mode robuste pour {blob_name}")
             return download_file_from_supabase_robust(blob_name)
         logger.error(f"Download error: {e}")
         return None
@@ -279,7 +277,7 @@ def normalize_spaces(text):
     bank_corrections = {'u b a': 'UBA', 'e c o b a n k': 'ECOBANK', 'o r a b a n k': 'ORABANK', 'u b a -': 'UBA-', 'e c o o b a n k': 'ECOBANK', 'f i n a d e v': 'FINADEV', 'w o r l d': 'WORLD', 'v i s i o n': 'VISION', 'g l s': 'GLS', 'u b a g r o u p': 'UBAGROUP', 'c o r r e c t': 'CORRECT', 's e r v i c e s': 'SERVICES', 'c o n s u l t i n g': 'CONSULTING'}
     for wrong, correct in bank_corrections.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
-    typo_corrections = {'risque de marche': 'risque de marché', 'risque marche': 'risque marché', 'market risk': 'market risk', 'taux de change': 'taux de change', 'liquidite': 'liquidité', 'competence': 'compétence', 'experience': 'expérience'}
+    typo_corrections = {'risque de marche': 'risque de marche', 'risque marche': 'risque marche', 'market risk': 'market risk', 'taux de change': 'taux de change', 'liquidite': 'liquidite', 'competence': 'competence', 'experience': 'experience'}
     for wrong, correct in typo_corrections.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
     return text.strip()
@@ -306,7 +304,7 @@ def contains_negative_context(text, keyword):
     matches = list(keyword_pattern.finditer(text))
     if not matches:
         return False
-    negative_patterns = [r"\b(pas\s+de|pas\s+d')\s*(expérience|experience|expérimenté|competence)\b", r'\b(aucun|aucune|aucuns|aucunes)\s*(expérience|experience|competence|connaissance)\b', r'\b(sans|dépourvu\s+de|manque\s+de)\s*(expérience|experience|competence)\b', r"\b(n')?(?:ai|as|a|avons|avez|ont)\s+pas\s+(?:d')?(expérience|experience|competence|connaissance)\b", r'\b(jamais\s+(?:eu|travaillé|exercé|pratiqué))\b', r"\b(peu\s+d')?expérience\b", r'\b(expérience\s+(?:limitée|insuffisante|faible|partielle))\b', r'\b(ne\s+connais\s+pas|ne\s+maîtrise\s+pas|ne\s+possède\s+pas)\b', r'\b(no\s+experience|without\s+experience|lack\s+of\s+experience)\b']
+    negative_patterns = [r"\b(pas\s+de|pas\s+d')\s*(experience|experimente|competence)\b", r'\b(aucun|aucune|aucuns|aucunes)\s*(experience|competence|connaissance)\b', r'\b(sans|depourvu\s+de|manque\s+de)\s*(experience|competence)\b', r"\b(n')?(?:ai|as|a|avons|avez|ont)\s+pas\s+(?:d')?(experience|competence|connaissance)\b", r'\b(jamais\s+(?:eu|travaille|exerce|pratique))\b', r"\b(peu\s+d')?experience\b", r'\b(experience\s+(?:limitee|insuffisante|faible|partielle))\b', r'\b(ne\s+connais\s+pas|ne\s+maitrise\s+pas|ne\s+possede\s+pas)\b', r'\b(no\s+experience|without\s+experience|lack\s+of\s+experience)\b']
     for match in matches:
         start = max(0, match.start() - 100)
         end = min(len(text), match.end() + 100)
@@ -405,12 +403,12 @@ def extract_text_from_pdf_robust(file_bytes, filename):
                     raw_text = re.sub(r'[^\w\s\.\,\:\;\-\?\!\@\#\%\&\*\(\)\-\+\=\/\'\"]', ' ', raw_text)
                     raw_text = re.sub(r'\s+', ' ', raw_text).strip()
                     if len(raw_text) > 50:
-                        logger.info(f"Extraction brute réussie avec {encoding}")
+                        logger.info(f"Extraction brute reussie avec {encoding}")
                         return normalize_unicode(raw_text)
                 except:
                     continue
         except Exception as e:
-            logger.warning(f"Extraction brute échouée: {e}")
+            logger.warning(f"Extraction brute echouee: {e}")
     return text.strip() if text.strip() else ""
 def extract_text_from_docx_robust(file_bytes):
     if not DOCX_AVAILABLE:
@@ -448,7 +446,7 @@ def extract_text_from_docx_robust(file_bytes):
             result = result[:MAX_TEXT_SIZE]
         return normalize_unicode(result)
     except Exception as e2:
-        logger.warning(f"Fallback DOCX échoué: {e2}")
+        logger.warning(f"Fallback DOCX echoue: {e2}")
     try:
         text = re.sub(r'[^\x20-\x7E\u00C0-\u017F]+', ' ', file_bytes.decode('utf-8', errors='ignore'))
         if len(text) > MAX_TEXT_SIZE:
@@ -484,13 +482,13 @@ def extract_text_robust_from_bytes(file_bytes, filename):
     text = ""
     if ext == 'pdf':
         text = extract_text_from_pdf_robust(file_bytes, filename)
-        logger.info(f"Extraction PDF {filename}: {len(text)} caractères")
+        logger.info(f"Extraction PDF {filename}: {len(text)} caracteres")
     elif ext in ('doc', 'docx'):
         text = extract_text_from_docx_robust(file_bytes)
-        logger.info(f"Extraction DOCX {filename}: {len(text)} caractères")
+        logger.info(f"Extraction DOCX {filename}: {len(text)} caracteres")
     elif ext == 'txt':
         text = extract_text_from_txt(file_bytes)
-        logger.info(f"Extraction TXT {filename}: {len(text)} caractères")
+        logger.info(f"Extraction TXT {filename}: {len(text)} caracteres")
     else:
         try:
             for encoding in ['utf-8', 'latin-1', 'cp1252']:
@@ -503,11 +501,11 @@ def extract_text_robust_from_bytes(file_bytes, filename):
             if len(text) > MAX_TEXT_SIZE:
                 text = text[:MAX_TEXT_SIZE]
             text = normalize_unicode(normalize_spaces(text))
-            logger.info(f"Extraction brute {filename}: {len(text)} caractères")
+            logger.info(f"Extraction brute {filename}: {len(text)} caracteres")
         except Exception:
             pass
     if len(text.strip()) < 30:
-        logger.warning(f"Extraction faible pour {filename}: {len(text)} caractères")
+        logger.warning(f"Extraction faible pour {filename}: {len(text)} caracteres")
     return text.strip() if text.strip() else ""
 def init_recruteur():
     try:
@@ -518,7 +516,7 @@ def init_recruteur():
     except Exception as e:
         logger.warning(f"Erreur initialisation recruteur : {e}")
 init_recruteur()
-POSTES = ["Responsable Administration de Crédit", "Analyste Crédit CCB", "Archiviste (Administration Crédit)", "Senior Finance Officer", "Market Risk Officer", "IT Réseau & Infrastructure", "Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire", "Chef de Section Compensation", "Chargé(e) d'Administration de Crédit", "Chef de Division Local Corporate", "Data Analyst Finance"]
+POSTES = ["Responsable Administration de Credit", "Analyste Credit CCB", "Archiviste (Administration Credit)", "Senior Finance Officer", "Market Risk Officer", "IT Reseau & Infrastructure", "Auditeur interne", "Chef service controle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marche", "Chef service reporting reglementaire", "Chef de Section Compensation", "Charge(e) d'Administration de Credit", "Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_ACTIFS = ["Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 def is_poste_actif(poste):
@@ -526,112 +524,112 @@ def is_poste_actif(poste):
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": [
-            "A une expérience dans le secteur bancaire ou financier réglementé",
-            "A un diplôme de niveau Bac+4 ou supérieur (Master, MBA ou équivalent)",
-            "A minimum 5 ans d'expérience professionnelle dans une banque ou institution financière",
-            "A une expérience managériale démontrée (encadrement d'équipe, pilotage d'activité commerciale)",
-            "A une exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)"
+            "A une experience dans le secteur bancaire ou financier reglemente",
+            "A un diplome de niveau Bac+4 ou superieur (Master, MBA ou equivalent)",
+            "A minimum 5 ans d'experience professionnelle dans une banque ou institution financiere",
+            "A une experience manageriale demontree (encadrement d'equipe, pilotage d'activite commerciale)",
+            "A une exposition a la gestion du risque de credit ou au suivi de la qualite d'un portefeuille (NPL, provisions)"
         ],
         "a_verifier": [
-            "A encadré et évalué une équipe commerciale ou bancaire",
-            "A assuré le suivi de la qualité du portefeuille de crédit (NPL, CIR, provisions) et rendu compte à la direction",
-            "A développé des ventes croisées (cross-selling) ou des partenariats interdépartementaux",
-            "A produit ou supervisé des rapports de performance commerciale et financière",
-            "A une exposition à la réglementation bancaire locale (COBAC, BEAC) ou internationale",
-            "A piloté une activité Corporate avec des objectifs de revenus atteints",
-            "A encadré, développé et évalué les performances d'une équipe (fixation d'objectifs, évaluations annuelles, montée en compétences)"
+            "A encadre et evalue une equipe commerciale ou bancaire",
+            "A assure le suivi de la qualite du portefeuille de credit (NPL, CIR, provisions) et rendu compte a la direction",
+            "A developpe des ventes croisees (cross-selling) ou des partenariats interdépartementaux",
+            "A produit ou supervise des rapports de performance commerciale et financiere",
+            "A une exposition a la reglementation bancaire locale (COBAC, BEAC) ou internationale",
+            "A pilote une activite Corporate avec des objectifs de revenus atteints",
+            "A encadre, developpe et evalue les performances d'une equipe (fixation d'objectifs, evaluations annuelles, montee en competences)"
         ],
         "signaux_forts": [
-            "A une expérience avérée en cross-selling avec des équipes TSG, Trade Finance ou Cash Management",
-            "A démontré un leadership fort (constitution d'équipe, développement des collaborateurs, vivier de talents)",
-            "Possède une certification bancaire (Ecobank, Moody's, ITB - Institut Technique de Banque, ou équivalent)",
-            "A une exposition aux plateformes numériques bancaires (OMNI, Cash Management ou équivalent)",
-            "Présente des résultats commerciaux quantifiés et vérifiables dans son CV (chiffres d'affaires, taux de croissance, NPS)",
-            "A développé le portefeuille Corporate avec acquisition de nouveaux clients majeurs",
-            "A une connaissance approfondie du marché corporate tchadien ou de la zone CEMAC/UEMOA"
+            "A une experience averee en cross-selling avec des equipes TSG, Trade Finance ou Cash Management",
+            "A demontre un leadership fort (constitution d'equipe, developpement des collaborateurs, vivier de talents)",
+            "Possede une certification bancaire (Ecobank, Moody's, ITB - Institut Technique de Banque, ou equivalent)",
+            "A une exposition aux plateformes numeriques bancaires (OMNI, Cash Management ou equivalent)",
+            "Presente des resultats commerciaux quantifies et verifiables dans son CV (chiffres d'affaires, taux de croissance, NPS)",
+            "A developpe le portefeuille Corporate avec acquisition de nouveaux clients majeurs",
+            "A une connaissance approfondie du marche corporate tchadien ou de la zone CEMAC/UEMOA"
         ],
         "points_attention": [
-            "Profil techniquement solide (crédit, analyse) mais sans expérience managériale ni pilotage de P&L",
-            "Expériences très courtes (moins de 2 ans par poste) sans progression hiérarchique visible",
-            "CV sans résultats chiffrés (missions décrites en responsabilités sans livrables ni indicateurs atteints)",
-            "Trous inexpliqués dans le parcours ou incohérences entre les postes déclarés"
+            "Profil techniquement solide (credit, analyse) mais sans experience manageriale ni pilotage de P&L",
+            "Experiences tres courtes (moins de 2 ans par poste) sans progression hierarchique visible",
+            "CV sans resultats chiffres (missions decrites en responsabilites sans livrables ni indicateurs atteints)",
+            "Trous inexpliques dans le parcours ou incoherences entre les postes declares"
         ]
     },
     "Chef de Section Compensation": {
-        "eliminatoire": ["A une expérience en banque ou établissement financier réglementé", "A un diplôme de niveau Bac+3 minimum (Licence, Bachelor ou équivalent)", "A minimum 3 ans d'expérience en opérations bancaires ou back-office", "A une exposition aux opérations de compensation interbancaire", "A une connaissance des règles BEAC / GIMAC ou d'un système de compensation équivalent"],
-        "a_verifier": ["Supervise quotidiennement les opérations de compensation interbancaire", "Gère les suspens, rejets et réclamations interbancaires", "Encadre et coordonne une équipe opérationnelle", "Utilise des systèmes bancaires de compensation (SYSTAC, SYGMA, SWIFT)", "Produit des reportings opérationnels ou réglementaires", "Participe à des contrôles internes, audits COBAC ou inspections réglementaires"],
-        "signaux_forts": ["Maîtrise le règlement de positions nettes dans les délais réglementaires", "A une expérience dans une banque de la zone CEMAC / UEMOA", "A réussi des audits COBAC ou contrôles internes sans réserve majeure", "Gère une équipe avec des résultats mesurables", "Maîtrise le contrôle interne et la comptabilité bancaire (SYSCOHADA)"],
-        "points_attention": ["Parcours purement comptable sans exposition aux opérations interbancaires", "Rôle uniquement administratif ou de support, sans responsabilité opérationnelle", "Absence de tout rôle managérial dans le parcours", "CV avec missions trop génériques, sans livrables ni résultats quantifiés"]
+        "eliminatoire": ["A une experience en banque ou etablissement financier reglemente", "A un diplome de niveau Bac+3 minimum (Licence, Bachelor ou equivalent)", "A minimum 3 ans d'experience en operations bancaires ou back-office", "A une exposition aux operations de compensation interbancaire", "A une connaissance des regles BEAC / GIMAC ou d'un systeme de compensation equivalent"],
+        "a_verifier": ["Supervise quotidiennement les operations de compensation interbancaire", "Gere les suspens, rejets et reclamations interbancaires", "Encadre et coordonne une equipe operationnelle", "Utilise des systemes bancaires de compensation (SYSTAC, SYGMA, SWIFT)", "Produit des reportings operationnels ou reglementaires", "Participe a des controles internes, audits COBAC ou inspections reglementaires"],
+        "signaux_forts": ["Maitrise le reglement de positions nettes dans les delais reglementaires", "A une experience dans une banque de la zone CEMAC / UEMOA", "A reussi des audits COBAC ou controles internes sans reserve majeure", "Gere une equipe avec des resultats mesurables", "Maitrise le controle interne et la comptabilite bancaire (SYSCOHADA)"],
+        "points_attention": ["Parcours purement comptable sans exposition aux operations interbancaires", "Role uniquement administratif ou de support, sans responsabilite operationnelle", "Absence de tout role managerial dans le parcours", "CV avec missions trop generiques, sans livrables ni resultats quantifies"]
     },
-    "Chargé(e) d'Administration de Crédit": {
-        "eliminatoire": ["A une expérience dans une banque ou un établissement financier réglementé", "A un diplôme de niveau Bac+3 minimum (Licence, Bachelor ou équivalent)", "A minimum 1 an d'expérience dans une fonction bancaire", "A une exposition au cycle de vie du crédit bancaire", "A une connaissance des normes comptables bancaires ou de la réglementation COBAC"],
-        "a_verifier": ["Gère le cycle complet d'un crédit (mise en place, suivi, garanties, clôture)", "Suit et sécurise les garanties (enregistrement, valorisation, renouvellement)", "Supervise les échéances et produit des alertes aux gestionnaires de portefeuille", "Détecte et remonte les impayés, dépassements ou incidents de portefeuille", "Produit des reportings de portefeuille (tableaux de bord, rapports)", "Participe à des comités de risque, audits internes ou inspections réglementaires", "Maîtrise un système bancaire de gestion du crédit (Finacle, T24, Amplitude)"],
-        "signaux_forts": ["Maîtrise la norme IFRS 9 : staging du portefeuille (Stage 1, 2, 3), ECL, provisions", "Suit et sécurise les garanties avec coordination juridique", "Produit des reportings portefeuille (encours, impayés, dépassements, couverture)", "Participe aux comités de risque et traite les anomalies", "Maîtrise les Produits de Portefeuille (PP) et la politique de crédit (GCPPM)", "A réussi des audits ou contrôles internes sans réserve majeure", "Démontre une rigueur documentaire exemplaire"],
-        "points_attention": ["Parcours purement commercial ou front-office sans exposition à l'administration des crédits", "Profil uniquement comptable (SYSCOHADA) sans gestion du cycle de crédit bancaire", "Profil exclusivement théorique (stage ou formation seule) sans expérience opérationnelle", "Expériences très courtes (< 1 an par poste) sans progression dans la fonction", "Absence de mention des outils bancaires (système de gestion du crédit, Excel avancé, reporting)"]
+    "Charge(e) d'Administration de Credit": {
+        "eliminatoire": ["A une experience dans une banque ou un etablissement financier reglemente", "A un diplome de niveau Bac+3 minimum (Licence, Bachelor ou equivalent)", "A minimum 1 an d'experience dans une fonction bancaire", "A une exposition au cycle de vie du credit bancaire", "A une connaissance des normes comptables bancaires ou de la reglementation COBAC"],
+        "a_verifier": ["Gere le cycle complet d'un credit (mise en place, suivi, garanties, cloture)", "Suit et securise les garanties (enregistrement, valorisation, renouvellement)", "Supervise les echeances et produit des alertes aux gestionnaires de portefeuille", "Detecte et remonte les impayes, depassements ou incidents de portefeuille", "Produit des reportings de portefeuille (tableaux de bord, rapports)", "Participe a des comites de risque, audits internes ou inspections reglementaires", "Maitrise un systeme bancaire de gestion du credit (Finacle, T24, Amplitude)"],
+        "signaux_forts": ["Maitrise la norme IFRS 9 : staging du portefeuille (Stage 1, 2, 3), ECL, provisions", "Suit et securise les garanties avec coordination juridique", "Produit des reportings portefeuille (encours, impayes, depassements, couverture)", "Participe aux comites de risque et traite les anomalies", "Maitrise les Produits de Portefeuille (PP) et la politique de credit (GCPPM)", "A reussi des audits ou controles internes sans reserve majeure", "Demontre une rigueur documentaire exemplaire"],
+        "points_attention": ["Parcours purement commercial ou front-office sans exposition a l'administration des credits", "Profil uniquement comptable (SYSCOHADA) sans gestion du cycle de credit bancaire", "Profil exclusivement theorique (stage ou formation seule) sans experience operationnelle", "Experiences tres courtes (< 1 an par poste) sans progression dans la fonction", "Absence de mention des outils bancaires (systeme de gestion du credit, Excel avance, reporting)"]
     },
     "Auditeur interne": {
-        "eliminatoire": ["A une expérience réelle en audit interne ou externe", "A minimum 3 ans en audit bancaire ou cabinet d'audit", "A une connaissance des normes d'audit et contrôle interne", "A un diplôme de niveau Bac+4 ou supérieur", "A une expérience en rédaction de rapports d'audit"],
-        "a_verifier": ["A réalisé des missions d'audit sur site", "Évalue les risques opérationnels", "Rédige des rapports d'audit détaillés", "Assure le suivi des recommandations", "Connaît les normes IIA / IPPF", "Maîtrise la réglementation bancaire (COBAC)", "A une expérience en audit IT ou systèmes d'information"],
-        "signaux_forts": ["Possède une certification CIA / CPA / ACCA", "A une expérience dans une banque de la zone CEMAC / UEMOA", "A participé à des inspections réglementaires", "A une expertise en audit des risques de crédit", "Maîtrise les outils d'audit (ACL, IDEA, etc.)"],
-        "points_attention": ["Profil purement comptable sans expérience d'audit", "Aucune expérience terrain en audit (uniquement du support)", "CV flou sur les missions d'audit réalisées", "Absence de connaissances en réglementation bancaire"]
+        "eliminatoire": ["A une experience reelle en audit interne ou externe", "A minimum 3 ans en audit bancaire ou cabinet d'audit", "A une connaissance des normes d'audit et controle interne", "A un diplome de niveau Bac+4 ou superieur", "A une experience en redaction de rapports d'audit"],
+        "a_verifier": ["A realise des missions d'audit sur site", "Evalue les risques operationnels", "Redige des rapports d'audit detailles", "Assure le suivi des recommandations", "Connait les normes IIA / IPPF", "Maitrise la reglementation bancaire (COBAC)", "A une experience en audit IT ou systemes d'information"],
+        "signaux_forts": ["Possede une certification CIA / CPA / ACCA", "A une experience dans une banque de la zone CEMAC / UEMOA", "A participe a des inspections reglementaires", "A une expertise en audit des risques de credit", "Maitrise les outils d'audit (ACL, IDEA, etc.)"],
+        "points_attention": ["Profil purement comptable sans experience d'audit", "Aucune experience terrain en audit (uniquement du support)", "CV flou sur les missions d'audit realisees", "Absence de connaissances en reglementation bancaire"]
     },
-    "Chef service contrôle des engagements": {
-        "eliminatoire": ["Maîtrise le risque crédit et l'analyse financière", "A une expérience significative en octroi de crédits", "A minimum 5 ans en institution financière", "A un diplôme de niveau Bac+4 ou supérieur", "A une expérience en animation de comité de crédit"],
-        "a_verifier": ["Analyse financièrement les dossiers d'entreprises", "Structure des crédits complexes", "Anime des comités de crédit", "Encadre et manage une équipe", "Maîtrise la classification des risques (IFRS 9)", "A une expérience en restructuration de dossiers sensibles", "Possède une formation en risk management"],
-        "signaux_forts": ["A géré des dossiers de crédit à enjeux importants", "A une expérience en banque Corporate", "A participé à des audits ou inspections réglementaires", "Possède une certification en risk management (FRM, PRMIA)"],
-        "points_attention": ["Profil purement commercial sans analyse financière", "Aucune expérience en analyse de risque crédit", "CV orienté relation client uniquement"]
+    "Chef service controle des engagements": {
+        "eliminatoire": ["Maitrise le risque credit et l'analyse financiere", "A une experience significative en octroi de credits", "A minimum 5 ans en institution financiere", "A un diplome de niveau Bac+4 ou superieur", "A une experience en animation de comite de credit"],
+        "a_verifier": ["Analyse financierement les dossiers d'entreprises", "Structure des credits complexes", "Anime des comites de credit", "Encadre et manage une equipe", "Maitrise la classification des risques (IFRS 9)", "A une experience en restructuration de dossiers sensibles", "Possede une formation en risk management"],
+        "signaux_forts": ["A gere des dossiers de credit a enjeux importants", "A une experience en banque Corporate", "A participe a des audits ou inspections reglementaires", "Possede une certification en risk management (FRM, PRMIA)"],
+        "points_attention": ["Profil purement commercial sans analyse financiere", "Aucune experience en analyse de risque credit", "CV oriente relation client uniquement"]
     },
     "Senior Finance Officer": {
-        "eliminatoire": ["A une expérience en reporting financier structuré", "A une exposition aux états financiers", "A minimum 3 ans en département finance ou cabinet d'audit", "A une interaction avec les auditeurs", "A un diplôme de niveau Bac+4 ou supérieur en finance/comptabilité"],
-        "a_verifier": ["Produit des états financiers", "Réalise le reporting groupe", "Connaît les normes IFRS", "Maîtrise les contraintes réglementaires", "A une expérience en consolidation de comptes", "Utilise des outils ERP (SPECTRA, CERBER, SAP)"],
-        "signaux_forts": ["A une expertise en IFRS / consolidation", "A interagi avec les commissaires aux comptes (CAC)", "Maîtrise les outils SPECTRA / CERBER / ERP", "Possède une certification ACCA, CPA ou CFA", "A une expérience en reporting groupe"],
-        "points_attention": ["Profil comptable junior sans responsabilité réelle", "Pas de responsabilité en production d'états financiers", "CV flou sur les livrables produits"]
+        "eliminatoire": ["A une experience en reporting financier structure", "A une exposition aux etats financiers", "A minimum 3 ans en departement finance ou cabinet d'audit", "A une interaction avec les auditeurs", "A un diplome de niveau Bac+4 ou superieur en finance/comptabilite"],
+        "a_verifier": ["Produit des etats financiers", "Realise le reporting groupe", "Connait les normes IFRS", "Maitrise les contraintes reglementaires", "A une experience en consolidation de comptes", "Utilise des outils ERP (SPECTRA, CERBER, SAP)"],
+        "signaux_forts": ["A une expertise en IFRS / consolidation", "A interagi avec les commissaires aux comptes (CAC)", "Maitrise les outils SPECTRA / CERBER / ERP", "Possede une certification ACCA, CPA ou CFA", "A une experience en reporting groupe"],
+        "points_attention": ["Profil comptable junior sans responsabilite reelle", "Pas de responsabilite en production d'etats financiers", "CV flou sur les livrables produits"]
     },
     "Market Risk Officer": {
-        "eliminatoire": ["A une base solide en risques de marché", "A une exposition à FX / taux / liquidité", "A minimum 3 ans en institution financière", "A un diplôme de niveau Bac+4 ou supérieur en finance/quantitatif", "Maîtrise VaR ou stress testing"],
-        "a_verifier": ["Analyse des positions de marché", "Maîtrise Excel avancé", "Connaît VBA ou Python", "Produit du reporting risque", "Connaît les produits FICC", "A une expérience en gestion ALM / liquidité"],
-        "signaux_forts": ["Maîtrise Bâle II / III", "A une expérience en modélisation de risques", "Utilise des outils de quantification (R, Python)", "Possède une certification FRM ou équivalent", "A une expérience en reporting prudentiel"],
-        "points_attention": ["CV trop théorique académique", "Aucune mention d'outils de modélisation", "Absence d'expérience en gestion de risques"]
+        "eliminatoire": ["A une base solide en risques de marche", "A une exposition a FX / taux / liquidite", "A minimum 3 ans en institution financiere", "A un diplome de niveau Bac+4 ou superieur en finance/quantitatif", "Maitrise VaR ou stress testing"],
+        "a_verifier": ["Analyse des positions de marche", "Maitrise Excel avance", "Connait VBA ou Python", "Produit du reporting risque", "Connait les produits FICC", "A une experience en gestion ALM / liquidite"],
+        "signaux_forts": ["Maitrise Bale II / III", "A une experience en modelisation de risques", "Utilise des outils de quantification (R, Python)", "Possede une certification FRM ou equivalent", "A une experience en reporting prudentiel"],
+        "points_attention": ["CV trop theorique academique", "Aucune mention d'outils de modelisation", "Absence d'experience en gestion de risques"]
     },
-    "IT Réseau & Infrastructure": {
-        "eliminatoire": ["A une expérience en réseau / infrastructure", "A une exposition à environnement critique", "A une notion de sécurité IT", "A minimum 2 ans d'expérience", "A une expérience en gestion de réseaux LAN/WAN/VPN"],
-        "a_verifier": ["Gère les réseaux LAN/WAN/VPN", "Administre des serveurs Windows/Linux", "A une connaissance du Cloud (AWS, Azure, GCP)", "Gère les incidents IT", "Assure la disponibilité des systèmes", "A une expérience en cybersécurité / firewall"],
-        "signaux_forts": ["A une certification Cisco ou Microsoft", "A une expérience en virtualisation (VMware, Hyper-V)", "A une expérience en systèmes bancaires core banking", "Maîtrise ITIL / gestion de services IT", "A une expérience en haute disponibilité / PRA/PCA"],
-        "points_attention": ["Profil trop helpdesk sans expertise réseau", "CV sans détail technique précis", "Aucune mention de sécurité informatique"]
+    "IT Reseau & Infrastructure": {
+        "eliminatoire": ["A une experience en reseau / infrastructure", "A une exposition a environnement critique", "A une notion de securite IT", "A minimum 2 ans d'experience", "A une experience en gestion de reseaux LAN/WAN/VPN"],
+        "a_verifier": ["Gere les reseaux LAN/WAN/VPN", "Administre des serveurs Windows/Linux", "A une connaissance du Cloud (AWS, Azure, GCP)", "Gere les incidents IT", "Assure la disponibilite des systemes", "A une experience en cybersecurite / firewall"],
+        "signaux_forts": ["A une certification Cisco ou Microsoft", "A une experience en virtualisation (VMware, Hyper-V)", "A une experience en systemes bancaires core banking", "Maitrise ITIL / gestion de services IT", "A une experience en haute disponibilite / PRA/PCA"],
+        "points_attention": ["Profil trop helpdesk sans expertise reseau", "CV sans detail technique precis", "Aucune mention de securite informatique"]
     },
-    "Chef service reporting réglementaire": {
-        "eliminatoire": ["A une comptabilité bancaire approfondie", "A une expérience en reporting réglementaire (BEAC, COBAC, SPECTRA)", "A minimum 5 ans en banque ou cabinet d'audit bancaire", "A un diplôme de niveau Bac+4 ou supérieur", "A une expérience en production de rapports réglementaires"],
-        "a_verifier": ["Produit des rapports réglementaires", "Effectue le contrôle de cohérence des données", "Assure la veille réglementaire bancaire", "Interagit avec les autorités de tutelle", "Maîtrise SPECTRA / CERBER / outils BEAC", "Connaît les normes COBAC"],
-        "signaux_forts": ["A une expertise en reporting prudentiel Bâle", "A une formation en comptabilité bancaire spécialisée", "A une expérience en audits réglementaires", "A participé à des inspections COBAC"],
-        "points_attention": ["Profil généraliste sans spécialisation bancaire", "Aucune expérience en reporting réglementaire", "CV flou sur les livrables produits"]
+    "Chef service reporting reglementaire": {
+        "eliminatoire": ["A une comptabilite bancaire approfondie", "A une experience en reporting reglementaire (BEAC, COBAC, SPECTRA)", "A minimum 5 ans en banque ou cabinet d'audit bancaire", "A un diplome de niveau Bac+4 ou superieur", "A une experience en production de rapports reglementaires"],
+        "a_verifier": ["Produit des rapports reglementaires", "Effectue le controle de coherence des donnees", "Assure la veille reglementaire bancaire", "Interagit avec les autorites de tutelle", "Maitrise SPECTRA / CERBER / outils BEAC", "Connait les normes COBAC"],
+        "signaux_forts": ["A une expertise en reporting prudentiel Bale", "A une formation en comptabilite bancaire specialisee", "A une experience en audits reglementaires", "A participe a des inspections COBAC"],
+        "points_attention": ["Profil generaliste sans specialisation bancaire", "Aucune experience en reporting reglementaire", "CV flou sur les livrables produits"]
     },
-    "Archiviste (Administration Crédit)": {
-        "eliminatoire": ["A une expérience en gestion documentaire structurée", "Démontre une rigueur dans son parcours", "A une expérience en archivage physique et électronique", "A une expérience en gestion de dossiers sensibles"],
-        "a_verifier": ["Gère l'archivage physique et électronique", "Manipule des garanties ou contrats", "Utilise des systèmes GED", "Assure la traçabilité des documents", "Applique les procédures d'archivage", "A une expérience en banque ou juridique"],
-        "signaux_forts": ["A une expérience en banque ou secteur juridique", "Manipule des garanties ou contrats", "A une certification en gestion documentaire", "A une expérience en dématérialisation"],
-        "points_attention": ["Profil trop généraliste", "CV désorganisé sans expérience documentaire", "Absence de mention de GED ou d'archivage numérique"]
+    "Archiviste (Administration Credit)": {
+        "eliminatoire": ["A une experience en gestion documentaire structuree", "Demontre une rigueur dans son parcours", "A une experience en archivage physique et electronique", "A une experience en gestion de dossiers sensibles"],
+        "a_verifier": ["Gere l'archivage physique et electronique", "Manipule des garanties ou contrats", "Utilise des systemes GED", "Assure la tracabilite des documents", "Applique les procedures d'archivage", "A une experience en banque ou juridique"],
+        "signaux_forts": ["A une experience en banque ou secteur juridique", "Manipule des garanties ou contrats", "A une certification en gestion documentaire", "A une experience en dematerialisation"],
+        "points_attention": ["Profil trop generaliste", "CV desorganise sans experience documentaire", "Absence de mention de GED ou d'archivage numerique"]
     },
-    "Responsable Administration de Crédit": {
-        "eliminatoire": ["A une expérience bancaire significative (minimum 3 ans en crédit/risque)", "A une exposition aux garanties ou à la conformité", "A un diplôme de niveau Bac+4 ou supérieur", "A une expérience en validation de dossiers de crédit", "A une expérience en gestion des garanties"],
-        "a_verifier": ["A validé des dossiers de crédit", "A géré des garanties", "A participé à des audits", "Connaît IFRS 9", "Connaît COBAC / conformité", "A suivi un portefeuille / impayés"],
-        "signaux_forts": ["Maîtrise IFRS 9", "Maîtrise COBAC / conformité", "A suivi un portefeuille avec résultats", "A participé à des comités de crédit", "Possède une certification en risk management"],
-        "points_attention": ["Parcours trop comptable pur", "Rôle uniquement administratif sans responsabilité", "CV flou avec missions génériques"]
+    "Responsable Administration de Credit": {
+        "eliminatoire": ["A une experience bancaire significative (minimum 3 ans en credit/risque)", "A une exposition aux garanties ou a la conformite", "A un diplome de niveau Bac+4 ou superieur", "A une experience en validation de dossiers de credit", "A une experience en gestion des garanties"],
+        "a_verifier": ["A valide des dossiers de credit", "A gere des garanties", "A participe a des audits", "Connait IFRS 9", "Connait COBAC / conformite", "A suivi un portefeuille / impayes"],
+        "signaux_forts": ["Maitrise IFRS 9", "Maitrise COBAC / conformite", "A suivi un portefeuille avec resultats", "A participe a des comites de credit", "Possede une certification en risk management"],
+        "points_attention": ["Parcours trop comptable pur", "Role uniquement administratif sans responsabilite", "CV flou avec missions generiques"]
     },
-    "Analyste Crédit CCB": {
-        "eliminatoire": ["A une expérience en analyse crédit", "A une capacité à lire des états financiers", "A minimum 3 ans en institution financière", "A un diplôme de niveau Bac+4 ou supérieur en finance", "A une expérience en structuration de crédit"],
-        "a_verifier": ["A travaillé avec des clients PME", "A travaillé avec des clients particuliers", "A structuré des crédits", "A rédigé des avis de crédit", "A réalisé des analyses financières (cash-flow)", "A participé à des comités de crédit"],
-        "signaux_forts": ["Maîtrise l'analyse cash-flow", "A monté des crédits complexes", "A participé à des comités de crédit", "A une certification en analyse financière"],
-        "points_attention": ["CV trop relation client sans analyse", "Aucune notion de risque", "Expériences très courtes sans progression"]
+    "Analyste Credit CCB": {
+        "eliminatoire": ["A une experience en analyse credit", "A une capacite a lire des etats financiers", "A minimum 3 ans en institution financiere", "A un diplome de niveau Bac+4 ou superieur en finance", "A une experience en structuration de credit"],
+        "a_verifier": ["A travaille avec des clients PME", "A travaille avec des clients particuliers", "A structure des credits", "A redige des avis de credit", "A realise des analyses financieres (cash-flow)", "A participe a des comites de credit"],
+        "signaux_forts": ["Maitrise l'analyse cash-flow", "A monte des credits complexes", "A participe a des comites de credit", "A une certification en analyse financiere"],
+        "points_attention": ["CV trop relation client sans analyse", "Aucune notion de risque", "Experiences tres courtes sans progression"]
     },
     "Data Analyst Finance": {
-        "eliminatoire": ["A une formation en Finance, Comptabilité, Contrôle de gestion, Statistiques, Data Analytics ou Informatique décisionnelle", "A un diplôme de niveau Bac+3 ou supérieur", "A une expérience en analyse financière, reporting financier, contrôle de gestion, audit ou data analytics", "Maîtrise Excel (TCD, formules, Power Query) - compétence incontournable", "A des connaissances en comptabilité et en états financiers (P&L, bilan, flux de trésorerie)"],
-        "a_verifier": ["A produit des rapports financiers périodiques (mensuels, trimestriels)", "A conçu ou maintenu des tableaux de bord financiers (Power BI, Excel ou autre outil BI)", "A réalisé des analyses Budget / Réalisé / N-1 avec identification des écarts", "A travaillé avec SQL pour extraire ou interroger des données financières", "A assuré la réconciliation de données multi-sources (comptabilité / systèmes opérationnels)", "A participé à l'élaboration d'un budget ou d'un forecast financier", "A une expérience dans le secteur bancaire ou avec un Core Banking (FLEXCUBE, T24, Amplitude)"],
-        "signaux_forts": ["Maîtrise explicite de Power BI (dashboards, DAX, Power Query) avec exemples concrets", "Expérience avérée en automatisation de reportings (Power Query, VBA, Python, outils ETL)", "Analyse d'écarts Budget / Réalisé / N-1 avec présentation à la Direction Financière ou à la DG", "Participation à la construction de modèles de prévision financière ou d'analyses de scénarios", "Exposition aux données bancaires : PNB, NPL, coût du risque, rentabilité par agence ou produit", "Maîtrise de SQL pour l'extraction et la manipulation de données en base relationnelle", "Connaissance de Python ou R pour des analyses statistiques avancées", "Mise en place de contrôles qualité sur les données et documentation des règles de calcul", "Résultats quantifiés dans le CV : gains de productivité, délais réduits, anomalies détectées"],
-        "points_attention": ["Profil purement comptable sans exposition aux outils BI ou au reporting de gestion", "Profil exclusivement IT / développeur sans connaissance financière", "Expérience uniquement académique ou stage sans production de reportings réels en environnement professionnel", "CV sans aucun outil cité nommément", "Missions décrites en termes génériques sans livrables précis ni résultats mesurables", "Trous inexpliqués dans le parcours ou expériences très courtes sans progression visible"]
+        "eliminatoire": ["A une formation en Finance, Comptabilite, Controle de gestion, Statistiques, Data Analytics ou Informatique decisionnelle", "A un diplome de niveau Bac+3 ou superieur", "A une experience en analyse financiere, reporting financier, controle de gestion, audit ou data analytics", "Maitrise Excel (TCD, formules, Power Query) - competence incontournable", "A des connaissances en comptabilite et en etats financiers (P&L, bilan, flux de tresorerie)"],
+        "a_verifier": ["A produit des rapports financiers periodiques (mensuels, trimestriels)", "A conçu ou maintenu des tableaux de bord financiers (Power BI, Excel ou autre outil BI)", "A realise des analyses Budget / Realise / N-1 avec identification des ecarts", "A travaille avec SQL pour extraire ou interroger des donnees financieres", "A assure la reconciliation de donnees multi-sources (comptabilite / systemes operationnels)", "A participe a l'elaboration d'un budget ou d'un forecast financier", "A une experience dans le secteur bancaire ou avec un Core Banking (FLEXCUBE, T24, Amplitude)"],
+        "signaux_forts": ["Maitrise explicite de Power BI (dashboards, DAX, Power Query) avec exemples concrets", "Experience averee en automatisation de reportings (Power Query, VBA, Python, outils ETL)", "Analyse d'ecarts Budget / Realise / N-1 avec presentation a la Direction Financiere ou a la DG", "Participation a la construction de modeles de prevision financiere ou d'analyses de scenarios", "Exposition aux donnees bancaires : PNB, NPL, cout du risque, rentabilite par agence ou produit", "Maitrise de SQL pour l'extraction et la manipulation de donnees en base relationnelle", "Connaissance de Python ou R pour des analyses statistiques avancees", "Mise en place de controles qualite sur les donnees et documentation des regles de calcul", "Resultats quantifies dans le CV : gains de productivite, delais reduits, anomalies detectees"],
+        "points_attention": ["Profil purement comptable sans exposition aux outils BI ou au reporting de gestion", "Profil exclusivement IT / developpeur sans connaissance financiere", "Experience uniquement academique ou stage sans production de reportings reels en environnement professionnel", "CV sans aucun outil cite nommement", "Missions decrites en termes generiques sans livrables precis ni resultats mesurables", "Trous inexpliques dans le parcours ou experiences tres courtes sans progression visible"]
     }
 }
-POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"]
-POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"]
+POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service controle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marche", "Chef service reporting reglementaire"]
+POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Charge(e) d'Administration de Credit"]
 POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate", "Data Analyst Finance"]
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
@@ -647,21 +645,21 @@ def get_recommandation_from_score(score, poste=None):
         if s >= 10:
             return "Entretien prioritaire"
         elif s >= 7:
-            return "Potentiel à évaluer en entretien"
+            return "Potentiel a evaluer en entretien"
         else:
             return "Rejet"
     if poste and poste in POSTES_AVEC_SCORING_14:
         if s >= 11:
             return "Entretien prioritaire"
         elif s >= 7:
-            return "Potentiel à évaluer en entretien"
+            return "Potentiel a evaluer en entretien"
         else:
             return "Rejet"
     if poste and poste in POSTES_AVEC_SCORING_100:
         if s >= 80:
             return "Shortlist"
         elif s >= 70:
-            return "À considérer"
+            return "A considerer"
         elif s >= 60:
             return "Faible"
         else:
@@ -669,7 +667,7 @@ def get_recommandation_from_score(score, poste=None):
     if s >= 8:
         return "Entretien prioritaire"
     elif s >= 5:
-        return "Potentiel à évaluer en entretien"
+        return "Potentiel a evaluer en entretien"
     else:
         return "Rejet"
 def get_statut_from_decision(decision):
@@ -677,14 +675,35 @@ def get_statut_from_decision(decision):
         return 'en_attente'
     if "Entretien prioritaire" in decision or "Shortlist" in decision:
         return "retenu"
-    elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
+    elif "Potentiel" in decision or "considerer" in decision or "Faible" in decision:
         return "entretien"
     else:
         return "rejete"
 def split_into_jobs(raw_text):
-    separators = re.compile(r"(?:^|\n)(?=\s*(?:(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*(?:20\d{2}|19\d{2})|\d{1,2}[/\-\.](?:20\d{2}|19\d{2})|(?:depuis|de |from |since |desde |a partir de |starting |beginning)))", re.IGNORECASE | re.MULTILINE)
-    blocks = separators.split(raw_text)
-    return [b.strip() for b in blocks if b.strip()]
+    if not raw_text:
+        return []
+    text = re.sub(r'\s+', ' ', raw_text)
+    patterns = [
+        r'(?:^|\n)(?=\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2})\s*[-–—])',
+        r'(?:^|\n)(?=\s*(?:de|du|d[eu]|from|since)\s+(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}))',
+        r'(?:^|\n)(?=\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2})\s*[-–—]\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}|present|current))',
+        r'(?:^|\n)(?=\s*(?:[A-Z][A-Z\s]+)\s*(?:-|–|—)\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}))',
+    ]
+    blocks = []
+    positions = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            positions.append(match.start())
+    positions = sorted(set(positions))
+    if not positions:
+        return [text.strip()] if text.strip() else []
+    for i, pos in enumerate(positions):
+        start = pos
+        end = positions[i + 1] if i + 1 < len(positions) else len(text)
+        block = text[start:end].strip()
+        if block:
+            blocks.append(block)
+    return blocks
 STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b', r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b', r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b', r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b']
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
 def is_stage_block(block_text):
@@ -695,11 +714,13 @@ def extract_duration_years_from_block(block_text):
     _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
     text = text.translate(_ACCENT_MAP)
     duration_patterns = [
-        r'(\d+[\.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)',
-        r'\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',
-        r'\w+\s+\(\s*(\d+)\s*\)\s*(?:ans?|annee?s?|years?)',
-        r'plus\s+de\s+(\d+)\s*(?:ans?|annee?s?|years?)',
-        r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:ans?|annee?s?)'
+        r'(\d+[.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)',
+        r'\(\s*(\d+[.,]?\d*)\s*\)\s*(?:ans?|annee?s?|years?)',
+        r'\w+\s+\(\s*(\d+[.,]?\d*)\s*\)\s*(?:ans?|annee?s?|years?)',
+        r'plus\s+de\s+(\d+[.,]?\d*)\s*(?:ans?|annee?s?|years?)',
+        r'depuis\s+(?:plus\s+de\s+)?(\d+[.,]?\d*)\s*(?:ans?|annee?s?)',
+        r'(\d+[.,]?\d*)\s*(?:ans?|annee?s?|years?)\s+(?:d[ée]?experience|dans|en|de)',
+        r'experience\s+(?:de\s+)?(\d+[.,]?\d*)\s*(?:ans?|annee?s?)'
     ]
     for dp in duration_patterns:
         m = re.search(dp, text)
@@ -749,10 +770,8 @@ def extract_duration_years_from_block(block_text):
                 if start_year and end_year:
                     delta = end_year - start_year
                     if 0 < delta <= 40:
-                        logger.debug(f"Date détectée: {start_year}-{end_year} = {delta} ans")
                         return round(float(delta), 1)
-            except (ValueError, IndexError, TypeError) as e:
-                logger.debug(f"Erreur parsing date: {e}")
+            except (ValueError, IndexError, TypeError):
                 continue
     pattern_present = re.compile(r"(?:(janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|jan|fev|mar|avr|juil|aou|sep|oct|nov|dec)\s*)?(20\d{2}|19\d{2})\s*(?:a|-|–|—|au|jusqu'au|to|until|au\s+)?\s*(?:aujourd'hui|present|actuel|en cours|now|current|actual|hoje|ce jour|nos\s+jours|a\s+nos\s+jours)", re.IGNORECASE)
     m = pattern_present.search(text)
@@ -810,13 +829,13 @@ def detect_institution_type(text):
     text_lower = text.lower()
     commercial_banks = [
         'ecobank', 'orabank', 'uba', 'bicec', 'sgbc', 'cbc', 'bct',
-        'société générale', 'standard chartered', 'nsia banque',
+        'societe generale', 'standard chartered', 'nsia banque',
         'commercial bank', 'banque commerciale', 'investment bank',
         'banque d affaires', 'credit institution', 'financial institution',
         'banque', 'express union', 'coris bank', 'orabank tchad',
         'uba tchad', 'commercial bank tchad', 'cbt', 'finadev',
         'united bank for africa', 'banque islamique', 'microfinance',
-        'orabank tchad', 'commercial bank tchad', 'societe generale', 'sogé'
+        'orabank tchad', 'commercial bank tchad', 'societe generale', 'soge'
     ]
     commercial_pattern = re.compile(r'\b(' + '|'.join(re.escape(b) for b in commercial_banks) + r')\b', re.IGNORECASE)
     if commercial_pattern.search(text_lower):
@@ -832,13 +851,13 @@ def detect_language(text):
         return 'fr'
 def extract_quantified_results(text):
     patterns = [
-        r'(\d+)\s*(?:%|pourcent|percent)\s*(?:d\'|de\s+)?(augmentation|croissance|réduction|reduction|hausse|baisse)',
-        r'(augmentation|croissance|réduction|reduction|hausse|baisse)\s+(?:de\s+)?(\d+)',
+        r'(\d+)\s*(?:%|pourcent|percent)\s*(?:d\'|de\s+)?(augmentation|croissance|reduction|hausse|baisse)',
+        r'(augmentation|croissance|reduction|hausse|baisse)\s+(?:de\s+)?(\d+)',
         r'(\d+)\s*(?:millions|milliards|M|B|K)\s*(?:€|\$|FCFA|XOF)',
         r'CA\s*(?:de|:)?\s*(\d+)',
         r'chiffre\s*d\'affaires\s*(?:de|:)?\s*(\d+)',
         r'portefeuille\s*(?:de|:)?\s*(\d+)',
-        r'clients\s*(?:acquis|développés|développes)?\s*(?:de|:)?\s*(\d+)',
+        r'clients\s*(?:acquis|developpes)?\s*(?:de|:)?\s*(\d+)',
         r'\b(?:NPL|CIR|provisions?)\s*(?:de|:)?\s*(\d+(?:[.,]\d+)?)\s*%',
     ]
     results = []
@@ -856,11 +875,11 @@ def detect_banking_experience_years(text):
         years_int = sorted([int(y) for y in years])
         total_years = years_int[-1] - years_int[0]
         if total_years > 0 and total_years < 50:
-            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
+            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'credit', 'institution financiere']
             for kw in bank_keywords:
                 if kw in text_lower:
                     return total_years
-    match = re.search(r'(\d+)\s*(?:ans|années?)\s*(?:d[ée]?expérience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', text, re.IGNORECASE)
+    match = re.search(r'(\d+)\s*(?:ans|annees?)\s*(?:d[ée]?experience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque)', text, re.IGNORECASE)
     if match:
         return float(match.group(1))
     match = re.search(r'depuis\s+(19|20)\d{2}', text, re.IGNORECASE)
@@ -875,7 +894,7 @@ def detect_banking_experience_years(text):
             continue
         block_lower = block.lower()
         is_banking = False
-        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere']
+        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'credit', 'institution financiere']
         for kw in banking_keywords:
             if kw in block_lower:
                 is_banking = True
@@ -892,9 +911,9 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
     if not keywords:
         return False, 0.5, []
     semantic_expansions = {
-        "management": ["manager", "leadership", "supervision", "coordination", "direction", "pilotage", "encadrement", "gestion d'équipe", "management d'équipe", "team management", "team lead", "superviseur"],
-        "cross-selling": ["ventes croisées", "cross selling", "cross-selling", "synergie commerciale", "commercial synergy", "partenariat", "partnership", "collaboration commerciale"],
-        "risk": ["risque", "risk", "NPL", "non performing", "provisions", "IFRS 9", "crédit", "credit", "portefeuille", "portfolio", "CIR", "coût du risque"],
+        "management": ["manager", "leadership", "supervision", "coordination", "direction", "pilotage", "encadrement", "gestion d'equipe", "management d'equipe", "team management", "team lead", "superviseur"],
+        "cross-selling": ["ventes croisees", "cross selling", "cross-selling", "synergie commerciale", "commercial synergy", "partenariat", "partnership", "collaboration commerciale"],
+        "risk": ["risque", "risk", "NPL", "non performing", "provisions", "IFRS 9", "credit", "credit", "portefeuille", "portfolio", "CIR", "cout du risque"],
         "corporate": ["corporate", "grandes entreprises", "large entreprises", "entreprises", "clients corporate", "corporate clients", "grands comptes", "key accounts"],
         "certification": ["certification", "certificat", "certified", "ITB", "Moody's", "Ecobank", "MBA", "Master", "formation"]
     }
@@ -929,478 +948,248 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
                     for syn in synonyms:
                         syn_clean, _ = normalize_for_matching(syn)
                         if syn_clean in text_clean:
-                            found_kws.append(f"{syn} (sémantique)")
+                            found_kws.append(f"{syn} (semantique)")
                             best_score = max(best_score, 0.75)
     threshold = 0.45 if len(normalized_text) < 500 else 0.55
     return best_score >= threshold, round(best_score, 2), found_kws
+def analyze_cv_with_deepseek_reasoning(cv_text, lettre_text, attestation_texts_list, poste):
+    if not IA_ANALYSE_ACTIVE or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
+        return None
+    grille = GRILLE.get(poste, {})
+    system_prompt = """Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
+    REGLES ABSOLUES D'ANALYSE :
+    1. Tu DOIS raisonner etape par etape comme un expert humain.
+    2. Tu ne JAMAIS inventer des faits qui ne sont PAS dans les documents.
+    3. Si une information n'est PAS mentionnee, tu la consideres comme ABSENTE.
+    4. Les stages, benefolats et formations NE COMPTENT PAS comme experience pro.
+    5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
+    6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
+    METHODE DE RAISONNEMENT :
+    Etape 1: Analyser la structure du CV (qualite, clarte, professionnalisme)
+    Etape 2: Verifier les criteres eliminatoires UN PAR UN (avec justifications)
+    Etape 3: Evaluer la coherence du parcours (progression, stabilite, logique)
+    Etape 4: Identifier les competences techniques et manageriales
+    Etape 5: Detecter les signaux de qualite (resultats quantifies, certifications)
+    Etape 6: Synthetiser et donner une recommandation argumentee
+    FORMAT DE SORTIE : Structure JSON avec des scores et des justifications detaillees."""
+    def fmt_list(items):
+        return "\n".join(f"  {i+1}. {c}" for i, c in enumerate(items)) if items else "  (aucun)"
+    user_message = f"""POSTE : {poste}
+=== GRILLE D'EVALUATION ===
+CRITERES ELIMINATOIRES (rejet immediat si non valide) :
+{fmt_list(grille.get('eliminatoire', []))}
+POINTS A VERIFIER (qualite du profil) :
+{fmt_list(grille.get('a_verifier', []))}
+SIGNAUX FORTS (bonus, profil prioritaire) :
+{fmt_list(grille.get('signaux_forts', []))}
+POINTS D'ATTENTION (red flags a verifier) :
+{fmt_list(grille.get('points_attention', []))}
+=== DOCUMENTS DU CANDIDAT ===
+CV :
+{cv_text[:12000]}
+LETTRE DE MOTIVATION :
+{lettre_text[:3000] if lettre_text else '(Aucune lettre fournie)'}
+ATTESTATIONS/CERTIFICATS :
+{''.join(attestation_texts_list)[:3000] if attestation_texts_list else '(Aucune attestation)'}
+=== INSTRUCTIONS ===
+1. Analyse le CV comme un expert RH.
+2. RAISONNE ETAPE PAR ETAPE avant de conclure.
+3. Donne des SCORES JUSTIFIES sur chaque critere.
+4. Identifie les FORCES et FAIBLESSES du profil.
+5. Produis une SYNTHESE claire et actionable pour le recruteur.
+6. Utilise le format JSON attendu."""
+    try:
+        with _ia_semaphore:
+            response = _deepseek_client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.1,
+                max_tokens=4096,
+                response_format={"type": "json_object"}
+            )
+        result_text = response.choices[0].message.content
+        logger.info(f"Analyse DeepSeek terminee: {len(result_text)} caracteres")
+        try:
+            analyse = json.loads(result_text)
+        except json.JSONDecodeError:
+            import re as re_json
+            json_match = re_json.search(r'\{[\s\S]*\}', result_text)
+            if json_match:
+                analyse = json.loads(json_match.group())
+            else:
+                logger.error("Impossible de parser la reponse DeepSeek")
+                return None
+        flags_elim = analyse.get('flags_eliminatoires', [])
+        if isinstance(flags_elim, list):
+            flags_elim = [f for f in flags_elim if f]
+        else:
+            flags_elim = []
+        lm = analyse.get('lettre_motivation', {})
+        if lm.get('eliminatoire', False):
+            flags_elim.append(f"Lettre: {lm.get('commentaire', 'eliminatoire')}")
+        score_total = 0 if flags_elim else int(analyse.get('score_total', 0))
+        score_max = get_score_max_for_poste(poste)
+        decision = get_recommandation_from_score(score_total, poste)
+        points_forts = analyse.get('points_forts', [])
+        points_vigilance = analyse.get('points_vigilance', [])
+        synthese = analyse.get('synthese_recruteur', '')
+        sous_scores = analyse.get('sous_scores', {})
+        details = {
+            'moteur': 'DeepSeek Reasoning v2',
+            'model': DEEPSEEK_MODEL,
+            'analyse_raw': analyse,
+            'points_forts': points_forts,
+            'points_vigilance': points_vigilance,
+            'synthese_recruteur': synthese,
+            'raisonnement_detaille': analyse.get('raisonnement', '')
+        }
+        return {
+            'score': score_total,
+            'score_max': score_max,
+            'decision': decision,
+            'flags_eliminatoires': flags_elim,
+            'sous_scores': sous_scores,
+            'checklist': analyse.get('checklist', {}),
+            'signaux_detectes': analyse.get('signaux_detectes', []),
+            'points_forts': points_forts,
+            'points_vigilance': points_vigilance,
+            'synthese': synthese,
+            'details': details
+        }
+    except Exception as e:
+        logger.error(f"Erreur analyse DeepSeek: {e}")
+        return None
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
-    """
-    Analyse INTELLIGENTE et RAISONNÉE pour le poste de Chef de Division Local Corporate.
-    Applique strictement la grille de présélection avec raisonnement d'expert recrutement bancaire.
-    Score total : /14 points
-    """
     poste = "Chef de Division Local Corporate"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
-    raw_lower = raw_full.lower()
-    
-    # =========================================================================
-    # ÉTAPE 1 : CRITÈRES ÉLIMINATOIRES (FILTRE DUR - Rejet immédiat si échec)
-    # =========================================================================
-    flags_eliminatoires = []
-    eliminatoire_failed = False
-    
-    # Critère éliminatoire 1 : Expérience secteur bancaire/financier réglementé
-    banking_keywords = ['banque', 'bancaire', 'établissement bancaire', 'institution bancaire', 
-                        'institution financière', 'secteur bancaire', 'groupe bancaire', 
-                        'ecobank', 'orabank', 'uba', 'bicec', 'sgc', 'afriland', 'standard chartered',
-                        'microfinance', 'credit institution', 'financial institution', 'banking']
-    has_banking_experience = any(kw in raw_lower for kw in banking_keywords)
-    
-    # Vérification avancée : détection des noms de banques africaines
-    african_banks = ['ecobank', 'orabank', 'uba', 'bicec', 'société générale', 'sgc', 'afriland first bank',
-                     'commercial bank', 'union bank', 'zenith bank', 'first bank', 'access bank',
-                     'scb', 'standard chartered', 'citibank', 'hsbc', 'nbad', 'bicic', 'bgfi', 'ucec',
-                     'finadev', 'renaprov', 'mc2', 'cefam', 'padme', 'lokoli', 'advans', 'alafia']
-    for bank in african_banks:
-        if bank in raw_lower:
-            has_banking_experience = True
-            break
-    
-    if not has_banking_experience:
-        flags_eliminatoires.append("Aucune expérience dans le secteur bancaire ou financier réglementé")
-        eliminatoire_failed = True
-    
-    # Critère éliminatoire 2 : Niveau diplôme Bac+4 minimum
-    has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd|bac\+[5-9]|bac [5-9]', cv_text, re.IGNORECASE))
-    has_bac4 = bool(re.search(r'bac\+4|bac 4|maîtrise|maitrise|licence.*professionnelle|diplôm.*bac\+4', cv_text, re.IGNORECASE))
-    diplome_suffisant = has_master or has_bac4
-    
-    if not diplome_suffisant:
-        flags_eliminatoires.append("Niveau de diplôme inférieur à Bac+4 (Master ou équivalent requis)")
-        eliminatoire_failed = True
-    
-    # Critère éliminatoire 3 : Minimum 5 ans d'expérience dont partie significative en banque
     banking_years = detect_banking_experience_years(raw_full)
-    # Fonction helper pour détecter années d'expérience bancaire
-    exp_pattern = r'(?:expérien[cc]e?|parcours|carrière|activité).*?(\\d+)\\s*(?:ans|années)'
-    matches = re.findall(exp_pattern, raw_lower)
-    total_years = sum(int(m) for m in matches) if matches else 0
-    
-    # Comptage sophistiqué des années bancaires
-    if banking_years < 5:
-        # Tentative d'extraction depuis les blocs de poste
-        blocks = split_into_jobs(cv_text)
-        banking_total = 0.0
-        for block in blocks:
-            if is_stage_block(block):
-                continue
-            block_lower = block.lower()
-            if any(bk in block_lower for bk in banking_keywords + african_banks):
-                duration = extract_duration_years_from_block(block)
-                if duration > 0:
-                    banking_total += duration
-        if banking_total >= 5:
-            banking_years = banking_total
-    
-    if banking_years < 5:
-        flags_eliminatoires.append(f"Moins de 5 ans d'expérience professionnelle en banque ({banking_years:.1f} ans identifiés)")
-        eliminatoire_failed = True
-    
-    # Critère éliminatoire 4 : Expérience managériale (encadrement OU pilotage activité commerciale)
-    management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 
-                          'leadership', 'gestion d\'équipe', 'responsable', 'head of', 'team leader',
-                          'supervision', 'coordinateur', 'pilote', 'animation d\'équipe', 'n+1']
-    management_indicators = sum(1 for kw in management_keywords if kw in raw_lower)
-    
-    # Recherche de preuves concrètes de management
-    has_team_size = bool(re.search(r'\\d+\\s*(?:collaborateurs|personnes|équipes|salariés|employés|subordonnés)', raw_lower))
-    has_objectives = bool(re.search(r'(objectifs|cibles|targets|budget|performance).*?(?:définir|fixer|atteindre|suivre)', raw_lower))
-    has_evaluation = bool(re.search(r'(évaluation|appréciation|review|entretien).*?(?:annuel|périodique|collaborateur)', raw_lower))
-    
-    management_proven = management_indicators >= 3 or has_team_size or (has_objectives and has_evaluation)
-    
-    if not management_proven:
-        flags_eliminatoires.append("Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale")
-        eliminatoire_failed = True
-    
-    # Critère éliminatoire 5 : Exposition gestion risque crédit / qualité portefeuille (NPL, provisions)
-    credit_risk_keywords = ['risque de crédit', 'credit risk', 'npl', 'non-performing loan', 'créances douteuses',
-                           'provisions', 'provisionnement', 'qualité portefeuille', 'portefeuille crédit',
-                           'impayés', 'contentieux crédit', 'recouvrement', 'classement crédit',
-                           'surveillance portefeuille', 'watchlist', 'ifrs 9', 'staging', 'ecl',
-                           'taux défaut', 'rating crédit', 'scoring crédit', 'garanties']
-    credit_risk_count = sum(1 for kw in credit_risk_keywords if kw in raw_lower)
-    
-    # Recherche spécifique NPL/CIR/provisions
-    has_npl = bool(re.search(r'npl|taux.*(douteux|improductif)|créances.*douteuses|non-performing', raw_lower))
-    has_provisions = bool(re.search(r'provision|provisionnement|perte.*crédit|impairment', raw_lower))
-    has_portfolio_quality = bool(re.search(r'qualité.*portefeuille|monitoring.*portefeuille|surveillance.*crédit', raw_lower))
-    
-    credit_risk_exposure = credit_risk_count >= 3 or has_npl or has_provisions or has_portfolio_quality
-    
-    if not credit_risk_exposure:
-        flags_eliminatoires.append("Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)")
-        eliminatoire_failed = True
-    
-    # Si critère éliminatoire échoué → score 0, rejet immédiat
-    if eliminatoire_failed:
-        return {
-            'score': 0,
-            'score_max': 14,
-            'decision': "Rejet",
-            'flags_eliminatoires': flags_eliminatoires,
-            'checklist': {},
-            'sous_scores': {
-                "Adéquation structurelle": 0,
-                "Capacité managériale": 0,
-                "Maîtrise risque crédit": 0,
-                "Cross-selling/TSG": 0,
-                "Cohérence parcours": 0,
-                "Qualité CV/Lettre": 0,
-                "Certifications": 0
-            },
-            'points_forts': [],
-            'points_vigilance': flags_eliminatoires,
-            'synthese': f"Candidature rejetée - Non-conformité aux critères éliminatoires : {'; '.join(flags_eliminatoires)}",
-            'raisonnement_recruteur': {
-                'critere_1_banque': {'valide': has_banking_experience, 'detail': f'Expérience bancaire détectée: {has_banking_experience}'},
-                'critere_2_diplome': {'valide': diplome_suffisant, 'detail': f'Bac+4+: {diplome_suffisant} (Master: {has_master}, Bac+4: {has_bac4})'},
-                'critere_3_experience': {'valide': banking_years >= 5, 'detail': f'Années banque: {banking_years:.1f}/5 requis'},
-                'critere_4_management': {'valide': management_proven, 'detail': f'Management prouvé: {management_proven} (indicateurs: {management_indicators})'},
-                'critere_5_risque_credit': {'valide': credit_risk_exposure, 'detail': f'Exposition risque crédit: {credit_risk_exposure} (NPL: {has_npl}, Provisions: {has_provisions})'}
-            }
-        }
-    
-    # =========================================================================
-    # ÉTAPE 2 : POINTS À VÉRIFIER (Score Bloc 2 - max 3 points)
-    # =========================================================================
-    points_a_verifier = 0
-    validations_details = []
-    
-    # Point 1 : Encadrement et évaluation équipe commerciale/bancaire
-    if management_proven:
-        points_a_verifier += 0.5
-        validations_details.append("Encadrement équipe confirmé")
-    
-    # Point 2 : Suivi qualité portefeuille crédit (NPL, CIR, provisions) + reporting direction
-    has_reporting_direction = bool(re.search(r'(rapport|reporting|présentation).*?(?:direction|comité|codir|conseil|dg)', raw_lower))
-    if (has_npl or has_provisions) and has_reporting_direction:
-        points_a_verifier += 0.5
-        validations_details.append("Suivi qualité portefeuille + reporting direction")
-    elif has_npl or has_provisions:
-        points_a_verifier += 0.3
-        validations_details.append("Suivi qualité portefeuille partiel")
-    
-    # Point 3 : Développement ventes croisées (cross-selling) ou partenariats interdépartementaux
-    crosssell_keywords = ['cross-selling', 'vente croisée', 'ventes croisées', 'partenariat', 'collaboration',
-                         'interdépartemental', 'transverse', 'synergie', 'offre globale', 'solution intégrée',
-                         'tsg', 'trade finance', 'cash management', 'produits associés']
-    has_crossselling = any(kw in raw_lower for kw in crosssell_keywords)
-    has_partnerships = bool(re.search(r'(partenariat|collaboration|coopération).*?(?:département|direction|équipe)', raw_lower))
-    
-    if has_crossselling or has_partnerships:
-        points_a_verifier += 0.5
-        validations_details.append("Cross-selling ou partenariats développés")
-    
-    # Point 4 : Production/supervision rapports performance commerciale et financière
-    perf_reporting_keywords = ['rapport performance', 'reporting commercial', 'tableau bord financier',
-                              'kpi commerciaux', 'indicateurs performance', 'suivi budgétaire',
-                              'analyse financière', 'p&l', 'compte résultat', 'marge', 'revenus']
-    has_perf_reporting = any(kw in raw_lower for kw in perf_reporting_keywords)
-    
-    if has_perf_reporting:
-        points_a_verifier += 0.5
-        validations_details.append("Rapports performance commerciale/financière")
-    
-    # Point 5 : Exposition réglementation bancaire locale (COBAC, BEAC) ou internationale
-    has_cobac = bool(re.search(r'cobac|réglementation.*bancaire|conformité.*bancaire', raw_lower))
-    has_beac = bool(re.search(r'beac|banque.*centrale|ce mac|uem oa', raw_lower))
-    has_basel = bool(re.search(r'bâle|bale|bale ii|bale iii|basel', raw_lower))
-    
-    if has_cobac or has_beac or has_basel:
-        points_a_verifier += 0.5
-        validations_details.append("Exposition réglementation bancaire")
-    
-    # Point 6 : Pilotage activité Corporate avec objectifs revenus atteints
-    has_corporate = bool(re.search(r'corporate|entreprises|grands comptes|clientèle.*entreprise', raw_lower))
-    has_revenue_objectives = bool(re.search(r'(chiffre.*affaires|revenu|income|sales target|objectif.*commercial).*(?:atteint|dépassé|réalisé)', raw_lower))
-    
-    if has_corporate and has_revenue_objectives:
-        points_a_verifier += 0.5
-        validations_details.append("Pilotage activité Corporate avec résultats")
-    elif has_corporate:
-        points_a_verifier += 0.3
-        validations_details.append("Expérience Corporate sans objectifs chiffrés")
-    
-    # Point 7 : Encadrement, développement, évaluation performances équipe
-    has_team_development = bool(re.search(r'(développement|formation|montée.*compétences|coaching|mentoring).*?(?:équipe|collaborateur)', raw_lower))
-    has_objectives_setting = bool(re.search(r'(fixation|définition).*?(?:objectifs|cibles|kpi).*?(?:équipe|collaborateur)', raw_lower))
-    has_annual_review = bool(re.search(r'(évaluation|entretien|appréciation).*(?:annuel|périodique|performance)', raw_lower))
-    
-    if has_team_development and has_objectives_setting:
-        points_a_verifier += 0.5
-        validations_details.append("Développement équipe et fixation objectifs")
-    
-    points_a_verifier = min(3, points_a_verifier)
-    
-    # =========================================================================
-    # ÉTAPE 3 : SIGNAUX FORTS (Score Bloc 3 - max 4 points, 0.5 par signal)
-    # =========================================================================
-    signaux_detectes = []
-    points_signaux = 0
-    
-    # Signal 1 : Cross-selling avéré avec équipes TSG, Trade Finance ou Cash Management
-    if any(kw in raw_lower for kw in ['tsg', 'trade finance', 'cash management']) and has_crossselling:
-        signaux_detectes.append("Cross-selling TSG/Trade Finance/Cash Management")
-        points_signaux += 0.5
-    
-    # Signal 2 : Leadership démontré (constitution équipe, développement, vivier talents)
-    has_leadership = bool(re.search(r'(constituer|créer|mettre en place|recruter).*?(?:équipe|structure)', raw_lower))
-    has_talent_pipeline = bool(re.search(r'(vivier.*talents|succès plan|relève|potentiel|high potential)', raw_lower))
-    
-    if has_leadership and (has_team_development or has_talent_pipeline):
-        signaux_detectes.append("Leadership et développement talents")
-        points_signaux += 0.5
-    
-    # Signal 3 : Certification Ecobank/Moody's/ITB ou équivalent
-    certifications = ['itb', 'institut technique banque', 'moody', 'ecobank certification', 
-                     'cia', 'frm', 'prm', 'cfa', 'acca', 'certification.*bancaire']
-    has_certification = any(re.search(cert, raw_lower) for cert in certifications)
-    
-    if has_certification:
-        signaux_detectes.append("Certification professionnelle bancaire")
-        points_signaux += 0.5
-    
-    # Signal 4 : Exposition plateformes numériques bancaires (OMNI, Cash Management...)
-    digital_platforms = ['omni', 'cash management', 'ebanking', 'plateforme.*numérique', 
-                        'digital banking', 'core banking', 'flexcube', 't24', 'amplitude', 'temenos']
-    has_digital_platform = any(kw in raw_lower for kw in digital_platforms)
-    
-    if has_digital_platform:
-        signaux_detectes.append("Plateformes numériques bancaires")
-        points_signaux += 0.5
-    
-    # Signal 5 : Résultats commerciaux quantifiés et vérifiables (CA, croissance, NPS)
-    quantified_results = bool(re.search(r'(\\d+\\.?\\d*)\\s*(?:%|pourcent|million|milliard|mrd|md|k|croissance|augmentation|progression|amélioration)', raw_lower))
-    has_kpi_commercial = bool(re.search(r'(chiffre.*affaires|ca|revenu|income|margin|marge|part.*marché|nps|satisfaction).*?(?:\\d|atteint|dépassé)', raw_lower))
-    
-    if quantified_results and has_kpi_commercial:
-        signaux_detectes.append("Résultats commerciaux quantifiés")
-        points_signaux += 0.5
-    
-    # Signal 6 : Développement portefeuille Corporate avec acquisition clients majeurs
-    has_new_clients = bool(re.search(r'(acquisition|nouveau|conquête).*?(?:client|compte|portefeuille)', raw_lower))
-    has_major_clients = bool(re.search(r'(grand compte|client.*majeur|key account|top client|premier.*client)', raw_lower))
-    
-    if has_corporate and (has_new_clients or has_major_clients):
-        signaux_detectes.append("Développement portefeuille Corporate")
-        points_signaux += 0.5
-    
-    # Signal 7 : Connaissance marché corporate tchadien ou zone CEMAC/UEMOA
-    has_chad = bool(re.search(r'tchad|ndjamena|tchadien', raw_lower))
-    has_cemac = bool(re.search(r'cemac|afrique.*centrale|zone.*cemac', raw_lower))
-    has_uemoa = bool(re.search(r'uemoa|afrique.*ouest|zone.*uemoa', raw_lower))
-    
-    if has_chad or has_cemac or has_uemoa:
-        signaux_detectes.append("Connaissance marché local/régional")
-        points_signaux += 0.5
-    
-    points_signaux = min(4, points_signaux)
-    
-    # =========================================================================
-    # ÉTAPE 4 : CALCUL SCORE FINAL (/14) SELON GRILLE OFFICIELLE
-    # =========================================================================
-    # Grille de scoring :
-    # - Capacité managériale démontrée : 0-3
-    # - Maîtrise risque crédit/portefeuille : 0-2
-    # - Exposition cross-selling/TSG/Cash Management : 0-2
-    # - Cohérence/progression parcours : 0-2
-    # - Qualité CV + Lettre motivation : 0-1
-    # - Certification/Connaissance CEMAC-UEMOA : 0-1
-    
-    # Sous-score 1 : Capacité managériale (0-3)
-    score_management = 0
-    if management_proven:
-        score_management = 1
-        if has_team_size or management_indicators >= 5:
-            score_management = 2
-        if has_team_development and has_objectives_setting and has_annual_review:
-            score_management = 3
-    
-    # Sous-score 2 : Maîtrise risque crédit (0-2)
-    score_credit_risk = 0
-    if credit_risk_exposure:
-        score_credit_risk = 1
-        if (has_npl or has_provisions) and has_reporting_direction:
-            score_credit_risk = 2
-    
-    # Sous-score 3 : Cross-selling/TSG (0-2)
-    score_crosssell = 0
-    if has_crossselling:
-        score_crosssell = 1
-        if any(kw in raw_lower for kw in ['tsg', 'trade finance', 'cash management']):
-            score_crosssell = 2
-    
-    # Sous-score 4 : Cohérence parcours (0-2)
-    score_coherence = 0
-    jobs_responsabilite = len(re.findall(r'(chef|responsable|directeur|manager|head|lead|senior)', raw_lower))
-    if jobs_responsabilite >= 2:
-        score_coherence = 1
-    if jobs_responsabilite >= 3 and banking_years >= 5:
-        score_coherence = 2
-    
-    # Sous-score 5 : Qualité CV + Lettre (0-1)
-    score_qualite = 0
-    has_quantified_cv = bool(re.search(r'\d+\s*(?:%|million|milliard|clients|équipe|collaborateurs)', cv_text))
-    lettre_ok = lettre_text and len(lettre_text.strip()) > 80
-    if has_quantified_cv or lettre_ok:
-        score_qualite = 1
-    
-    # Sous-score 6 : Certification/Connaissance CEMAC-UEMOA (0-1)
-    score_certif = 0
-    if has_certification or (has_chad or has_cemac or has_uemoa):
-        score_certif = 1
-    
-    # Calcul du score final selon la grille officielle (/14)
-    total_score = score_management + score_credit_risk + score_crosssell + score_coherence + score_qualite + score_certif
-    total_score = min(14, total_score)
-    
-    # Détermination de la décision selon les seuils officiels
-    if total_score >= 11:
+    if banking_years >= 5:
+        exp_bancaire = 4
+    elif banking_years >= 3:
+        exp_bancaire = 2
+    elif banking_years >= 1:
+        exp_bancaire = 1
+    else:
+        exp_bancaire = 0
+    has_master = bool(re.search(r'master|mba|ingenieur|doctorat|phd', cv_text, re.IGNORECASE))
+    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maitrise|licence.*professionnelle', cv_text, re.IGNORECASE))
+    if has_master:
+        diplome = 3
+    elif has_bac4:
+        diplome = 2
+    else:
+        diplome = 0
+    management_count = 0
+    for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe']:
+        if kw in cv_text.lower():
+            management_count += 1
+    management = min(3, management_count)
+    credit_count = 0
+    for kw in ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye']:
+        if kw in cv_text.lower():
+            credit_count += 1
+    if credit_count >= 4:
+        risque_credit = 2
+    elif credit_count >= 2:
+        risque_credit = 1
+    else:
+        risque_credit = 0
+    jobs = cv_text.split('\n')
+    job_count = 0
+    for j in jobs:
+        if 'chef' in j.lower() or 'manager' in j.lower() or 'responsable' in j.lower():
+            job_count += 1
+    coherence = 2 if job_count >= 3 else (1 if job_count >= 1 else 0)
+    qualite_cv = 1 if len(cv_text) > 500 else 0
+    score = exp_bancaire + diplome + management + risque_credit + coherence + qualite_cv
+    score = min(14, score)
+    checklist = {
+        "elim_0": banking_years >= 5,
+        "elim_1": has_master or has_bac4,
+        "elim_2": management_count >= 2,
+        "elim_3": credit_count >= 3,
+        "elim_4": job_count >= 3
+    }
+    if score >= 11:
         decision = "Entretien prioritaire"
-    elif total_score >= 7:
-        decision = "Potentiel à évaluer en entretien"
+    elif score >= 7:
+        decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
-    
-    # Construction des points forts
     points_forts = []
-    if score_management >= 2:
-        points_forts.append(f"Capacité managériale démontrée (score: {score_management}/3)")
-    if score_credit_risk >= 2:
-        points_forts.append(f"Maîtrise du risque crédit et qualité portefeuille (score: {score_credit_risk}/2)")
-    if score_crosssell >= 2:
-        points_forts.append(f"Expertise cross-selling/TSG/Cash Management (score: {score_crosssell}/2)")
-    if score_coherence >= 2:
-        points_forts.append("Parcours cohérent avec progression hiérarchique")
-    if score_qualite >= 1:
-        points_forts.append("CV qualitatif avec résultats chiffrés ou lettre pertinente")
-    if score_certif >= 1:
-        points_forts.append("Certification bancaire ou connaissance marché local/régional")
-    if signaux_detectes:
-        points_forts.extend([f"Signal fort: {s}" for s in signaux_detectes[:3]])
-    
-    # Construction des points de vigilance
     points_vigilance = []
-    if score_management < 2:
-        points_vigilance.append("Capacité managériale à confirmer en entretien")
-    if score_credit_risk < 2:
-        points_vigilance.append("Maîtrise risque crédit à approfondir")
-    if score_crosssell < 1:
-        points_vigilance.append("Expérience cross-selling limitée")
-    if score_coherence < 2:
-        points_vigilance.append("Progression hiérarchique à vérifier")
-    if validations_details:
-        points_vigilance.extend([f"À vérifier: {v}" for v in validations_details if v not in points_forts])
-    
-    # Synthèse raisonnée du recruteur
-    synthese = f"Candidat avec un score de {total_score}/14. "
-    if total_score >= 11:
-        synthese += "Profil très solide pour le poste de Chef de Division Local Corporate. Excellente adéquation avec les exigences du poste : expérience bancaire confirmée, compétences managériales avérées, maîtrise du risque crédit et orientation commerciale. À recommander pour entretien prioritaire."
-    elif total_score >= 7:
-        synthese += "Profil intéressant avec des compétences pertinentes pour le poste. Certains domaines sont à approfondir mais le potentiel est présent. À convoquer en entretien pour évaluer l'adéquation réelle avec les responsabilités du poste."
+    if banking_years >= 5:
+        points_forts.append(f"Plus de 5 ans d'experience bancaire ({banking_years:.1f} ans)")
     else:
-        synthese += "Profil insuffisant pour le poste. Manque de compétences clés en management d'équipe Corporate, gestion du risque crédit ou expérience bancaire significative."
-    
+        points_vigilance.append(f"Experience bancaire de {banking_years:.1f} ans (idealement 5 ans+)")
+    if has_master:
+        points_forts.append("Diplome Bac+5 ou superieur")
+    elif has_bac4:
+        points_forts.append("Diplome Bac+4")
+    else:
+        points_vigilance.append("Niveau de diplome inferieur a Bac+4")
+    if management >= 2:
+        points_forts.append(f"Experience manageriale (score: {management}/3)")
+    else:
+        points_vigilance.append("Experience manageriale a renforcer")
+    if risque_credit >= 2:
+        points_forts.append(f"Exposition au risque de credit (score: {risque_credit}/3)")
+    else:
+        points_vigilance.append("Exposition au risque de credit limitee")
+    if coherence >= 2:
+        points_forts.append("Parcours coherent avec des postes a responsabilite")
+    if qualite_cv >= 1:
+        points_forts.append("CV detaille")
+    if banking_years < 5 or management < 2:
+        points_vigilance.append("Verifier en entretien : experience et management")
     return {
-        'score': total_score,
+        'score': score,
         'score_max': 14,
         'decision': decision,
-        'flags_eliminatoires': flags_eliminatoires if eliminatoire_failed else [],
-        'checklist': {
-            "exp_bancaire_5ans": banking_years >= 5,
-            "diplome_bac4": diplome_suffisant,
-            "management_prouve": management_proven,
-            "risque_credit": credit_risk_exposure,
-            "cross_selling": has_crossselling,
-            "reglementation_bancaire": has_cobac or has_beac or has_basel
-        },
+        'flags_eliminatoires': [],
+        'checklist': checklist,
         'sous_scores': {
-            "Capacité managériale démontrée": score_management,
-            "Maîtrise risque crédit/portefeuille": score_credit_risk,
-            "Exposition cross-selling/TSG/Cash Management": score_crosssell,
-            "Cohérence/progression parcours": score_coherence,
-            "Qualité CV + Lettre motivation": score_qualite,
-            "Certification/Connaissance CEMAC-UEMOA": score_certif
+            "Experience bancaire": exp_bancaire,
+            "Diplome": diplome,
+            "Management": management,
+            "Risque de credit": risque_credit,
+            "Coherence": coherence,
+            "Qualite CV": qualite_cv
         },
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
-        'signaux_detectes': signaux_detectes,
-        'synthese': synthese,
-        'raisonnement_recruteur': {
-            'etape_1_eliminatoire': {
-                'statut': 'FRANCHIE' if not eliminatoire_failed else 'ECHEC',
-                'detail': f'Tous critères éliminatoires validés' if not eliminatoire_failed else f'{len(flags_eliminatoires)} critère(s) non conforme(s)'
-            },
-            'etape_2_points_a_verifier': {
-                'score_obtenu': f'{points_a_verifier}/3',
-                'validations': validations_details
-            },
-            'etape_3_signaux_forts': {
-                'score_obtenu': f'{points_signaux}/4',
-                'signaux_identifies': signaux_detectes
-            },
-            'etape_4_scoring_final': {
-                'score_management': f'{score_management}/3',
-                'score_risque_credit': f'{score_credit_risk}/2',
-                'score_crosssell': f'{score_crosssell}/2',
-                'score_coherence': f'{score_coherence}/2',
-                'score_qualite': f'{score_qualite}/1',
-                'score_certif': f'{score_certif}/1',
-                'total': f'{total_score}/14',
-                'decision': decision
-            },
-            'analyse_detaillee': {
-                'annees_experience_banque': f'{banking_years:.1f} ans',
-                'niveau_diplome': 'Bac+5+' if has_master else ('Bac+4' if has_bac4 else '<Bac+4'),
-                'indicateurs_management': management_indicators,
-                'exposition_risque_credit': credit_risk_count,
-                'npl_detectes': has_npl,
-                'provisions_detectes': has_provisions,
-                'cross_selling_present': has_crossselling,
-                'certifications_presentes': has_certification,
-                'connaissance_marche_local': has_chad or has_cemac or has_uemoa
-            }
-        }
+        'synthese': f"Candidat avec un score de {score}/14. " + (decision if "prioritaire" in decision else "A evaluer.")
     }
-
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
-    poste = "Chargé(e) d'Administration de Crédit"
+    poste = "Charge(e) d'Administration de Credit"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
     banking_years = detect_banking_experience_years(cv_text)
     flags_elim = []
     diplome_ok = False
-    diplome_patterns = [r'licence', r'bachelor', r'bac\+3', r'bac 3', r'baccalauréat.*université', r'master', r'mba', r'ingénieur', r'bac\+4', r'bac 4', r'bac\+5', r'bac 5', r'maîtrise', r'doctorat', r'phd', r'école de commerce', r'école supérieure']
+    diplome_patterns = [r'licence', r'bachelor', r'bac\+3', r'bac 3', r'baccalaureat.*universite', r'master', r'mba', r'ingenieur', r'bac\+4', r'bac 4', r'bac\+5', r'bac 5', r'maitrise', r'doctorat', r'phd', r'ecole de commerce', r'ecole superieure']
     for pattern in diplome_patterns:
         if re.search(pattern, cv_text.lower()):
             diplome_ok = True
             break
     if not diplome_ok:
-        flags_elim.append("Niveau de diplôme inférieur à Bac+3")
+        flags_elim.append("Niveau de diplome inferieur a Bac+3")
     exp_bancaire_ok = banking_years >= 1.0
     if not exp_bancaire_ok:
-        flags_elim.append(f"Moins de 1 an d'expérience bancaire ({banking_years:.1f} ans) - les stages ne sont pas comptabilisés")
+        flags_elim.append(f"Moins de 1 an d'experience bancaire ({banking_years:.1f} ans) - les stages ne sont pas comptabilises")
     credit_cycle_ok = False
-    credit_cycle_keywords = ['crédit', 'credit', 'dossier de crédit', 'analyse de crédit', 'instruction crédit', 'octroi', 'mise en place', 'suivi crédit', 'garantie', 'échéance', 'portefeuille', 'administration de crédit', 'back-office crédit', 'credit administration']
+    credit_cycle_keywords = ['credit', 'credit', 'dossier de credit', 'analyse de credit', 'instruction credit', 'octroi', 'mise en place', 'suivi credit', 'garantie', 'echeance', 'portefeuille', 'administration de credit', 'back-office credit', 'credit administration']
     for kw in credit_cycle_keywords:
         if kw in cv_text.lower():
             credit_cycle_ok = True
             break
     if not credit_cycle_ok:
-        flags_elim.append("Aucune exposition au cycle de vie du crédit bancaire")
+        flags_elim.append("Aucune exposition au cycle de vie du credit bancaire")
     reporting_ok = False
     reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'statistiques', 'indicateur', 'kpi', 'report', 'suivi', 'monitoring']
     for kw in reporting_keywords:
@@ -1408,7 +1197,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             reporting_ok = True
             break
     if not reporting_ok:
-        flags_elim.append("Aucune expérience de production de reportings")
+        flags_elim.append("Aucune experience de production de reportings")
     tools_ok = False
     tools_keywords = ['excel', 'word', 'powerpoint', 'outlook', 'office', 'bureautique', 'tableur']
     for kw in tools_keywords:
@@ -1416,14 +1205,14 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             tools_ok = True
             break
     if not tools_ok:
-        flags_elim.append("Incapacité à utiliser des outils bureautiques courants")
+        flags_elim.append("Incapacite a utiliser des outils bureautiques courants")
     adequation = 0
-    if re.search(r'(économie|gestion|finance|comptabilité|banque|commerce)', cv_text.lower()):
+    if re.search(r'(economie|gestion|finance|comptabilite|banque|commerce)', cv_text.lower()):
         adequation += 1
     credit_years = 0.0
     blocks = split_into_jobs(cv_text)
     for block in blocks:
-        if not is_stage_block(block) and ('crédit' in block.lower() or 'credit' in block.lower()):
+        if not is_stage_block(block) and ('credit' in block.lower() or 'credit' in block.lower()):
             duration = extract_duration_years_from_block(block)
             if duration > 0:
                 credit_years += duration
@@ -1431,19 +1220,19 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         adequation += 2
     elif credit_years >= 1:
         adequation += 1
-    if re.search(r'(certification|certificat).*(bancaire|crédit|finance)', cv_text.lower()):
+    if re.search(r'(certification|certificat).*(bancaire|credit|finance)', cv_text.lower()):
         adequation += 0.5
     adequation = min(3, int(adequation))
     ifrs_score = 0
     if re.search(r'ifrs|provisionnement|stage\s*[123]|ecl', cv_text.lower()):
         ifrs_score += 2
-    if re.search(r'cobac|réglementation bancaire|conformité', cv_text.lower()):
+    if re.search(r'cobac|reglementation bancaire|conformite', cv_text.lower()):
         ifrs_score += 1
-    if re.search(r'portefeuille|encours|impayés|dépassements', cv_text.lower()):
+    if re.search(r'portefeuille|encours|impayes|depassements', cv_text.lower()):
         ifrs_score += 0.5
     ifrs_score = min(3, int(ifrs_score))
     tools_score = 0
-    banking_tools = ['amplitude', 'finacle', 't24', 'temenos', 'flexcube', 'sopra', 'système de gestion', 'ged']
+    banking_tools = ['amplitude', 'finacle', 't24', 'temenos', 'flexcube', 'sopra', 'systeme de gestion', 'ged']
     for tool in banking_tools:
         if tool in cv_text.lower():
             tools_score += 1
@@ -1462,16 +1251,16 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
             break
     if long_experience:
         coherence += 1
-    if re.search(r'(banque|finance|économie|gestion)', cv_text.lower()):
+    if re.search(r'(banque|finance|economie|gestion)', cv_text.lower()):
         coherence += 1
     coherence = min(2, coherence)
     qualite = 0
     if re.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*cas|\d+\s*rapports', cv_text.lower()):
         qualite += 1
     if lettre_text and len(lettre_text.strip()) > 50:
-        if 'ecobank' in lettre_text.lower() and ('administration de crédit' in lettre_text.lower() or 'chargé' in lettre_text.lower()):
+        if 'ecobank' in lettre_text.lower() and ('administration de credit' in lettre_text.lower() or 'charge' in lettre_text.lower()):
             qualite += 1
-        elif 'chargé' in lettre_text.lower() and 'crédit' in lettre_text.lower():
+        elif 'charge' in lettre_text.lower() and 'credit' in lettre_text.lower():
             qualite += 0.5
     qualite = min(2, int(qualite))
     total_score = adequation + ifrs_score + tools_score + coherence + qualite
@@ -1479,32 +1268,32 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     if total_score >= 10:
         decision = "Entretien prioritaire"
     elif total_score >= 7:
-        decision = "Potentiel à évaluer en entretien"
+        decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
     points_forts = []
     points_vigilance = []
     if adequation >= 2:
-        points_forts.append(f"Expérience crédit de {credit_years:.1f} ans")
+        points_forts.append(f"Experience credit de {credit_years:.1f} ans")
     if ifrs_score >= 2:
         points_forts.append("Connaissance IFRS 9 / COBAC")
     if tools_score >= 2:
-        points_forts.append("Maîtrise des outils bancaires")
+        points_forts.append("Maitrise des outils bancaires")
     if coherence >= 2:
-        points_forts.append("Parcours cohérent et stable")
+        points_forts.append("Parcours coherent et stable")
     if qualite >= 2:
-        points_forts.append("CV détaillé avec résultats chiffrés")
+        points_forts.append("CV detaille avec resultats chiffres")
     if adequation < 2:
-        points_vigilance.append("Expérience crédit limitée")
+        points_vigilance.append("Experience credit limitee")
     if ifrs_score < 2:
-        points_vigilance.append("IFRS 9 à approfondir")
+        points_vigilance.append("IFRS 9 a approfondir")
     if coherence < 2:
-        points_vigilance.append("Parcours à stabiliser")
+        points_vigilance.append("Parcours a stabiliser")
     if qualite < 2:
-        points_vigilance.append("CV/lettre à enrichir")
-    sous_scores = {"Adéquation formation/expérience au crédit": adequation, "Exposition IFRS 9 / gestion portefeuille": ifrs_score, "Maîtrise outils bancaires": tools_score, "Cohérence et sérieux du parcours": coherence, "Qualité CV + Lettre de motivation": qualite}
+        points_vigilance.append("CV/lettre a enrichir")
+    sous_scores = {"Adequation formation/experience au credit": adequation, "Exposition IFRS 9 / gestion portefeuille": ifrs_score, "Maitrise outils bancaires": tools_score, "Coherence et serieux du parcours": coherence, "Qualite CV + Lettre de motivation": qualite}
     synthese = _generate_synthese_rac(cv_text, lettre_text, total_score, points_forts, points_vigilance)
-    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags_elim if flags_elim else [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags_elim)} critère(s) éliminatoire(s) non satisfait(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
+    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags_elim if flags_elim else [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
 def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vigilance):
     synthese = ""
     has_experience = bool(re.search(r'Express Union|Coris Bank|Ecobank|banque|bancaire|\d+\s*ans', cv_text.lower()))
@@ -1512,29 +1301,29 @@ def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vig
     has_results = bool(re.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*rapports', cv_text.lower()))
     lettre_personnalisee = bool(lettre_text and 'ecobank' in lettre_text.lower())
     if score >= 10:
-        synthese = "Candidat très solide pour le poste. "
+        synthese = "Candidat tres solide pour le poste. "
         if has_experience:
-            synthese += "Expérience bancaire confirmée. "
+            synthese += "Experience bancaire confirmee. "
         if has_certification:
             synthese += "Certifications pertinentes. "
         if has_results:
-            synthese += "Résultats quantifiés démontrant la performance. "
+            synthese += "Resultats quantifies demontrant la performance. "
         if lettre_personnalisee:
-            synthese += "Lettre de motivation personnalisée. "
-        synthese += "À recommander pour entretien prioritaire."
+            synthese += "Lettre de motivation personnalisee. "
+        synthese += "A recommander pour entretien prioritaire."
     elif score >= 7:
         synthese = "Bon profil avec du potentiel. "
         if has_experience:
-            synthese += "Expérience bancaire présente. "
+            synthese += "Experience bancaire presente. "
         else:
-            synthese += "Expérience à consolider. "
+            synthese += "Experience a consolider. "
         if not has_results:
-            synthese += "Manque de résultats chiffrés. "
-        synthese += "À convoquer en entretien."
+            synthese += "Manque de resultats chiffres. "
+        synthese += "A convoquer en entretien."
     else:
         synthese = "Profil en dessous des attentes. "
         if not has_experience:
-            synthese += "Expérience bancaire insuffisante. "
+            synthese += "Experience bancaire insuffisante. "
         if not has_certification:
             synthese += "Certifications professionnelles manquantes. "
         synthese += "Recommandation : ne pas retenir."
@@ -1548,12 +1337,12 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     banking_years = detect_banking_experience_years(cv_text)
     flags = []
     if banking_years < 1.0:
-        flags.append("A une expérience en banque ou établissement financier réglementé")
+        flags.append("A une experience en banque ou etablissement financier reglemente")
     if banking_years < 3.0:
-        flags.append("Minimum 3 ans d'expérience en opérations bancaires ou back-office")
+        flags.append("Minimum 3 ans d'experience en operations bancaires ou back-office")
     has_diploma = bool(re.search(r'licence|bachelor|bac\+3|bac 3|master|mba', cv_text.lower()))
     if not has_diploma:
-        flags.append("A un diplôme de niveau Bac+3 minimum (Licence, Bachelor ou équivalent)")
+        flags.append("A un diplome de niveau Bac+3 minimum (Licence, Bachelor ou equivalent)")
     has_compensation = False
     compensation_keywords = ['compensation', 'interbancaire', 'systac', 'sygma', 'gimac', 'back-office', 'clearing']
     for kw in compensation_keywords:
@@ -1561,8 +1350,8 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
             has_compensation = True
             break
     if not has_compensation:
-        flags.append("A une exposition aux opérations de compensation interbancaire")
-        flags.append("A une connaissance des règles BEAC / GIMAC ou d'un système de compensation équivalent")
+        flags.append("A une exposition aux operations de compensation interbancaire")
+        flags.append("A une connaissance des regles BEAC / GIMAC ou d'un systeme de compensation equivalent")
     for crit in grille.get('eliminatoire', []):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         if not ok:
@@ -1574,14 +1363,14 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     def check_crit(crit):
         ok, _, _ = check_criterion_match_advanced(crit, normalized, raw_full, poste=poste)
         return ok
-    signaux_exp = ["Supervision quotidienne des opérations de compensation interbancaire", "Dénouement de positions nettes en fin de journée", "Gestion de suspens, rejets et réclamations interbancaires", "Utilisation de systèmes bancaires de compensation"]
+    signaux_exp = ["Supervision quotidienne des operations de compensation interbancaire", "Denouement de positions nettes en fin de journee", "Gestion de suspens, rejets et reclamations interbancaires", "Utilisation de systemes bancaires de compensation"]
     n_exp = sum(1 for c in signaux_exp if check_crit(c))
     adequation = min(3, n_exp)
-    signaux_beac = ["BEAC / GIMAC / compensation interbancaire", "Règlement de positions nettes dans les délais réglementaires", "Expérience dans une banque de la zone CEMAC / UEMOA"]
+    signaux_beac = ["BEAC / GIMAC / compensation interbancaire", "Reglement de positions nettes dans les delais reglementaires", "Experience dans une banque de la zone CEMAC / UEMOA"]
     n_beac = sum(1 for c in signaux_beac if check_crit(c))
     exposition_beac = min(3, n_beac)
-    encadrement_ok = check_crit("Encadrement et coordination d'une équipe opérationnelle")
-    resultats_mesurables = check_crit("Gestion d'une équipe avec résultats mesurables")
+    encadrement_ok = check_crit("Encadrement et coordination d'une equipe operationnelle")
+    resultats_mesurables = check_crit("Gestion d'une equipe avec resultats mesurables")
     encadrement = (1 if encadrement_ok else 0) + (1 if resultats_mesurables else 0)
     n_points_attention = sum(1 for c in grille.get('points_attention', []) if check_crit(c))
     coherence = 2 if n_points_attention == 0 else (1 if n_points_attention <= 2 else 0)
@@ -1595,49 +1384,49 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         lettre_score = 1 if (len(lettre_clean.split()) >= 80 and mentions_poste) else 0
     else:
         lettre_score = 0
-    sous_scores = {"Adéquation de l'expérience (compensation interbancaire)": adequation, "Exposition BEAC / GIMAC / SYSTAC": exposition_beac, "Capacité d'encadrement": encadrement, "Cohérence du parcours": coherence, "Qualité CV + Lettre": qualite_cv + lettre_score}
+    sous_scores = {"Adequation de l'experience (compensation interbancaire)": adequation, "Exposition BEAC / GIMAC / SYSTAC": exposition_beac, "Capacite d'encadrement": encadrement, "Coherence du parcours": coherence, "Qualite CV + Lettre": qualite_cv + lettre_score}
     total_score = sum(sous_scores.values())
     total_score = min(12, total_score)
     if total_score >= 10:
         decision = "Entretien prioritaire"
     elif total_score >= 7:
-        decision = "Potentiel à évaluer en entretien"
+        decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
-    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}", 'points_forts': ["Expérience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""], 'synthese': f"Candidat avec un score de {total_score}/12"}
+    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}", 'points_forts': ["Experience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""], 'synthese': f"Candidat avec un score de {total_score}/12"}
 def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts_list):
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
     normalized = normalize_for_matching(raw_full)[0]
     flags_elim = []
-    formation_keywords = ['finance', 'comptabilité', 'comptabilite', 'contrôle de gestion', 'controle de gestion', 'statistiques', 'statistique', 'data analytics', 'analyse de données', 'business intelligence', 'informatique décisionnelle', 'informatique decisionnelle', 'économie', 'economie']
+    formation_keywords = ['finance', 'comptabilite', 'comptabilite', 'controle de gestion', 'controle de gestion', 'statistiques', 'statistique', 'data analytics', 'analyse de donnees', 'business intelligence', 'informatique decisionnelle', 'informatique decisionnelle', 'economie', 'economie']
     formation_ok = any(kw in cv_text.lower() for kw in formation_keywords)
     if not formation_ok:
-        flags_elim.append("Formation en Finance, Comptabilité, Contrôle de gestion, Statistiques, Data Analytics ou Informatique décisionnelle")
+        flags_elim.append("Formation en Finance, Comptabilite, Controle de gestion, Statistiques, Data Analytics ou Informatique decisionnelle")
     diplome_ok = False
-    diplome_patterns = [r'bac\+3', r'bac 3', r'licence', r'bachelor', r'bac\+4', r'bac 4', r'master', r'mba', r'ingénieur', r'ingenieur', r'bac\+5', r'bac 5', r'maîtrise', r'maitrise', r'doctorat', r'phd', r'école de commerce', r'ecole de commerce', r'école supérieure', r'ecole superieure']
+    diplome_patterns = [r'bac\+3', r'bac 3', r'licence', r'bachelor', r'bac\+4', r'bac 4', r'master', r'mba', r'ingenieur', r'ingenieur', r'bac\+5', r'bac 5', r'maitrise', r'maitrise', r'doctorat', r'phd', r'ecole de commerce', r'ecole de commerce', r'ecole superieure', r'ecole superieure']
     for pattern in diplome_patterns:
         if re.search(pattern, cv_text.lower()):
             diplome_ok = True
             break
     if not diplome_ok:
-        flags_elim.append("Diplôme de niveau Bac+3 ou supérieur")
-    exp_keywords = ['analyse financière', 'analyse financiere', 'reporting financier', 'contrôle de gestion', 'controle de gestion', 'audit', 'data analytics', 'analyse de données', 'analyse de donnees', 'tableau de bord', 'dashboard', 'reporting', 'rapport financier']
+        flags_elim.append("Diplome de niveau Bac+3 ou superieur")
+    exp_keywords = ['analyse financiere', 'analyse financiere', 'reporting financier', 'controle de gestion', 'controle de gestion', 'audit', 'data analytics', 'analyse de donnees', 'analyse de donnees', 'tableau de bord', 'dashboard', 'reporting', 'rapport financier']
     exp_ok = any(kw in cv_text.lower() for kw in exp_keywords)
     if not exp_ok:
-        flags_elim.append("Expérience en analyse financière, reporting financier, contrôle de gestion, audit ou data analytics")
-    excel_keywords = ['excel', 'power query', 'tableau croisé', 'tcd', 'formule excel', 'vba']
+        flags_elim.append("Experience en analyse financiere, reporting financier, controle de gestion, audit ou data analytics")
+    excel_keywords = ['excel', 'power query', 'tableau croise', 'tcd', 'formule excel', 'vba']
     excel_ok = any(kw in cv_text.lower() for kw in excel_keywords)
     if not excel_ok:
-        flags_elim.append("Maîtrise Excel (TCD, formules, Power Query) - compétence incontournable")
-    comptab_keywords = ['comptabilité', 'comptabilite', 'états financiers', 'etats financiers', 'p&l', 'bilan', 'flux de trésorerie', 'accounting', 'financial statements', 'income statement', 'balance sheet', 'cash flow']
+        flags_elim.append("Maitrise Excel (TCD, formules, Power Query) - competence incontournable")
+    comptab_keywords = ['comptabilite', 'comptabilite', 'etats financiers', 'etats financiers', 'p&l', 'bilan', 'flux de tresorerie', 'accounting', 'financial statements', 'income statement', 'balance sheet', 'cash flow']
     comptab_ok = any(kw in cv_text.lower() for kw in comptab_keywords)
     if not comptab_ok:
-        flags_elim.append("Connaissances en comptabilité et en états financiers (P&L, bilan, flux de trésorerie)")
+        flags_elim.append("Connaissances en comptabilite et en etats financiers (P&L, bilan, flux de tresorerie)")
     if flags_elim:
-        return {'score': 0, 'score_max': 14, 'decision': 'Rejet', 'flags_eliminatoires': flags_elim, 'sous_scores': {"Adéquation expérience (reporting/analyse/data)": 0, "Maîtrise outils BI (Excel/Power BI)": 0, "Connaissance SQL": 0, "Exposition données bancaires/Core Banking": 0, "Cohérence et progression": 0, "Qualité CV + Lettre": 0, "Compétences avancées": 0}, 'checklist': {}, 'detail': f"REJET IMMÉDIAT - {len(flags_elim)} critère(s) éliminatoire(s) non satisfait(s)", 'points_forts': [], 'points_vigilance': flags_elim, 'synthese': f"Rejet immédiat : {', '.join(flags_elim[:3])}"}
+        return {'score': 0, 'score_max': 14, 'decision': 'Rejet', 'flags_eliminatoires': flags_elim, 'sous_scores': {"Adequation experience (reporting/analyse/data)": 0, "Maitrise outils BI (Excel/Power BI)": 0, "Connaissance SQL": 0, "Exposition donnees bancaires/Core Banking": 0, "Coherence et progression": 0, "Qualite CV + Lettre": 0, "Competences avancees": 0}, 'checklist': {}, 'detail': f"REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s)", 'points_forts': [], 'points_vigilance': flags_elim, 'synthese': f"Rejet immediat : {', '.join(flags_elim[:3])}"}
     exp_score = 0
-    reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'budget', 'réalisé', 'realise', 'écart', 'ecart', 'analyse', 'prévision', 'prevision', 'forecast', 'contrôle de gestion', 'controle de gestion', 'data analyst', 'analyste de données']
+    reporting_keywords = ['reporting', 'rapport', 'tableau de bord', 'dashboard', 'budget', 'realise', 'realise', 'ecart', 'ecart', 'analyse', 'prevision', 'prevision', 'forecast', 'controle de gestion', 'controle de gestion', 'data analyst', 'analyste de donnees']
     found_exp = sum(1 for kw in reporting_keywords if kw in cv_text.lower())
     if found_exp >= 6:
         exp_score = 3
@@ -1646,7 +1435,7 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     elif found_exp >= 2:
         exp_score = 1
     bi_score = 0
-    excel_advanced = ['excel avancé', 'excel avance', 'power query', 'tcd', 'tableau croisé', 'vba excel']
+    excel_advanced = ['excel avance', 'excel avance', 'power query', 'tcd', 'tableau croise', 'vba excel']
     powerbi = ['power bi', 'powerbi', 'dax']
     has_excel_advanced = any(kw in cv_text.lower() for kw in excel_advanced)
     has_powerbi = any(kw in cv_text.lower() for kw in powerbi)
@@ -1659,14 +1448,14 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     if 'tableau' in cv_text.lower() and bi_score > 0:
         bi_score = min(3, bi_score + 1)
     sql_score = 0
-    sql_keywords = ['sql', 'base de données', 'base de donnees', 'extraction', 'requête', 'requete', 'data warehouse', 'etl', 'select', 'join']
+    sql_keywords = ['sql', 'base de donnees', 'base de donnees', 'extraction', 'requete', 'requete', 'data warehouse', 'etl', 'select', 'join']
     found_sql = sum(1 for kw in sql_keywords if kw in cv_text.lower())
     if found_sql >= 4:
         sql_score = 2
     elif found_sql >= 2:
         sql_score = 1
     bank_score = 0
-    banking_keywords = ['banque', 'bancaire', 'core banking', 'flexcube', 't24', 'amplitude', 'financial institution', 'institution financière', 'pnb', 'npl', 'coût du risque', 'cout du risque', 'rentabilité', 'rentabilite', 'agence', 'produit bancaire', 'crédit', 'credit']
+    banking_keywords = ['banque', 'bancaire', 'core banking', 'flexcube', 't24', 'amplitude', 'financial institution', 'institution financiere', 'pnb', 'npl', 'cout du risque', 'cout du risque', 'rentabilite', 'rentabilite', 'agence', 'produit bancaire', 'credit', 'credit']
     found_bank = sum(1 for kw in banking_keywords if kw in cv_text.lower())
     if found_bank >= 4:
         bank_score = 2
@@ -1688,17 +1477,17 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     if re.search(r'(responsable|lead|senior|chef|manager|superviseur|coordinateur)', cv_text.lower()):
         coher_score = min(2, coher_score + 1)
     qualite_score = 0
-    has_quantified = bool(re.search(r'\d+\s*(%|pourcent|réduction|reduction|gain|amélioration|amelioration|efficacité|efficacite)', cv_text.lower()))
+    has_quantified = bool(re.search(r'\d+\s*(%|pourcent|reduction|reduction|gain|amelioration|amelioration|efficacite|efficacite)', cv_text.lower()))
     has_tools = bool(re.search(r'(power bi|powerbi|sql|excel|python|r|tableau|etl|vba|dax)', cv_text.lower()))
     if has_quantified and has_tools:
         qualite_score = 1
     if lettre_text and len(lettre_text.strip()) > 80:
-        lettre_kw = ['data', 'finance', 'analyste', 'reporting', 'dashboard', 'analyse', 'données', 'donnees']
+        lettre_kw = ['data', 'finance', 'analyste', 'reporting', 'dashboard', 'analyse', 'donnees', 'donnees']
         if any(kw in lettre_text.lower() for kw in lettre_kw):
             if 'power bi' in lettre_text.lower() or 'excel' in lettre_text.lower() or 'sql' in lettre_text.lower():
                 qualite_score = 1
     avance_score = 0
-    advanced_keywords = ['python', 'r', 'automatisation', 'modélisation', 'modelisation', 'prévision', 'prevision', 'scénario', 'scenario', 'reporting réglementaire', 'reporting reglementaire', 'machine learning']
+    advanced_keywords = ['python', 'r', 'automatisation', 'modelisation', 'modelisation', 'prevision', 'prevision', 'scenario', 'scenario', 'reporting reglementaire', 'reporting reglementaire', 'machine learning']
     found_adv = sum(1 for kw in advanced_keywords if kw in cv_text.lower())
     if found_adv >= 2:
         avance_score = 1
@@ -1707,39 +1496,39 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     if total_score >= 11:
         decision = "Entretien prioritaire"
     elif total_score >= 7:
-        decision = "Potentiel à évaluer en entretien"
+        decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
     points_forts = []
     points_vigilance = []
     if exp_score >= 2:
-        points_forts.append("Expérience en reporting/analyse financière")
+        points_forts.append("Experience en reporting/analyse financiere")
     if bi_score >= 2:
-        points_forts.append("Maîtrise des outils BI (Excel/Power BI)")
+        points_forts.append("Maitrise des outils BI (Excel/Power BI)")
     if sql_score >= 2:
-        points_forts.append("Maîtrise de SQL")
+        points_forts.append("Maitrise de SQL")
     if bank_score >= 2:
         points_forts.append("Exposition au secteur bancaire")
     if coher_score >= 2:
-        points_forts.append("Parcours cohérent avec progression")
+        points_forts.append("Parcours coherent avec progression")
     if avance_score >= 1:
-        points_forts.append("Compétences avancées (Python/R/automatisation)")
+        points_forts.append("Competences avancees (Python/R/automatisation)")
     if exp_score < 2:
-        points_vigilance.append("Expérience en analyse financière limitée")
+        points_vigilance.append("Experience en analyse financiere limitee")
     if bi_score < 2:
-        points_vigilance.append("Maîtrise des outils BI à renforcer")
+        points_vigilance.append("Maitrise des outils BI a renforcer")
     if sql_score < 1:
-        points_vigilance.append("Compétences SQL à approfondir")
+        points_vigilance.append("Competences SQL a approfondir")
     if bank_score < 1:
-        points_vigilance.append("Exposition au secteur bancaire limitée")
-    sous_scores = {"Adéquation expérience (reporting/analyse/data)": exp_score, "Maîtrise outils BI (Excel/Power BI)": bi_score, "Connaissance SQL": sql_score, "Exposition données bancaires/Core Banking": bank_score, "Cohérence et progression": coher_score, "Qualité CV + Lettre": qualite_score, "Compétences avancées": avance_score}
+        points_vigilance.append("Exposition au secteur bancaire limitee")
+    sous_scores = {"Adequation experience (reporting/analyse/data)": exp_score, "Maitrise outils BI (Excel/Power BI)": bi_score, "Connaissance SQL": sql_score, "Exposition donnees bancaires/Core Banking": bank_score, "Coherence et progression": coher_score, "Qualite CV + Lettre": qualite_score, "Competences avancees": avance_score}
     synthese = f"Candidat avec un score de {total_score}/14. "
     if total_score >= 11:
-        synthese += "Profil très solide pour le poste de Data Analyst Finance. Excellente adéquation avec les exigences du poste. À recommander pour entretien prioritaire."
+        synthese += "Profil tres solide pour le poste de Data Analyst Finance. Excellente adequation avec les exigences du poste. A recommander pour entretien prioritaire."
     elif total_score >= 7:
-        synthese += "Profil intéressant avec des compétences pertinentes. Certains domaines sont à approfondir mais le potentiel est présent. À convoquer en entretien."
+        synthese += "Profil interessant avec des competences pertinentes. Certains domaines sont a approfondir mais le potentiel est present. A convoquer en entretien."
     else:
-        synthese += "Profil insuffisant pour le poste. Manque de compétences clés en analyse financière et outils BI."
+        synthese += "Profil insuffisant pour le poste. Manque de competences cles en analyse financiere et outils BI."
     return {'score': total_score, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/14 — {decision}", 'points_forts': points_forts, 'points_vigilance': points_vigilance, 'synthese': synthese}
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
@@ -1793,12 +1582,12 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     nb_elim_manquants = len(flags_elim)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'score_breakdown': {'bloc1_eliminatoire': False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'score_final': score_final, 'note': f"Score: {score_final}/10"}}
 KEYWORD_MAPPING = {
-    "Expérience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
-    "Minimum 3 ans en crédit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
-    "Minimum 1 an d'expérience dans une fonction bancaire": ["EXP_BANK_1ANS"],
-    "Minimum 3 ans en opérations bancaires ou back-office (hors stage)": ["EXP_BACKOFFICE_3ANS"],
-    "A une exposition au cycle de vie du crédit bancaire": ["cycle de credit", "mise en place credit", "suivi credit", "garantie", "echeances credit", "credit administration", "administration de credit"],
-    "A une connaissance des normes comptables bancaires ou de la réglementation COBAC": ["cobac", "reglementation bancaire", "ifrs 9", "normes ifrs", "comptabilite bancaire", "syscohada", "bale ii", "bale iii"]
+    "Experience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
+    "Minimum 3 ans en credit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
+    "Minimum 1 an d'experience dans une fonction bancaire": ["EXP_BANK_1ANS"],
+    "Minimum 3 ans en operations bancaires ou back-office (hors stage)": ["EXP_BACKOFFICE_3ANS"],
+    "A une exposition au cycle de vie du credit bancaire": ["cycle de credit", "mise en place credit", "suivi credit", "garantie", "echeances credit", "credit administration", "administration de credit"],
+    "A une connaissance des normes comptables bancaires ou de la reglementation COBAC": ["cobac", "reglementation bancaire", "ifrs 9", "normes ifrs", "comptabilite bancaire", "syscohada", "bale ii", "bale iii"]
 }
 EXP_MIN_YEARS_MAP = {"EXP_CREDIT_3ANS": 3.0, "EXP_BANK_1ANS": 1.0, "EXP_BACKOFFICE_3ANS": 3.0}
 DOMAIN_KEYWORDS_MAP = {"EXP_CREDIT_3ANS": ["credit", "risque", "banque", "bancaire", "institution financiere", "analyste", "charge", "gestionnaire", "loan", "credit analysis"], "EXP_BANK_1ANS": ["credit", "banque", "bancaire", "administration credit", "back office", "back-office", "risque", "risk", "analyse credit", "credit analysis", "loan", "institution financiere", "financial institution", "banking", "credit officer", "credit analyst", "credit administrator", "charge de credit", "gestionnaire credit", "analyste credit", "operations bancaires", "banking operations", "portfolio", "portefeuille", "garantie", "collateral"], "EXP_BACKOFFICE_3ANS": ["back-office", "back office", "operations bancaires", "compensation", "interbancaire", "banque", "bancaire", "middle office", "moyens de paiement", "traitement des operations", "chambre de compensation"]}
@@ -1843,7 +1632,7 @@ def check_criterion_match_advanced(criterion, normalized_text, raw_full_text="",
 def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, poste=None):
     blocks = split_into_jobs(full_raw_text)
     total_years = 0.0
-    years_patterns = [r'(\d+)\s*(?:années?|ans?)', r'plus\s+de\s+(\d+)\s*(?:années?|ans?)', r'\(\s*(\d+)\s*\)\s*(?:années?|ans?)', r'\w+\s+\(\s*(\d+)\s*\)\s*(?:années?|ans?)', r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:années?|ans?)', r'(\d+)\s*(?:années?|ans?)\s+(?:d[ée]?expérience|dans|en|de)', r'expérience\s+(?:de\s+)?(\d+)\s*(?:années?|ans?)']
+    years_patterns = [r'(\d+)\s*(?:annees?|ans?)', r'plus\s+de\s+(\d+)\s*(?:annees?|ans?)', r'\(\s*(\d+)\s*\)\s*(?:annees?|ans?)', r'\w+\s+\(\s*(\d+)\s*\)\s*(?:annees?|ans?)', r'depuis\s+(?:plus\s+de\s+)?(\d+)\s*(?:annees?|ans?)', r'(\d+)\s*(?:annees?|ans?)\s+(?:d[ée]?experience|dans|en|de)', r'experience\s+(?:de\s+)?(\d+)\s*(?:annees?|ans?)']
     text_lower = full_raw_text.lower()
     for pattern in years_patterns:
         matches = re.findall(pattern, text_lower, re.IGNORECASE)
@@ -1854,7 +1643,7 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
                     return True
             except (ValueError, TypeError):
                 continue
-    banking_posts = ["Responsable Administration de Crédit", "Analyste Crédit CCB", "Senior Finance Officer", "Market Risk Officer", "Chargé(e) d'Administration de Crédit"]
+    banking_posts = ["Responsable Administration de Credit", "Analyste Credit CCB", "Senior Finance Officer", "Market Risk Officer", "Charge(e) d'Administration de Credit"]
     for block in blocks:
         if is_stage_block(block):
             continue
@@ -1868,47 +1657,66 @@ def has_experience_years_strict(full_raw_text, min_years, domain_keywords=None, 
 def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     if not IA_ANALYSE_ACTIVE or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
         return None
-    tool = {"name": "soumettre_analyse_candidature", "description": "Soumet l'analyse structurée d'une candidature.", "input_schema": {"type": "object", "properties": {"eliminatoire": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "valide": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "valide", "justification"]}}, "a_verifier": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "signaux_forts": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "points_attention": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "present": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "present", "justification"]}}, "lettre_motivation": {"type": "object", "properties": {"presente": {"type": "boolean"}, "coherente_avec_cv": {"type": "boolean"}, "generique_ou_copiee": {"type": "boolean"}, "qualite_redactionnelle": {"type": "string", "enum": ["bonne", "moyenne", "faible", "non_evaluable"]}, "eliminatoire": {"type": "boolean"}, "commentaire": {"type": "string"}}, "required": ["presente", "coherente_avec_cv", "generique_ou_copiee", "qualite_redactionnelle", "eliminatoire", "commentaire"]}, "diplomes": {"type": "object", "properties": {"niveau_suffisant": {"type": "boolean"}, "domaine_pertinent": {"type": "boolean"}, "atout_complementaire_detecte": {"type": "boolean"}, "commentaire": {"type": "string"}}, "required": ["niveau_suffisant", "domaine_pertinent", "atout_complementaire_detecte", "commentaire"]}, "sous_scores": {"type": "object", "additionalProperties": {"type": "integer"}}, "score_total": {"type": "integer"}, "decision": {"type": "string"}, "points_forts": {"type": "array", "items": {"type": "string"}}, "points_vigilance": {"type": "array", "items": {"type": "string"}}, "synthese_recruteur": {"type": "string"}}, "required": ["eliminatoire", "a_verifier", "signaux_forts", "points_attention", "lettre_motivation", "diplomes", "sous_scores", "score_total", "decision", "points_forts", "points_vigilance", "synthese_recruteur"]}}
-    SYSTEM_PROMPT_RECRUTEUR = """Tu es un responsable recrutement senior avec 15 ans d'expérience dans le secteur bancaire en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
-REGLES ABSOLUES D'AUTHENTICITE :
-1. Tu ne JAMAIS inventer de faits qui ne sont PAS dans les documents fournis.
-2. Si une information n'est PAS explicitement mentionnée, tu considères qu'elle N'EXISTE PAS.
-3. Tu ne fais AUCUNE supposition, AUCUNE interprétation excessive.
-4. Les stages, bénévolats et formations NE COMPTENT PAS comme expérience professionnelle.
-5. Tu justifies CHAQUE évaluation avec une citation courte du document concerné.
-6. Tu suis STRICTEMENT la grille fournie."""
+    tool = {"name": "soumettre_analyse_candidature", "description": "Soumet l'analyse structuree d'une candidature.", "input_schema": {"type": "object", "properties": {"eliminatoire": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "valide": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "valide", "justification"]}}, "a_verifier": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "signaux_forts": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "detecte": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "detecte", "justification"]}}, "points_attention": {"type": "array", "items": {"type": "object", "properties": {"critere": {"type": "string"}, "present": {"type": "boolean"}, "justification": {"type": "string"}}, "required": ["critere", "present", "justification"]}}, "lettre_motivation": {"type": "object", "properties": {"presente": {"type": "boolean"}, "coherente_avec_cv": {"type": "boolean"}, "generique_ou_copiee": {"type": "boolean"}, "qualite_redactionnelle": {"type": "string", "enum": ["bonne", "moyenne", "faible", "non_evaluable"]}, "eliminatoire": {"type": "boolean"}, "commentaire": {"type": "string"}}, "required": ["presente", "coherente_avec_cv", "generique_ou_copiee", "qualite_redactionnelle", "eliminatoire", "commentaire"]}, "diplomes": {"type": "object", "properties": {"niveau_suffisant": {"type": "boolean"}, "domaine_pertinent": {"type": "boolean"}, "atout_complementaire_detecte": {"type": "boolean"}, "commentaire": {"type": "string"}}, "required": ["niveau_suffisant", "domaine_pertinent", "atout_complementaire_detecte", "commentaire"]}, "sous_scores": {"type": "object", "additionalProperties": {"type": "integer"}}, "score_total": {"type": "integer"}, "decision": {"type": "string"}, "points_forts": {"type": "array", "items": {"type": "string"}}, "points_vigilance": {"type": "array", "items": {"type": "string"}}, "synthese_recruteur": {"type": "string"}}, "required": ["eliminatoire", "a_verifier", "signaux_forts", "points_attention", "lettre_motivation", "diplomes", "sous_scores", "score_total", "decision", "points_forts", "points_vigilance", "synthese_recruteur"]}}
+    SYSTEM_PROMPT_RECRUTEUR = """Tu es un responsable recrutement senior avec 15 ans d'experience dans le secteur bancaire en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
+    REGLES ABSOLUES D'AUTHENTICITE :
+    1. Tu ne JAMAIS inventer de faits qui ne sont PAS dans les documents fournis.
+    2. Si une information n'est PAS explicitement mentionnee, tu consideres qu'elle N'EXISTE PAS.
+    3. Tu ne fais AUCUNE supposition, AUCUNE interpretation excessive.
+    4. Les stages, benefolats et formations NE COMPTENT PAS comme experience professionnelle.
+    5. Tu justifies CHAQUE evaluation avec une citation courte du document concerne.
+    6. Tu suis STRICTEMENT la grille fournie."""
     try:
         grille = GRILLE.get(poste, {})
         def fmt_list(items):
             return "\n".join(f"  {i+1}. {c}" for i, c in enumerate(items)) if items else "  (aucun)"
         user_msg = f"""POSTE : {poste}
-GRILLE :
-Eliminatoires :
-{fmt_list(grille.get('eliminatoire', []))}
-A vérifier :
-{fmt_list(grille.get('a_verifier', []))}
-Signaux forts :
-{fmt_list(grille.get('signaux_forts', []))}
-Points attention :
-{fmt_list(grille.get('points_attention', []))}
-DOCUMENTS :
-CV : {cv_text[:8000]}
-Lettre : {lettre_text[:3000] if lettre_text else '(aucune)'}
-Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list else '(aucune)'}"""
+    GRILLE :
+    Eliminatoires :
+    {fmt_list(grille.get('eliminatoire', []))}
+    A verifier :
+    {fmt_list(grille.get('a_verifier', []))}
+    Signaux forts :
+    {fmt_list(grille.get('signaux_forts', []))}
+    Points attention :
+    {fmt_list(grille.get('points_attention', []))}
+    DOCUMENTS :
+    CV : {cv_text[:8000]}
+    Lettre : {lettre_text[:3000] if lettre_text else '(aucune)'}
+    Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list else '(aucune)'}"""
         with _ia_semaphore:
-            response = _claude_client.messages.create(model=ANTHROPIC_MODEL, max_tokens=4096, temperature=0, system=SYSTEM_PROMPT_RECRUTEUR, tools=[tool], tool_choice={"type": "tool", "name": "soumettre_analyse_candidature"}, messages=[{"role": "user", "content": user_msg}])
-        tool_use = next((b for b in response.content if b.type == "tool_use"), None)
+            response = _deepseek_client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT_RECRUTEUR},
+                    {"role": "user", "content": user_msg}
+                ],
+                temperature=0.1,
+                max_tokens=4096,
+                response_format={"type": "json_object"}
+            )
+        result_text = response.choices[0].message.content
+        try:
+            analyse = json.loads(result_text)
+        except json.JSONDecodeError:
+            import re as re_json
+            json_match = re_json.search(r'\{[\s\S]*\}', result_text)
+            if json_match:
+                analyse = json.loads(json_match.group())
+            else:
+                return None
+        tool_use = {"input": analyse}
         if not tool_use:
             return None
-        analyse = tool_use.input
+        analyse = tool_use["input"]
         flags_elim = [e['critere'] for e in analyse.get('eliminatoire', []) if not e.get('valide')]
         lm = analyse.get('lettre_motivation', {})
         if lm.get('eliminatoire'):
-            flags_elim.append(f"Lettre: {lm.get('commentaire', 'éliminatoire')}")
+            flags_elim.append(f"Lettre: {lm.get('commentaire', 'eliminatoire')}")
         score_total = 0 if flags_elim else int(analyse.get('score_total', 0))
         decision = get_recommandation_from_score(score_total, poste)
         score_max = get_score_max_for_poste(poste)
-        return {'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'details': {'moteur': 'IA (Claude)', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': analyse.get('sous_scores', {}), 'score_final': score_total, 'score_max': score_max, 'decision': decision}}
+        return {'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'details': {'moteur': 'IA (DeepSeek)', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': analyse.get('sous_scores', {}), 'score_final': score_total, 'score_max': score_max, 'decision': decision}}
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
         return None
@@ -1924,7 +1732,7 @@ def get_display_status(c):
     if decision:
         if "Entretien prioritaire" in decision or "Shortlist" in decision:
             return "retenu"
-        elif "Potentiel" in decision or "considérer" in decision or "Faible" in decision:
+        elif "Potentiel" in decision or "considerer" in decision or "Faible" in decision:
             return "entretien"
         else:
             return "rejete"
@@ -1947,60 +1755,60 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                 for key, value in sous_scores.items():
                     if value > 0:
                         lines.append(f"  • {key}: {value}/3")
-            if note and "Décision" not in note and len(note) > 5:
+            if note and "Decision" not in note and len(note) > 5:
                 lines.append(f"\nNOTE RECRUTEUR : {note}")
             return "\n".join(lines)
-        if note and "Décision" not in note and len(note) > 5:
+        if note and "Decision" not in note and len(note) > 5:
             return f"RETENU - {note}"
         return "RETENU - Candidature retenue"
     if statut == "entretien":
-        lines = ["POTENTIEL À ÉVALUER :"]
+        lines = ["POTENTIEL A EVALUER :"]
         if strengths:
             for s in strengths[:2]:
                 lines.append(f"  • {s}")
         if weaknesses:
-            lines.append("Points à vérifier :")
+            lines.append("Points a verifier :")
             for w in weaknesses[:2]:
                 lines.append(f"  • {w}")
-        if note and "Décision" not in note and len(note) > 5:
+        if note and "Decision" not in note and len(note) > 5:
             lines.append(f"\nNOTE RECRUTEUR : {note}")
         return "\n".join(lines)
     if statut == "rejete":
         if flags:
-            lines = ["CRITÈRES ÉLIMINATOIRES NON SATISFAITS :"]
+            lines = ["CRITERES ELIMINATOIRES NON SATISFAITS :"]
             for flag in flags[:4]:
-                clean = str(flag).replace('❌', '').replace('⚠️', '').strip()
+                clean = str(flag).replace('', '').replace('', '').strip()
                 if clean and len(clean) > 3:
                     lines.append(f"  • {clean}")
             if len(flags) > 4:
                 lines.append(f"  • +{len(flags)-4} autre(s)")
-            if note and "Décision" not in note and len(note) > 5:
+            if note and "Decision" not in note and len(note) > 5:
                 lines.append(f"\nNOTE RECRUTEUR : {note}")
             return "\n".join(lines)
         if weaknesses:
             lines = ["POINTS DE VIGILANCE :"]
             for w in weaknesses[:4]:
                 lines.append(f"  • {w}")
-            if note and "Décision" not in note and len(note) > 5:
+            if note and "Decision" not in note and len(note) > 5:
                 lines.append(f"\nNOTE RECRUTEUR : {note}")
             return "\n".join(lines)
-        if note and "Décision" not in note and len(note) > 5:
-            return f"REJETÉ - {note}"
+        if note and "Decision" not in note and len(note) > 5:
+            return f"REJETE - {note}"
         if score == 0:
-            return "REJETÉ - Analyse automatique : le candidat ne répond pas aux critères éliminatoires du poste"
+            return "REJETE - Analyse automatique : le candidat ne repond pas aux criteres eliminatoires du poste"
         if score < 7:
-            return f"REJETÉ - Score insuffisant ({score}/{score_max}) - Profil ne correspond pas aux exigences du poste"
-        return "REJETÉ - Profil ne correspond pas aux exigences du poste"
+            return f"REJETE - Score insuffisant ({score}/{score_max}) - Profil ne correspond pas aux exigences du poste"
+        return "REJETE - Profil ne correspond pas aux exigences du poste"
     else:
         if flags:
-            lines = ["CRITÈRES ÉLIMINATOIRES :"]
+            lines = ["CRITERES ELIMINATOIRES :"]
             for flag in flags[:3]:
-                clean = str(flag).replace('❌', '').replace('⚠️', '').strip()
+                clean = str(flag).replace('', '').replace('', '').strip()
                 if clean and len(clean) > 5:
                     lines.append(f"  • {clean}")
             return "\n".join(lines)
         if "Entretien prioritaire" in decision_auto or "Shortlist" in decision_auto:
-            lines = ["PROFIL RECOMMANDÉ :"]
+            lines = ["PROFIL RECOMMANDE :"]
             if strengths:
                 for s in strengths[:4]:
                     lines.append(f"  • {s}")
@@ -2010,7 +1818,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                         lines.append(f"  • {key}: {value}/3")
             return "\n".join(lines)
         elif "Potentiel" in decision_auto:
-            lines = ["POTENTIEL À ÉVALUER :"]
+            lines = ["POTENTIEL A EVALUER :"]
             if strengths:
                 for s in strengths[:2]:
                     lines.append(f"  • {s}")
@@ -2126,7 +1934,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
             rec_color = ""
             statut = c.get('statut', 'en_attente')
             if statut == "rejete":
-                decision_final = "Rejeté"
+                decision_final = "Rejete"
                 rec_color = "FF0000"
             elif statut == "retenu":
                 decision_final = "Retenu"
@@ -2138,7 +1946,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
                 decision_final = get_recommandation_from_score(score, poste)
                 if "Entretien prioritaire" in decision_final or "Shortlist" in decision_final:
                     rec_color = "00B050"
-                elif "Potentiel" in decision_final or "considérer" in decision_final or "Faible" in decision_final:
+                elif "Potentiel" in decision_final or "considerer" in decision_final or "Faible" in decision_final:
                     rec_color = "FFC000"
                 else:
                     rec_color = "FF0000"
@@ -2221,7 +2029,7 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
             score_max_local = get_score_max_for_poste(poste)
             statut = c.get('statut', 'en_attente')
             if statut == "rejete":
-                decision = "Rejeté"
+                decision = "Rejete"
             elif statut == "retenu":
                 decision = "Retenu"
             elif statut == "entretien":
@@ -2250,7 +2058,7 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(0.8, 1, 0.8)))
             elif decision_val == "Entretien":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.95, 0.6)))
-            elif decision_val == "Rejeté":
+            elif decision_val == "Rejete":
                 tbl_style.append(('BACKGROUND', (8, row_idx), (8, row_idx), colors.Color(1, 0.85, 0.85)))
         tbl.setStyle(TableStyle(tbl_style))
         els.append(tbl)
@@ -2323,7 +2131,7 @@ def generate_word_report(candidats_data, poste_filter=None):
             score_max = get_score_max_for_poste(c.get('poste', ''))
             statut = c.get('statut', 'en_attente')
             if statut == "rejete":
-                recommandation = "Rejeté"
+                recommandation = "Rejete"
             elif statut == "retenu":
                 recommandation = "Retenu"
             elif statut == "entretien":
@@ -2376,9 +2184,9 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 cv_text = extract_text_robust_from_bytes(cv_bytes, cv_filename)
                 if len(cv_text) > MAX_TEXT_SIZE:
                     cv_text = cv_text[:MAX_TEXT_SIZE]
-                logger.info(f"CV extrait pour {token}: {len(cv_text)} caractères")
+                logger.info(f"CV extrait pour {token}: {len(cv_text)} caracteres")
                 if len(cv_text) < 50:
-                    logger.warning(f"CV {cv_filename} très court ({len(cv_text)} caractères)")
+                    logger.warning(f"CV {cv_filename} tres court ({len(cv_text)} caracteres)")
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase_robust(lettre_filename)
@@ -2386,7 +2194,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 lm_text = extract_text_robust_from_bytes(lm_bytes, lettre_filename)
                 if len(lm_text) > MAX_TEXT_SIZE:
                     lm_text = lm_text[:MAX_TEXT_SIZE]
-                logger.info(f"Lettre extraite pour {token}: {len(lm_text)} caractères")
+                logger.info(f"Lettre extraite pour {token}: {len(lm_text)} caracteres")
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -2414,27 +2222,39 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         logger.warning(f"CV et lettre identiques pour {token} (similarite: {similarity:.0%})")
                         lm_text = ""
                         supabase.table('candidats').update({"note": "Attention: Le CV et la lettre de motivation sont identiques. Une lettre personnalisee est attendue."}).eq('token', token).execute()
-        logger.info(f"Analyse pour {token} - poste: {poste}, CV: {len(cv_text)} caractères")
+        logger.info(f"Analyse pour {token} - poste: {poste}, CV: {len(cv_text)} caracteres")
         gc.collect()
-        if poste == "Chargé(e) d'Administration de Crédit":
-            result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
-            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
-        elif poste == "Chef de Section Compensation":
-            result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
-            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
-        elif poste == "Chef de Division Local Corporate":
-            logger.info(f"Appel du scoring specifique pour {poste}")
-            result = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
-            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/14 - {result.get('decision', 'Inconnu')}")
-        elif poste == "Data Analyst Finance":
-            result = calculate_score_data_analyst_finance(cv_text, lm_text, att_texts)
-            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/14 - {result.get('decision', 'Inconnu')}")
+        if IA_ANALYSE_ACTIVE and poste in GRILLE:
+            logger.info(f"Utilisation de DeepSeek pour l'analyse du poste: {poste}")
+            result = analyze_cv_with_deepseek_reasoning(cv_text, lm_text, att_texts, poste)
+            if result:
+                logger.info(f"Analyse DeepSeek reussie pour {token} - Score: {result.get('score', 0)}/{result.get('score_max', 0)}")
+            else:
+                logger.warning(f"DeepSeek a echoue, fallback vers scoring specifique pour {poste}")
+                result = None
         else:
-            result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
-            if result is None:
-                logger.info(f"Fallback vers analyse_grille pour {poste}")
-                result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
-            logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/10 - {result.get('decision', 'Inconnu')}")
+            logger.info(f"Fallback vers scoring specifique pour {poste}")
+            result = None
+        if result is None:
+            if poste == "Charge(e) d'Administration de Credit":
+                result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
+                logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
+            elif poste == "Chef de Section Compensation":
+                result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
+                logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/12 - {result.get('decision', 'Inconnu')}")
+            elif poste == "Chef de Division Local Corporate":
+                logger.info(f"Appel du scoring specifique pour {poste}")
+                result = calculate_score_chef_division_corporate(cv_text, lm_text, att_texts)
+                logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/14 - {result.get('decision', 'Inconnu')}")
+            elif poste == "Data Analyst Finance":
+                result = calculate_score_data_analyst_finance(cv_text, lm_text, att_texts)
+                logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/14 - {result.get('decision', 'Inconnu')}")
+            else:
+                result = analyze_cv_intelligent(cv_text, lm_text, att_texts, poste)
+                if result is None:
+                    logger.info(f"Fallback vers analyse_grille pour {poste}")
+                    result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
+                logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/10 - {result.get('decision', 'Inconnu')}")
         score = result.get('score', 0)
         score_max = result.get('score_max', get_score_max_for_poste(poste))
         decision = result.get('decision') or get_recommandation_from_score(score, poste)
@@ -2445,8 +2265,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         details['points_forts'] = result.get('points_forts', [])
         details['points_vigilance'] = result.get('points_vigilance', [])
         details['synthese_recruteur'] = result.get('synthese', '')
-        details['moteur'] = 'scoring_specifique_v2'
-        score_breakdown = {'score_final': score, 'score_max': score_max, 'decision': decision, 'moteur_analyse': 'scoring_specifique_v2', 'sous_scores': result.get('sous_scores', {})}
+        details['moteur'] = 'deepseek_reasoning' if IA_ANALYSE_ACTIVE else 'scoring_specifique_v2'
+        score_breakdown = {'score_final': score, 'score_max': score_max, 'decision': decision, 'moteur_analyse': details['moteur'], 'sous_scores': result.get('sous_scores', {})}
         if supabase:
             update_data = {"score": str(score), "decision": decision, "statut": statut, "analyse_status": "completed", "analyse_auto_date": datetime.datetime.now().isoformat()}
             if result.get('checklist'):
@@ -2556,7 +2376,7 @@ def postuler():
         supabase.table('candidats').insert({"token": token, "nom": nom, "prenom": prenom, "email": email, "telephone": telephone, "poste": poste, "numero_dossier": numero_dossier, "cv_filename": cv_filename, "lettre_filename": lettre_filename, "attestation_filenames": json.dumps(att_filenames, ensure_ascii=False), "statut": "en_attente", "note": "", "score": "0", "checklist": "", "flags_eliminatoires": "", "signaux_detectes": "", "score_breakdown": "", "analyse_status": "pending", "date_candidature": datetime.datetime.now().isoformat()}).execute()
         if is_poste_actif(poste):
             threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste, False), daemon=True).start()
-            analyse_msg = 'Analyse automatique en cours'
+            analyse_msg = 'Analyse automatique en cours avec DeepSeek'
         else:
             analyse_msg = 'Poste cloture — candidature enregistree sans analyse'
             supabase.table('candidats').update({"analyse_status": "closed_post_no_analysis", "analyse_auto_date": datetime.datetime.now().isoformat()}).eq('token', token).execute()
@@ -2564,7 +2384,7 @@ def postuler():
         sujet_confirmation = f"Confirmation de candidature – {poste}"
         corps_confirmation = f"Bonjour {nom_complet},\nNous accusons reception de votre candidature.\nSans reponse de notre part sous deux (2) semaines, veuillez considerer que votre candidature n'a pas ete retenue.\nPour toute information : contact@cdotchad.com.\nCordialement,"
         threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
-        return jsonify({'message': 'Candidature soumise avec succes', 'token': token, 'numero_dossier': numero_dossier, 'analyse': analyse_msg, 'poste_statut': 'actif' if is_poste_actif(poste) else 'cloture'}), 201
+        return jsonify({'message': 'Candidature soumise avec succes', 'token': token, 'numero_dossier': numero_dossier, 'analyse': analyse_msg, 'poste_statut': 'actif' if is_poste_actif(poste) else 'cloture', 'ia_engine': 'DeepSeek Reasoning' if IA_ANALYSE_ACTIVE else 'Fallback'}), 201
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2689,11 +2509,11 @@ def update_candidat(token):
         return jsonify({'error': 'Statut invalide'}), 400
     update_data = {"statut": statut, "note": note, "decision_date": datetime.datetime.now().isoformat(), "decided_by": get_jwt_identity()}
     if statut == "rejete":
-        update_data["decision"] = "Rejet - Décision du recruteur"
+        update_data["decision"] = "Rejet - Decision du recruteur"
     elif statut == "retenu":
-        update_data["decision"] = "Retenu - Décision du recruteur"
+        update_data["decision"] = "Retenu - Decision du recruteur"
     elif statut == "entretien":
-        update_data["decision"] = "Entretien - Décision du recruteur"
+        update_data["decision"] = "Entretien - Decision du recruteur"
     supabase.table('candidats').update(update_data).eq('token', token).execute()
     return jsonify({'message': 'Mis a jour avec succes', 'statut': statut}), 200
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
@@ -2716,7 +2536,7 @@ def trigger_analyze(token):
         return jsonify({'error': f'Le poste "{poste}" est cloture. Utilisez ?force=1 pour forcer l\'analyse.', 'poste': poste, 'statut': 'cloture'}), 403
     supabase.table('candidats').update({"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()}).eq('token', token).execute()
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, force), daemon=True).start()
-    return jsonify({'message': 'Analyse re-declenchee', 'token': token}), 202
+    return jsonify({'message': 'Analyse re-declenchee avec DeepSeek', 'token': token, 'ia_engine': 'DeepSeek Reasoning'}), 202
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
 def get_reanalyze_status():
@@ -2920,7 +2740,7 @@ def reanalyze_fast():
                             t = extract_text_robust_from_bytes(att_bytes, fn)
                             if t:
                                 att_texts.append(t)
-                if poste == "Chargé(e) d'Administration de Crédit":
+                if poste == "Charge(e) d'Administration de Credit":
                     result = calculate_score_charge_admin_credit(cv_text, lm_text, att_texts)
                 elif poste == "Chef de Section Compensation":
                     result = calculate_score_chef_section_compensation(cv_text, lm_text, att_texts)
@@ -3029,7 +2849,7 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
     try:
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'processing'
-        logger.info(f"[job {job_id}] Début export ZIP optimisé - {datetime.datetime.now()}")
+        logger.info(f"[job {job_id}] Debut export ZIP optimise - {datetime.datetime.now()}")
         if not supabase:
             with _ZIP_JOBS_LOCK:
                 _ZIP_JOBS[job_id]['status'] = 'error'
@@ -3093,7 +2913,7 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
         tmp_fd.close()
         files_added = 0
         max_workers = min(_ZIP_MAX_WORKERS, max(1, len(download_tasks)))
-        logger.info(f"[job {job_id}] Utilisation de {max_workers} workers pour le téléchargement")
+        logger.info(f"[job {job_id}] Utilisation de {max_workers} workers pour le telechargement")
         with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             if download_tasks:
                 BATCH_SIZE = 50
@@ -3262,14 +3082,14 @@ def test_email():
         to = request.args.get('to', '')
         if not to:
             return jsonify({'error': 'Parametre ?to= requis'}), 400
-        ok = send_email(to, 'Test RecrutBank', 'Ceci est un email de test depuis RecrutBank.')
+        ok = send_email(to, 'Test RecrutBank', 'Ceci est un email de test depuis RecrutBank avec DeepSeek.')
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v6.2-cumulative",
+        "version": "v7.0-deepseek-reasoning",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3279,11 +3099,9 @@ def health_version():
         "max_concurrent_downloads": DOWNLOAD_MAX_CONCURRENT,
         "zip_max_workers": _ZIP_MAX_WORKERS,
         "intelligent_scoring": True,
-        "date_pattern_fixed": True,
-        "advanced_date_detection": True,
-        "multi_detection_methods": True,
-        "regex_direct_extraction": True,
-        "cumulative_years": True,
+        "advanced_reasoning": True,
+        "ia_provider": "DeepSeek" if IA_ANALYSE_ACTIVE else "Fallback",
+        "ia_model": DEEPSEEK_MODEL if IA_ANALYSE_ACTIVE else "N/A",
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3291,19 +3109,20 @@ if __name__ == '__main__':
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
-    logger.info(f"RecrutBank API v6.2-cumulative demarree sur le port {port}")
-    logger.info(f"Workers suggeres: {suggested_workers} (configurable via GUNICORN_WORKERS)")
-    logger.info(f"Threads par worker: 4 (configurable via GUNICORN_THREADS)")
+    logger.info("=" * 60)
+    logger.info(" RecrutBank API v7.0 - DeepSeek Reasoning Engine")
+    logger.info("=" * 60)
+    logger.info(f"Port: {port}")
+    logger.info(f"Workers suggeres: {suggested_workers}")
+    logger.info(f"Threads par worker: 4")
+    logger.info(f"IA Provider: {'DeepSeek ' if IA_ANALYSE_ACTIVE else ' Aucune'}")
+    if IA_ANALYSE_ACTIVE:
+        logger.info(f"Modele DeepSeek: {DEEPSEEK_MODEL}")
+        logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
+    logger.info(f"Mode raisonnement avance: {'ACTIF ' if IA_ANALYSE_ACTIVE else 'INACTIF '}")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
     logger.info(f"Workers ZIP max: {_ZIP_MAX_WORKERS}")
-    logger.info(f"Analyseur semantique: {'Active' if IA_ANALYSE_ACTIVE else 'Inactif (fallback mots-cles)'}")
-    logger.info(f"Mode scoring INTELLIGENT: Actif (detection des banques, extraction avancee)")
-    logger.info(f"Mode scoring STRICT: Active (rejet immediat si critere eliminaire non satisfait)")
-    logger.info(f"Priorite statut manuel: Active (le statut du recruteur prime sur la decision auto)")
-    logger.info(f"Auto-width Excel: Active (colonnes ajustees automatiquement)")
-    logger.info(f"Download retry: Active (max {DOWNLOAD_MAX_RETRIES} tentatives, backoff exponentiel)")
-    logger.info(f"Download concurrent: max {DOWNLOAD_MAX_CONCURRENT} telechargements simultanes")
-    logger.info(f"Regex directe avec cumul des annees bancaires: Active")
+    logger.info("=" * 60)
     try:
         import gunicorn
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
