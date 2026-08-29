@@ -273,9 +273,9 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
     if not result:
         return result
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + "\n".join(attestation_texts_list) if attestation_texts_list else ""
-    is_chef_agence = bool(re_json.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager', raw_full, re_json.IGNORECASE))
-    is_gestionnaire_portefeuille = bool(re_json.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit', raw_full, re_json.IGNORECASE))
-    has_portfolio_management = bool(re_json.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises', raw_full, re_json.IGNORECASE))
+    is_chef_agence = bool(re_json.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center|branch manager|agency head', raw_full, re_json.IGNORECASE))
+    is_gestionnaire_portefeuille = bool(re_json.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit|gestionnaire de clientèle|gestionnaire de clientele|commercial|chargé d\'affaires|charge d affaires|responsable de portefeuille', raw_full, re_json.IGNORECASE))
+    has_portfolio_management = bool(re_json.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises|portefeuille.*?npl|portefeuille.*?provision|recouvrement|relance client|gestion des impayés|gestion des impayes', raw_full, re_json.IGNORECASE))
     sous_scores = result.get('sous_scores', {})
     if not sous_scores:
         sous_scores = {
@@ -305,22 +305,38 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
     if score_total > score_max:
         score_total = score_max
     flags_elim = result.get('flags_eliminatoires', [])
-    if not flags_elim and (is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management):
-        flags_elim = [f for f in flags_elim if 'risque' not in f.lower() and 'credit' not in f.lower()]
+    new_flags = []
+    for flag in flags_elim:
+        flag_lower = flag.lower()
+        if is_chef_agence:
+            if 'manageriale' in flag_lower or 'management' in flag_lower or 'risque' in flag_lower or 'credit' in flag_lower or 'npl' in flag_lower or 'encadrement' in flag_lower:
+                continue
+        if (is_gestionnaire_portefeuille or has_portfolio_management):
+            if 'risque' in flag_lower or 'credit' in flag_lower or 'npl' in flag_lower or 'provision' in flag_lower or 'portefeuille' in flag_lower:
+                continue
+        if flag_lower and flag_lower.strip() and len(flag_lower) > 3:
+            new_flags.append(flag)
     result['sous_scores'] = sous_scores
     result['score'] = score_total
-    result['flags_eliminatoires'] = flags_elim
+    result['flags_eliminatoires'] = new_flags
+    if len(new_flags) == 0 and len(flags_elim) > 0:
+        poste = result.get('poste', None)
+        if not poste:
+            poste = result.get('details', {}).get('poste', None)
+        result['decision'] = get_recommandation_from_score(score_total, poste)
     if 'score_breakdown' in result:
         result['score_breakdown']['sous_scores'] = sous_scores
         result['score_breakdown']['score_final'] = score_total
+        result['score_breakdown']['decision'] = result.get('decision', '')
+        result['score_breakdown']['flags_eliminatoires'] = new_flags
     return result
 def extract_json_fallback(text):
     """Extrait les donnees minimales de la reponse textuelle avec sous-scores complets"""
     logger.info("🔧 Utilisation du fallback d'extraction JSON avec sous-scores complets")
     import re as re_json
-    is_chef_agence = bool(re_json.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager', text, re_json.IGNORECASE))
-    is_gestionnaire_portefeuille = bool(re_json.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit', text, re_json.IGNORECASE))
-    has_portfolio_management = bool(re_json.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises', text, re_json.IGNORECASE))
+    is_chef_agence = bool(re_json.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center|branch manager|agency head', text, re_json.IGNORECASE))
+    is_gestionnaire_portefeuille = bool(re_json.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit|gestionnaire de clientèle|gestionnaire de clientele|commercial|chargé d\'affaires|charge d affaires|responsable de portefeuille', text, re_json.IGNORECASE))
+    has_portfolio_management = bool(re_json.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises|portefeuille.*?npl|portefeuille.*?provision|recouvrement|relance client|gestion des impayés|gestion des impayes', text, re_json.IGNORECASE))
     flags = []
     flag_patterns = [
         (r'Aucune experience.*?bancaire|pas d\'experience.*?bancaire|sans experience.*?bancaire', 'Aucune experience dans le secteur bancaire ou financier reglemente'),
@@ -333,9 +349,9 @@ def extract_json_fallback(text):
         if re_json.search(pattern, text, re_json.IGNORECASE):
             flags.append(default)
     if is_chef_agence:
-        flags = [f for f in flags if 'manageriale' not in f and 'risque' not in f and 'Local Corporate' not in f and 'SME' not in f]
+        flags = [f for f in flags if 'manageriale' not in f and 'risque' not in f and 'Local Corporate' not in f and 'SME' not in f and 'credit' not in f.lower()]
     if is_gestionnaire_portefeuille or has_portfolio_management:
-        flags = [f for f in flags if 'risque' not in f.lower() and 'credit' not in f.lower()]
+        flags = [f for f in flags if 'risque' not in f.lower() and 'credit' not in f.lower() and 'npl' not in f.lower() and 'provision' not in f.lower()]
     points_forts = []
     if re_json.search(r'experience.*?bancaire|banque|bancaire', text, re_json.IGNORECASE):
         points_forts.append("Experience bancaire detectee")
@@ -484,7 +500,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v8.3-minimax-stable-rules',
+        'version': 'v8.4-minimax-stable-business-rules',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -510,7 +526,8 @@ def health_check():
             'local_corporate_sme': True,
             'chef_agence_auto_scoring': True,
             'portefeuille_auto_credit': True,
-            'business_rules_stable': True
+            'business_rules_stable': True,
+            'flags_auto_suppression': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -3717,7 +3734,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v8.3-minimax-stable-rules",
+        "version": "v8.4-minimax-stable-business-rules",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "14: 11/7, 12: 10/7, 100: 80/70/60, 10: 8/5",
@@ -3741,6 +3758,7 @@ def health_version():
         "chef_agence_auto_scoring": True,
         "portefeuille_auto_credit": True,
         "business_rules_stable": True,
+        "flags_auto_suppression": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3749,7 +3767,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v8.3 - {_PROVIDER} Stable Rules Engine")
+    logger.info(f"🚀 RecrutBank API v8.4 - {_PROVIDER} Stable Business Rules")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3766,7 +3784,7 @@ if __name__ == '__main__':
         logger.info(f"Local Corporate / SME: ✅ Active")
         logger.info(f"Chef d'agence = auto-scoring management & risque: ✅ Active")
         logger.info(f"Gestion de portefeuille = auto-scoring risque credit: ✅ Active")
-        logger.info(f"Business Rules applicables APRES l'IA: ✅ Stable")
+        logger.info(f"Business Rules avec auto-suppression des flags: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         test_ia_connection()
     else:
