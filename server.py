@@ -91,9 +91,9 @@ except ImportError as e:
     OPENAI_AVAILABLE = False
     logger.error(f"❌ Erreur import OpenAI: {e}")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-4-26b-a4b-it:free")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "minimax/minimax-m3:free")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-OPENROUTER_REASONING_ENABLED = os.getenv("OPENROUTER_REASONING_ENABLED", "true").lower() == "true"
+OPENROUTER_REASONING_ENABLED = os.getenv("OPENROUTER_REASONING_ENABLED", "false").lower() == "true"
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 logger.info(f"🔑 OPENROUTER_API_KEY: {'✅ Presente' if OPENROUTER_API_KEY else '❌ Manquante'}")
@@ -108,7 +108,7 @@ if OPENAI_AVAILABLE and OPENROUTER_API_KEY:
     try:
         _client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
         _MODEL = OPENROUTER_MODEL
-        _PROVIDER = "OpenRouter (Gemma-4-26B)"
+        _PROVIDER = "OpenRouter (MiniMax M3)"
         IA_ANALYSE_ACTIVE = True
         logger.info("✅ Client OpenRouter initialise avec succes (GRATUIT)")
         logger.info(f"   Modele: {_MODEL}")
@@ -229,7 +229,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v7.3-gemma-reasoning',
+        'version': 'v7.4-minimax-m3',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -1079,6 +1079,8 @@ ATTESTATIONS/CERTIFICATS :
             if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
                 api_params["extra_body"] = {"reasoning": {"enabled": True}}
                 logger.info("🧠 Reasoning active pour l'analyse (via extra_body)")
+            else:
+                logger.info("🧠 Reasoning desactive pour ce modele")
             response = _client.chat.completions.create(**api_params)
         result_text = response.choices[0].message.content
         logger.info(f"✅ Analyse {_PROVIDER} terminee: {len(result_text)} caracteres")
@@ -1110,7 +1112,7 @@ ATTESTATIONS/CERTIFICATS :
         synthese = analyse.get('synthese_recruteur', '')
         sous_scores = analyse.get('sous_scores', {})
         details = {
-            'moteur': f'{_PROVIDER} Reasoning v2',
+            'moteur': f'{_PROVIDER} v2',
             'model': _MODEL,
             'analyse_raw': analyse,
             'points_forts': points_forts,
@@ -3166,7 +3168,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v7.3-gemma-reasoning",
+        "version": "v7.4-minimax-m3",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3189,7 +3191,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v7.3 - {_PROVIDER} Reasoning Engine")
+    logger.info(f"🚀 RecrutBank API v7.4 - {_PROVIDER} Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
