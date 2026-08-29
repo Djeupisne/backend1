@@ -267,6 +267,53 @@ def parse_json_robust(result_text):
             else:
                 logger.error("❌ Aucun JSON trouve dans la reponse")
                 return None
+def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
+    """Applique les regles metier pour corriger les sous-scores et le score total"""
+    import re as re_json
+    if not result:
+        return result
+    raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + "\n".join(attestation_texts_list) if attestation_texts_list else ""
+    is_chef_agence = bool(re_json.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager', raw_full, re_json.IGNORECASE))
+    is_gestionnaire_portefeuille = bool(re_json.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit', raw_full, re_json.IGNORECASE))
+    has_portfolio_management = bool(re_json.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises', raw_full, re_json.IGNORECASE))
+    sous_scores = result.get('sous_scores', {})
+    if not sous_scores:
+        sous_scores = {
+            "experience_bancaire": 0,
+            "diplome": 0,
+            "management": 0,
+            "risque_credit": 0,
+            "experience_corporate": 0,
+            "coherence_parcours": 0,
+            "qualite_cv": 0,
+            "certification": 0
+        }
+    if is_chef_agence:
+        sous_scores["management"] = 3
+        sous_scores["risque_credit"] = 3
+        sous_scores["experience_corporate"] = 3
+        logger.info("✅ Regle metier: Chef d'agence -> management=3, risque_credit=3, experience_corporate=3")
+    if is_gestionnaire_portefeuille or has_portfolio_management:
+        if sous_scores["risque_credit"] < 2:
+            sous_scores["risque_credit"] = 2
+            logger.info("✅ Regle metier: Gestionnaire de portefeuille -> risque_credit=2")
+        if sous_scores["experience_corporate"] < 2:
+            sous_scores["experience_corporate"] = 2
+            logger.info("✅ Regle metier: Gestionnaire de portefeuille -> experience_corporate=2")
+    score_total = sum(sous_scores.values())
+    score_max = result.get('score_max', 14)
+    if score_total > score_max:
+        score_total = score_max
+    flags_elim = result.get('flags_eliminatoires', [])
+    if not flags_elim and (is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management):
+        flags_elim = [f for f in flags_elim if 'risque' not in f.lower() and 'credit' not in f.lower()]
+    result['sous_scores'] = sous_scores
+    result['score'] = score_total
+    result['flags_eliminatoires'] = flags_elim
+    if 'score_breakdown' in result:
+        result['score_breakdown']['sous_scores'] = sous_scores
+        result['score_breakdown']['score_final'] = score_total
+    return result
 def extract_json_fallback(text):
     """Extrait les donnees minimales de la reponse textuelle avec sous-scores complets"""
     logger.info("🔧 Utilisation du fallback d'extraction JSON avec sous-scores complets")
@@ -288,7 +335,7 @@ def extract_json_fallback(text):
     if is_chef_agence:
         flags = [f for f in flags if 'manageriale' not in f and 'risque' not in f and 'Local Corporate' not in f and 'SME' not in f]
     if is_gestionnaire_portefeuille or has_portfolio_management:
-        flags = [f for f in flags if 'risque' not in f]
+        flags = [f for f in flags if 'risque' not in f.lower() and 'credit' not in f.lower()]
     points_forts = []
     if re_json.search(r'experience.*?bancaire|banque|bancaire', text, re_json.IGNORECASE):
         points_forts.append("Experience bancaire detectee")
@@ -346,7 +393,7 @@ def extract_json_fallback(text):
     else:
         sous_scores["management"] = 0
     if is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management:
-        sous_scores["risque_credit"] = 3
+        sous_scores["risque_credit"] = 3 if is_chef_agence else 2
     elif re_json.search(r'npl|creances douteuses|creances impayees|impayes|provision.*?portefeuille|ifrs 9.*?stage|risk management.*?credit|ratio npl|cir|cout du risque|chef d\'agence|gestionnaire de portefeuille', text, re_json.IGNORECASE):
         sous_scores["risque_credit"] = 3
     elif re_json.search(r'credit|risque|analyse financiere|gestion de portefeuille|portefeuille.*?credit|suivi.*?portefeuille', text, re_json.IGNORECASE):
@@ -437,7 +484,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v8.2-minimax-portefeuille-auto-credit',
+        'version': 'v8.3-minimax-stable-rules',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -462,7 +509,8 @@ def health_check():
             'score_somme_sous_scores': True,
             'local_corporate_sme': True,
             'chef_agence_auto_scoring': True,
-            'portefeuille_auto_credit': True
+            'portefeuille_auto_credit': True,
+            'business_rules_stable': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -1399,7 +1447,7 @@ ATTESTATIONS/CERTIFICATS :
             'reasoning_enabled': OPENROUTER_REASONING_ENABLED,
             'json_parse_method': 'robust'
         }
-        return {
+        result = {
             'score': score_total,
             'score_max': score_max,
             'decision': decision,
@@ -1410,8 +1458,15 @@ ATTESTATIONS/CERTIFICATS :
             'points_forts': points_forts,
             'points_vigilance': points_vigilance,
             'synthese': synthese,
-            'details': details
+            'details': details,
+            'score_breakdown': {
+                'score_final': score_total,
+                'score_max': score_max,
+                'decision': decision,
+                'sous_scores': sous_scores
+            }
         }
+        return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
     except Exception as e:
         logger.error(f"❌ Erreur analyse {_PROVIDER}: {e}")
         return None
@@ -1533,7 +1588,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         synthese += "Profil tres solide, recommande pour entretien prioritaire."
     else:
         synthese += "Profil a evaluer en entretien."
-    return {
+    result = {
         'score': score,
         'score_max': 14,
         'decision': decision,
@@ -1549,8 +1604,15 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         'sous_scores': sous_scores,
         'points_forts': points_forts,
         'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance,
-        'synthese': synthese
+        'synthese': synthese,
+        'score_breakdown': {
+            'score_final': score,
+            'score_max': 14,
+            'decision': decision,
+            'sous_scores': sous_scores
+        }
     }
+    return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Charge(e) d'Administration de Credit"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
@@ -1693,7 +1755,8 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
     synthese = _generate_synthese_rac(cv_text, lettre_text, total_score, points_forts, points_vigilance)
     if flags_elim:
         synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". Score: {total_score}/12. " + synthese
-    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags_elim if flags_elim else [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
+    result = {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags_elim if flags_elim else [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese, 'score_breakdown': {'score_final': total_score, 'score_max': 12, 'decision': decision, 'sous_scores': sous_scores}}
+    return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
 def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vigilance):
     synthese = ""
     has_experience = bool(re.search(r'Express Union|Coris Bank|Ecobank|banque|bancaire|\d+\s*ans', cv_text.lower()))
@@ -1807,7 +1870,8 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
     synthese = f"Candidat avec un score de {total_score}/12"
     if flags:
         synthese = f"❌ REJET IMMEDIAT - {len(flags)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags) + ". Score: {total_score}/12. " + synthese
-    return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags)} critere(s) eliminatoire(s)" if flags else ""), 'points_forts': ["Experience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""] + flags, 'synthese': synthese}
+    result = {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags)} critere(s) eliminatoire(s)" if flags else ""), 'points_forts': ["Experience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""] + flags, 'synthese': synthese, 'score_breakdown': {'score_final': total_score, 'score_max': 12, 'decision': decision, 'sous_scores': sous_scores}}
+    return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
 def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts_list):
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
@@ -1957,7 +2021,8 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
         synthese += "Profil interessant avec des competences pertinentes. Certains domaines sont a approfondir mais le potentiel est present. A convoquer en entretien."
     else:
         synthese += "Profil insuffisant pour le poste. Manque de competences cles en analyse financiere et outils BI."
-    return {'score': total_score, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': flags_elim, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/14 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
+    result = {'score': total_score, 'score_max': 14, 'decision': decision, 'flags_eliminatoires': flags_elim, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/14 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese, 'score_breakdown': {'score_final': total_score, 'score_max': 14, 'decision': decision, 'sous_scores': sous_scores}}
+    return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
 def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, poste):
     if not cv_text or len(cv_text.strip()) < 50:
         return {'score': 0, 'checklist': {}, 'flags_eliminatoires': ['CV non analysable'], 'signaux_detectes': [], 'details': {'error': 'CV vide'}, 'score_breakdown': {'bloc1_eliminatoire': True, 'score_final': 0, 'note': 'CV non analysable'}}
@@ -2021,7 +2086,8 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
     score_final = 0 if flags_elim else sum(sous_scores.values())
     score_final = min(14, score_final)
     nb_elim_manquants = len(flags_elim)
-    return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'sous_scores': sous_scores, 'score_breakdown': {'bloc1_eliminatoire': True if flags_elim else False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'experience_corporate': corporate_exp, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'certification': certification, 'score_final': score_final, 'note': f"Score: {score_final}/14" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else "")}}
+    result = {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'sous_scores': sous_scores, 'score_breakdown': {'bloc1_eliminatoire': True if flags_elim else False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'experience_corporate': corporate_exp, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'certification': certification, 'score_final': score_final, 'note': f"Score: {score_final}/14" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else "")}}
+    return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
 KEYWORD_MAPPING = {
     "Experience bancaire": ["banque", "bancaire", "etablissement bancaire", "institution bancaire", "banque commerciale", "microfinance", "etablissement financier", "institution financiere", "secteur bancaire", "groupe bancaire", "filiale bancaire", "bank", "banking", "financial institution", "credit institution", "commercial bank", "ecobank", "orabank", "uba", "finadev", "ucec", "microfinance"],
     "Minimum 3 ans en credit / risque (hors stage)": ["EXP_CREDIT_3ANS"],
@@ -2175,7 +2241,8 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
         if flags_elim:
             decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
         score_max = get_score_max_for_poste(poste)
-        return {'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'sous_scores': sous_scores, 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': sous_scores, 'score_final': score_total, 'score_max': score_max, 'decision': decision}}
+        result = {'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'sous_scores': sous_scores, 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': sous_scores, 'score_final': score_total, 'score_max': score_max, 'decision': decision}}
+        return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
         return None
@@ -3650,7 +3717,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v8.2-minimax-portefeuille-auto-credit",
+        "version": "v8.3-minimax-stable-rules",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "14: 11/7, 12: 10/7, 100: 80/70/60, 10: 8/5",
@@ -3673,6 +3740,7 @@ def health_version():
         "local_corporate_sme": True,
         "chef_agence_auto_scoring": True,
         "portefeuille_auto_credit": True,
+        "business_rules_stable": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3681,7 +3749,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v8.2 - {_PROVIDER} Portefeuille auto-credit")
+    logger.info(f"🚀 RecrutBank API v8.3 - {_PROVIDER} Stable Rules Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3698,6 +3766,7 @@ if __name__ == '__main__':
         logger.info(f"Local Corporate / SME: ✅ Active")
         logger.info(f"Chef d'agence = auto-scoring management & risque: ✅ Active")
         logger.info(f"Gestion de portefeuille = auto-scoring risque credit: ✅ Active")
+        logger.info(f"Business Rules applicables APRES l'IA: ✅ Stable")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         test_ia_connection()
     else:
