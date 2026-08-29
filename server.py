@@ -254,6 +254,8 @@ def parse_json_robust(result_text):
         cleaned_text = re_json.sub(r'[\x00-\x1F\x7F]', '', cleaned_text)
         cleaned_text = re_json.sub(r'```json\s*', '', cleaned_text)
         cleaned_text = re_json.sub(r'\s*```', '', cleaned_text)
+        cleaned_text = re_json.sub(r'^[^{]*', '', cleaned_text)
+        cleaned_text = re_json.sub(r'[^}]*$', '', cleaned_text)
         try:
             analyse = json.loads(cleaned_text)
             logger.info("✅ JSON parse apres nettoyage")
