@@ -934,107 +934,447 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
     threshold = 0.45 if len(normalized_text) < 500 else 0.55
     return best_score >= threshold, round(best_score, 2), found_kws
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
+    """
+    Analyse INTELLIGENTE et RAISONNÉE pour le poste de Chef de Division Local Corporate.
+    Applique strictement la grille de présélection avec raisonnement d'expert recrutement bancaire.
+    Score total : /14 points
+    """
     poste = "Chef de Division Local Corporate"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
+    raw_lower = raw_full.lower()
+    
+    # =========================================================================
+    # ÉTAPE 1 : CRITÈRES ÉLIMINATOIRES (FILTRE DUR - Rejet immédiat si échec)
+    # =========================================================================
+    flags_eliminatoires = []
+    eliminatoire_failed = False
+    
+    # Critère éliminatoire 1 : Expérience secteur bancaire/financier réglementé
+    banking_keywords = ['banque', 'bancaire', 'établissement bancaire', 'institution bancaire', 
+                        'institution financière', 'secteur bancaire', 'groupe bancaire', 
+                        'ecobank', 'orabank', 'uba', 'bicec', 'sgc', 'afriland', 'standard chartered',
+                        'microfinance', 'credit institution', 'financial institution', 'banking']
+    has_banking_experience = any(kw in raw_lower for kw in banking_keywords)
+    
+    # Vérification avancée : détection des noms de banques africaines
+    african_banks = ['ecobank', 'orabank', 'uba', 'bicec', 'société générale', 'sgc', 'afriland first bank',
+                     'commercial bank', 'union bank', 'zenith bank', 'first bank', 'access bank',
+                     'scb', 'standard chartered', 'citibank', 'hsbc', 'nbad', 'bicic', 'bgfi', 'ucec',
+                     'finadev', 'renaprov', 'mc2', 'cefam', 'padme', 'lokoli', 'advans', 'alafia']
+    for bank in african_banks:
+        if bank in raw_lower:
+            has_banking_experience = True
+            break
+    
+    if not has_banking_experience:
+        flags_eliminatoires.append("Aucune expérience dans le secteur bancaire ou financier réglementé")
+        eliminatoire_failed = True
+    
+    # Critère éliminatoire 2 : Niveau diplôme Bac+4 minimum
+    has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd|bac\+[5-9]|bac [5-9]', cv_text, re.IGNORECASE))
+    has_bac4 = bool(re.search(r'bac\+4|bac 4|maîtrise|maitrise|licence.*professionnelle|diplôm.*bac\+4', cv_text, re.IGNORECASE))
+    diplome_suffisant = has_master or has_bac4
+    
+    if not diplome_suffisant:
+        flags_eliminatoires.append("Niveau de diplôme inférieur à Bac+4 (Master ou équivalent requis)")
+        eliminatoire_failed = True
+    
+    # Critère éliminatoire 3 : Minimum 5 ans d'expérience dont partie significative en banque
     banking_years = detect_banking_experience_years(raw_full)
-    if banking_years >= 5:
-        exp_bancaire = 4
-    elif banking_years >= 3:
-        exp_bancaire = 2
-    elif banking_years >= 1:
-        exp_bancaire = 1
-    else:
-        exp_bancaire = 0
-    has_master = bool(re.search(r'master|mba|ingénieur|doctorat|phd', cv_text, re.IGNORECASE))
-    has_bac4 = bool(re.search(r'bac\+[45]|bac [45]|maîtrise|licence.*professionnelle', cv_text, re.IGNORECASE))
-    if has_master:
-        diplome = 3
-    elif has_bac4:
-        diplome = 2
-    else:
-        diplome = 0
-    management_count = 0
-    for kw in ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'équipe']:
-        if kw in cv_text.lower():
-            management_count += 1
-    management = min(3, management_count)
-    credit_count = 0
-    for kw in ['crédit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impayé']:
-        if kw in cv_text.lower():
-            credit_count += 1
-    if credit_count >= 4:
-        risque_credit = 2
-    elif credit_count >= 2:
-        risque_credit = 1
-    else:
-        risque_credit = 0
-    jobs = cv_text.split('\n')
-    job_count = 0
-    for j in jobs:
-        if 'chef' in j.lower() or 'manager' in j.lower() or 'responsable' in j.lower():
-            job_count += 1
-    coherence = 2 if job_count >= 3 else (1 if job_count >= 1 else 0)
-    qualite_cv = 1 if len(cv_text) > 500 else 0
-    score = exp_bancaire + diplome + management + risque_credit + coherence + qualite_cv
-    score = min(14, score)
-    checklist = {
-        "elim_0": banking_years >= 5,
-        "elim_1": has_master or has_bac4,
-        "elim_2": management_count >= 2,
-        "elim_3": credit_count >= 3,
-        "elim_4": job_count >= 3
-    }
-    if score >= 11:
+    # Fonction helper pour détecter années d'expérience bancaire
+    exp_pattern = r'(?:expérien[cc]e?|parcours|carrière|activité).*?(\\d+)\\s*(?:ans|années)'
+    matches = re.findall(exp_pattern, raw_lower)
+    total_years = sum(int(m) for m in matches) if matches else 0
+    
+    # Comptage sophistiqué des années bancaires
+    if banking_years < 5:
+        # Tentative d'extraction depuis les blocs de poste
+        blocks = split_into_jobs(cv_text)
+        banking_total = 0.0
+        for block in blocks:
+            if is_stage_block(block):
+                continue
+            block_lower = block.lower()
+            if any(bk in block_lower for bk in banking_keywords + african_banks):
+                duration = extract_duration_years_from_block(block)
+                if duration > 0:
+                    banking_total += duration
+        if banking_total >= 5:
+            banking_years = banking_total
+    
+    if banking_years < 5:
+        flags_eliminatoires.append(f"Moins de 5 ans d'expérience professionnelle en banque ({banking_years:.1f} ans identifiés)")
+        eliminatoire_failed = True
+    
+    # Critère éliminatoire 4 : Expérience managériale (encadrement OU pilotage activité commerciale)
+    management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 
+                          'leadership', 'gestion d\'équipe', 'responsable', 'head of', 'team leader',
+                          'supervision', 'coordinateur', 'pilote', 'animation d\'équipe', 'n+1']
+    management_indicators = sum(1 for kw in management_keywords if kw in raw_lower)
+    
+    # Recherche de preuves concrètes de management
+    has_team_size = bool(re.search(r'\\d+\\s*(?:collaborateurs|personnes|équipes|salariés|employés|subordonnés)', raw_lower))
+    has_objectives = bool(re.search(r'(objectifs|cibles|targets|budget|performance).*?(?:définir|fixer|atteindre|suivre)', raw_lower))
+    has_evaluation = bool(re.search(r'(évaluation|appréciation|review|entretien).*?(?:annuel|périodique|collaborateur)', raw_lower))
+    
+    management_proven = management_indicators >= 3 or has_team_size or (has_objectives and has_evaluation)
+    
+    if not management_proven:
+        flags_eliminatoires.append("Aucune expérience managériale : ni encadrement d'équipe, ni pilotage d'une activité commerciale")
+        eliminatoire_failed = True
+    
+    # Critère éliminatoire 5 : Exposition gestion risque crédit / qualité portefeuille (NPL, provisions)
+    credit_risk_keywords = ['risque de crédit', 'credit risk', 'npl', 'non-performing loan', 'créances douteuses',
+                           'provisions', 'provisionnement', 'qualité portefeuille', 'portefeuille crédit',
+                           'impayés', 'contentieux crédit', 'recouvrement', 'classement crédit',
+                           'surveillance portefeuille', 'watchlist', 'ifrs 9', 'staging', 'ecl',
+                           'taux défaut', 'rating crédit', 'scoring crédit', 'garanties']
+    credit_risk_count = sum(1 for kw in credit_risk_keywords if kw in raw_lower)
+    
+    # Recherche spécifique NPL/CIR/provisions
+    has_npl = bool(re.search(r'npl|taux.*(douteux|improductif)|créances.*douteuses|non-performing', raw_lower))
+    has_provisions = bool(re.search(r'provision|provisionnement|perte.*crédit|impairment', raw_lower))
+    has_portfolio_quality = bool(re.search(r'qualité.*portefeuille|monitoring.*portefeuille|surveillance.*crédit', raw_lower))
+    
+    credit_risk_exposure = credit_risk_count >= 3 or has_npl or has_provisions or has_portfolio_quality
+    
+    if not credit_risk_exposure:
+        flags_eliminatoires.append("Aucune exposition à la gestion du risque de crédit ou au suivi de la qualité d'un portefeuille (NPL, provisions)")
+        eliminatoire_failed = True
+    
+    # Si critère éliminatoire échoué → score 0, rejet immédiat
+    if eliminatoire_failed:
+        return {
+            'score': 0,
+            'score_max': 14,
+            'decision': "Rejet",
+            'flags_eliminatoires': flags_eliminatoires,
+            'checklist': {},
+            'sous_scores': {
+                "Adéquation structurelle": 0,
+                "Capacité managériale": 0,
+                "Maîtrise risque crédit": 0,
+                "Cross-selling/TSG": 0,
+                "Cohérence parcours": 0,
+                "Qualité CV/Lettre": 0,
+                "Certifications": 0
+            },
+            'points_forts': [],
+            'points_vigilance': flags_eliminatoires,
+            'synthese': f"Candidature rejetée - Non-conformité aux critères éliminatoires : {'; '.join(flags_eliminatoires)}",
+            'raisonnement_recruteur': {
+                'critere_1_banque': {'valide': has_banking_experience, 'detail': f'Expérience bancaire détectée: {has_banking_experience}'},
+                'critere_2_diplome': {'valide': diplome_suffisant, 'detail': f'Bac+4+: {diplome_suffisant} (Master: {has_master}, Bac+4: {has_bac4})'},
+                'critere_3_experience': {'valide': banking_years >= 5, 'detail': f'Années banque: {banking_years:.1f}/5 requis'},
+                'critere_4_management': {'valide': management_proven, 'detail': f'Management prouvé: {management_proven} (indicateurs: {management_indicators})'},
+                'critere_5_risque_credit': {'valide': credit_risk_exposure, 'detail': f'Exposition risque crédit: {credit_risk_exposure} (NPL: {has_npl}, Provisions: {has_provisions})'}
+            }
+        }
+    
+    # =========================================================================
+    # ÉTAPE 2 : POINTS À VÉRIFIER (Score Bloc 2 - max 3 points)
+    # =========================================================================
+    points_a_verifier = 0
+    validations_details = []
+    
+    # Point 1 : Encadrement et évaluation équipe commerciale/bancaire
+    if management_proven:
+        points_a_verifier += 0.5
+        validations_details.append("Encadrement équipe confirmé")
+    
+    # Point 2 : Suivi qualité portefeuille crédit (NPL, CIR, provisions) + reporting direction
+    has_reporting_direction = bool(re.search(r'(rapport|reporting|présentation).*?(?:direction|comité|codir|conseil|dg)', raw_lower))
+    if (has_npl or has_provisions) and has_reporting_direction:
+        points_a_verifier += 0.5
+        validations_details.append("Suivi qualité portefeuille + reporting direction")
+    elif has_npl or has_provisions:
+        points_a_verifier += 0.3
+        validations_details.append("Suivi qualité portefeuille partiel")
+    
+    # Point 3 : Développement ventes croisées (cross-selling) ou partenariats interdépartementaux
+    crosssell_keywords = ['cross-selling', 'vente croisée', 'ventes croisées', 'partenariat', 'collaboration',
+                         'interdépartemental', 'transverse', 'synergie', 'offre globale', 'solution intégrée',
+                         'tsg', 'trade finance', 'cash management', 'produits associés']
+    has_crossselling = any(kw in raw_lower for kw in crosssell_keywords)
+    has_partnerships = bool(re.search(r'(partenariat|collaboration|coopération).*?(?:département|direction|équipe)', raw_lower))
+    
+    if has_crossselling or has_partnerships:
+        points_a_verifier += 0.5
+        validations_details.append("Cross-selling ou partenariats développés")
+    
+    # Point 4 : Production/supervision rapports performance commerciale et financière
+    perf_reporting_keywords = ['rapport performance', 'reporting commercial', 'tableau bord financier',
+                              'kpi commerciaux', 'indicateurs performance', 'suivi budgétaire',
+                              'analyse financière', 'p&l', 'compte résultat', 'marge', 'revenus']
+    has_perf_reporting = any(kw in raw_lower for kw in perf_reporting_keywords)
+    
+    if has_perf_reporting:
+        points_a_verifier += 0.5
+        validations_details.append("Rapports performance commerciale/financière")
+    
+    # Point 5 : Exposition réglementation bancaire locale (COBAC, BEAC) ou internationale
+    has_cobac = bool(re.search(r'cobac|réglementation.*bancaire|conformité.*bancaire', raw_lower))
+    has_beac = bool(re.search(r'beac|banque.*centrale|ce mac|uem oa', raw_lower))
+    has_basel = bool(re.search(r'bâle|bale|bale ii|bale iii|basel', raw_lower))
+    
+    if has_cobac or has_beac or has_basel:
+        points_a_verifier += 0.5
+        validations_details.append("Exposition réglementation bancaire")
+    
+    # Point 6 : Pilotage activité Corporate avec objectifs revenus atteints
+    has_corporate = bool(re.search(r'corporate|entreprises|grands comptes|clientèle.*entreprise', raw_lower))
+    has_revenue_objectives = bool(re.search(r'(chiffre.*affaires|revenu|income|sales target|objectif.*commercial).*(?:atteint|dépassé|réalisé)', raw_lower))
+    
+    if has_corporate and has_revenue_objectives:
+        points_a_verifier += 0.5
+        validations_details.append("Pilotage activité Corporate avec résultats")
+    elif has_corporate:
+        points_a_verifier += 0.3
+        validations_details.append("Expérience Corporate sans objectifs chiffrés")
+    
+    # Point 7 : Encadrement, développement, évaluation performances équipe
+    has_team_development = bool(re.search(r'(développement|formation|montée.*compétences|coaching|mentoring).*?(?:équipe|collaborateur)', raw_lower))
+    has_objectives_setting = bool(re.search(r'(fixation|définition).*?(?:objectifs|cibles|kpi).*?(?:équipe|collaborateur)', raw_lower))
+    has_annual_review = bool(re.search(r'(évaluation|entretien|appréciation).*(?:annuel|périodique|performance)', raw_lower))
+    
+    if has_team_development and has_objectives_setting:
+        points_a_verifier += 0.5
+        validations_details.append("Développement équipe et fixation objectifs")
+    
+    points_a_verifier = min(3, points_a_verifier)
+    
+    # =========================================================================
+    # ÉTAPE 3 : SIGNAUX FORTS (Score Bloc 3 - max 4 points, 0.5 par signal)
+    # =========================================================================
+    signaux_detectes = []
+    points_signaux = 0
+    
+    # Signal 1 : Cross-selling avéré avec équipes TSG, Trade Finance ou Cash Management
+    if any(kw in raw_lower for kw in ['tsg', 'trade finance', 'cash management']) and has_crossselling:
+        signaux_detectes.append("Cross-selling TSG/Trade Finance/Cash Management")
+        points_signaux += 0.5
+    
+    # Signal 2 : Leadership démontré (constitution équipe, développement, vivier talents)
+    has_leadership = bool(re.search(r'(constituer|créer|mettre en place|recruter).*?(?:équipe|structure)', raw_lower))
+    has_talent_pipeline = bool(re.search(r'(vivier.*talents|succès plan|relève|potentiel|high potential)', raw_lower))
+    
+    if has_leadership and (has_team_development or has_talent_pipeline):
+        signaux_detectes.append("Leadership et développement talents")
+        points_signaux += 0.5
+    
+    # Signal 3 : Certification Ecobank/Moody's/ITB ou équivalent
+    certifications = ['itb', 'institut technique banque', 'moody', 'ecobank certification', 
+                     'cia', 'frm', 'prm', 'cfa', 'acca', 'certification.*bancaire']
+    has_certification = any(re.search(cert, raw_lower) for cert in certifications)
+    
+    if has_certification:
+        signaux_detectes.append("Certification professionnelle bancaire")
+        points_signaux += 0.5
+    
+    # Signal 4 : Exposition plateformes numériques bancaires (OMNI, Cash Management...)
+    digital_platforms = ['omni', 'cash management', 'ebanking', 'plateforme.*numérique', 
+                        'digital banking', 'core banking', 'flexcube', 't24', 'amplitude', 'temenos']
+    has_digital_platform = any(kw in raw_lower for kw in digital_platforms)
+    
+    if has_digital_platform:
+        signaux_detectes.append("Plateformes numériques bancaires")
+        points_signaux += 0.5
+    
+    # Signal 5 : Résultats commerciaux quantifiés et vérifiables (CA, croissance, NPS)
+    quantified_results = bool(re.search(r'(\\d+\\.?\\d*)\\s*(?:%|pourcent|million|milliard|mrd|md|k|croissance|augmentation|progression|amélioration)', raw_lower))
+    has_kpi_commercial = bool(re.search(r'(chiffre.*affaires|ca|revenu|income|margin|marge|part.*marché|nps|satisfaction).*?(?:\\d|atteint|dépassé)', raw_lower))
+    
+    if quantified_results and has_kpi_commercial:
+        signaux_detectes.append("Résultats commerciaux quantifiés")
+        points_signaux += 0.5
+    
+    # Signal 6 : Développement portefeuille Corporate avec acquisition clients majeurs
+    has_new_clients = bool(re.search(r'(acquisition|nouveau|conquête).*?(?:client|compte|portefeuille)', raw_lower))
+    has_major_clients = bool(re.search(r'(grand compte|client.*majeur|key account|top client|premier.*client)', raw_lower))
+    
+    if has_corporate and (has_new_clients or has_major_clients):
+        signaux_detectes.append("Développement portefeuille Corporate")
+        points_signaux += 0.5
+    
+    # Signal 7 : Connaissance marché corporate tchadien ou zone CEMAC/UEMOA
+    has_chad = bool(re.search(r'tchad|ndjamena|tchadien', raw_lower))
+    has_cemac = bool(re.search(r'cemac|afrique.*centrale|zone.*cemac', raw_lower))
+    has_uemoa = bool(re.search(r'uemoa|afrique.*ouest|zone.*uemoa', raw_lower))
+    
+    if has_chad or has_cemac or has_uemoa:
+        signaux_detectes.append("Connaissance marché local/régional")
+        points_signaux += 0.5
+    
+    points_signaux = min(4, points_signaux)
+    
+    # =========================================================================
+    # ÉTAPE 4 : CALCUL SCORE FINAL (/14) SELON GRILLE OFFICIELLE
+    # =========================================================================
+    # Grille de scoring :
+    # - Capacité managériale démontrée : 0-3
+    # - Maîtrise risque crédit/portefeuille : 0-2
+    # - Exposition cross-selling/TSG/Cash Management : 0-2
+    # - Cohérence/progression parcours : 0-2
+    # - Qualité CV + Lettre motivation : 0-1
+    # - Certification/Connaissance CEMAC-UEMOA : 0-1
+    
+    # Sous-score 1 : Capacité managériale (0-3)
+    score_management = 0
+    if management_proven:
+        score_management = 1
+        if has_team_size or management_indicators >= 5:
+            score_management = 2
+        if has_team_development and has_objectives_setting and has_annual_review:
+            score_management = 3
+    
+    # Sous-score 2 : Maîtrise risque crédit (0-2)
+    score_credit_risk = 0
+    if credit_risk_exposure:
+        score_credit_risk = 1
+        if (has_npl or has_provisions) and has_reporting_direction:
+            score_credit_risk = 2
+    
+    # Sous-score 3 : Cross-selling/TSG (0-2)
+    score_crosssell = 0
+    if has_crossselling:
+        score_crosssell = 1
+        if any(kw in raw_lower for kw in ['tsg', 'trade finance', 'cash management']):
+            score_crosssell = 2
+    
+    # Sous-score 4 : Cohérence parcours (0-2)
+    score_coherence = 0
+    jobs_responsabilite = len(re.findall(r'(chef|responsable|directeur|manager|head|lead|senior)', raw_lower))
+    if jobs_responsabilite >= 2:
+        score_coherence = 1
+    if jobs_responsabilite >= 3 and banking_years >= 5:
+        score_coherence = 2
+    
+    # Sous-score 5 : Qualité CV + Lettre (0-1)
+    score_qualite = 0
+    has_quantified_cv = bool(re.search(r'\d+\s*(?:%|million|milliard|clients|équipe|collaborateurs)', cv_text))
+    lettre_ok = lettre_text and len(lettre_text.strip()) > 80
+    if has_quantified_cv or lettre_ok:
+        score_qualite = 1
+    
+    # Sous-score 6 : Certification/Connaissance CEMAC-UEMOA (0-1)
+    score_certif = 0
+    if has_certification or (has_chad or has_cemac or has_uemoa):
+        score_certif = 1
+    
+    # Calcul du score final selon la grille officielle (/14)
+    total_score = score_management + score_credit_risk + score_crosssell + score_coherence + score_qualite + score_certif
+    total_score = min(14, total_score)
+    
+    # Détermination de la décision selon les seuils officiels
+    if total_score >= 11:
         decision = "Entretien prioritaire"
-    elif score >= 7:
+    elif total_score >= 7:
         decision = "Potentiel à évaluer en entretien"
     else:
         decision = "Rejet"
+    
+    # Construction des points forts
     points_forts = []
+    if score_management >= 2:
+        points_forts.append(f"Capacité managériale démontrée (score: {score_management}/3)")
+    if score_credit_risk >= 2:
+        points_forts.append(f"Maîtrise du risque crédit et qualité portefeuille (score: {score_credit_risk}/2)")
+    if score_crosssell >= 2:
+        points_forts.append(f"Expertise cross-selling/TSG/Cash Management (score: {score_crosssell}/2)")
+    if score_coherence >= 2:
+        points_forts.append("Parcours cohérent avec progression hiérarchique")
+    if score_qualite >= 1:
+        points_forts.append("CV qualitatif avec résultats chiffrés ou lettre pertinente")
+    if score_certif >= 1:
+        points_forts.append("Certification bancaire ou connaissance marché local/régional")
+    if signaux_detectes:
+        points_forts.extend([f"Signal fort: {s}" for s in signaux_detectes[:3]])
+    
+    # Construction des points de vigilance
     points_vigilance = []
-    if banking_years >= 5:
-        points_forts.append(f"Plus de 5 ans d'expérience bancaire ({banking_years:.1f} ans)")
+    if score_management < 2:
+        points_vigilance.append("Capacité managériale à confirmer en entretien")
+    if score_credit_risk < 2:
+        points_vigilance.append("Maîtrise risque crédit à approfondir")
+    if score_crosssell < 1:
+        points_vigilance.append("Expérience cross-selling limitée")
+    if score_coherence < 2:
+        points_vigilance.append("Progression hiérarchique à vérifier")
+    if validations_details:
+        points_vigilance.extend([f"À vérifier: {v}" for v in validations_details if v not in points_forts])
+    
+    # Synthèse raisonnée du recruteur
+    synthese = f"Candidat avec un score de {total_score}/14. "
+    if total_score >= 11:
+        synthese += "Profil très solide pour le poste de Chef de Division Local Corporate. Excellente adéquation avec les exigences du poste : expérience bancaire confirmée, compétences managériales avérées, maîtrise du risque crédit et orientation commerciale. À recommander pour entretien prioritaire."
+    elif total_score >= 7:
+        synthese += "Profil intéressant avec des compétences pertinentes pour le poste. Certains domaines sont à approfondir mais le potentiel est présent. À convoquer en entretien pour évaluer l'adéquation réelle avec les responsabilités du poste."
     else:
-        points_vigilance.append(f"Expérience bancaire de {banking_years:.1f} ans (idéalement 5 ans+)")
-    if has_master:
-        points_forts.append("Diplôme Bac+5 ou supérieur")
-    elif has_bac4:
-        points_forts.append("Diplôme Bac+4")
-    else:
-        points_vigilance.append("Niveau de diplôme inférieur à Bac+4")
-    if management >= 2:
-        points_forts.append(f"Expérience managériale (score: {management}/3)")
-    else:
-        points_vigilance.append("Expérience managériale à renforcer")
-    if risque_credit >= 2:
-        points_forts.append(f"Exposition au risque de crédit (score: {risque_credit}/3)")
-    else:
-        points_vigilance.append("Exposition au risque de crédit limitée")
-    if coherence >= 2:
-        points_forts.append("Parcours cohérent avec des postes à responsabilité")
-    if qualite_cv >= 1:
-        points_forts.append("CV détaillé")
-    if banking_years < 5 or management < 2:
-        points_vigilance.append("Vérifier en entretien : expérience et management")
+        synthese += "Profil insuffisant pour le poste. Manque de compétences clés en management d'équipe Corporate, gestion du risque crédit ou expérience bancaire significative."
+    
     return {
-        'score': score,
+        'score': total_score,
         'score_max': 14,
         'decision': decision,
-        'flags_eliminatoires': [],
-        'checklist': checklist,
+        'flags_eliminatoires': flags_eliminatoires if eliminatoire_failed else [],
+        'checklist': {
+            "exp_bancaire_5ans": banking_years >= 5,
+            "diplome_bac4": diplome_suffisant,
+            "management_prouve": management_proven,
+            "risque_credit": credit_risk_exposure,
+            "cross_selling": has_crossselling,
+            "reglementation_bancaire": has_cobac or has_beac or has_basel
+        },
         'sous_scores': {
-            "Expérience bancaire": exp_bancaire,
-            "Diplôme": diplome,
-            "Management": management,
-            "Risque de crédit": risque_credit,
-            "Cohérence": coherence,
-            "Qualité CV": qualite_cv
+            "Capacité managériale démontrée": score_management,
+            "Maîtrise risque crédit/portefeuille": score_credit_risk,
+            "Exposition cross-selling/TSG/Cash Management": score_crosssell,
+            "Cohérence/progression parcours": score_coherence,
+            "Qualité CV + Lettre motivation": score_qualite,
+            "Certification/Connaissance CEMAC-UEMOA": score_certif
         },
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
-        'synthese': f"Candidat avec un score de {score}/14. " + (decision if "prioritaire" in decision else "À évaluer.")
+        'signaux_detectes': signaux_detectes,
+        'synthese': synthese,
+        'raisonnement_recruteur': {
+            'etape_1_eliminatoire': {
+                'statut': 'FRANCHIE' if not eliminatoire_failed else 'ECHEC',
+                'detail': f'Tous critères éliminatoires validés' if not eliminatoire_failed else f'{len(flags_eliminatoires)} critère(s) non conforme(s)'
+            },
+            'etape_2_points_a_verifier': {
+                'score_obtenu': f'{points_a_verifier}/3',
+                'validations': validations_details
+            },
+            'etape_3_signaux_forts': {
+                'score_obtenu': f'{points_signaux}/4',
+                'signaux_identifies': signaux_detectes
+            },
+            'etape_4_scoring_final': {
+                'score_management': f'{score_management}/3',
+                'score_risque_credit': f'{score_credit_risk}/2',
+                'score_crosssell': f'{score_crosssell}/2',
+                'score_coherence': f'{score_coherence}/2',
+                'score_qualite': f'{score_qualite}/1',
+                'score_certif': f'{score_certif}/1',
+                'total': f'{total_score}/14',
+                'decision': decision
+            },
+            'analyse_detaillee': {
+                'annees_experience_banque': f'{banking_years:.1f} ans',
+                'niveau_diplome': 'Bac+5+' if has_master else ('Bac+4' if has_bac4 else '<Bac+4'),
+                'indicateurs_management': management_indicators,
+                'exposition_risque_credit': credit_risk_count,
+                'npl_detectes': has_npl,
+                'provisions_detectes': has_provisions,
+                'cross_selling_present': has_crossselling,
+                'certifications_presentes': has_certification,
+                'connaissance_marche_local': has_chad or has_cemac or has_uemoa
+            }
+        }
     }
+
 def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_list):
     poste = "Chargé(e) d'Administration de Crédit"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
