@@ -684,27 +684,43 @@ def get_statut_from_decision(decision):
 def split_into_jobs(raw_text):
     if not raw_text:
         return []
-    text = re.sub(r'\s+', ' ', raw_text)
-    patterns = [
-        r'(?:^|\n)(?=\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2})\s*[-–—])',
-        r'(?:^|\n)(?=\s*(?:de|du|d[eu]|from|since)\s+(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}))',
-        r'(?:^|\n)(?=\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2})\s*[-–—]\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}|présent|present|current))',
-        r'(?:^|\n)(?=\s*(?:[A-Z][A-Z\s]+)\s*(?:-|–|—)\s*(?:[A-Z][a-z]+\s+)?(?:20\d{2}|19\d{2}))',
-    ]
-    blocks = []
+    # D'abord, on cherche les positions des débuts de blocs AVANT de normaliser les espaces
     positions = []
-    for pattern in patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE):
+    
+    # Patterns à chercher dans le texte original (avec les sauts de ligne)
+    patterns_with_newlines = [
+        # Format: Depuis Année (ex: Depuis avril 2023)
+        r'(?:^|\n)(?=\s*(?:Depuis|desde|Since)\s+[A-Z][a-z]+\s+(?:20\d{2}|19\d{2}))',
+        # Format: Mois Année à Mois Année (ex: Mai 2022 à Mars 2023, Décembre 2014 à 2021)
+        r'(?:^|\n)(?=\s*[A-Z][a-z]+\s+(?:20\d{2}|19\d{2})\s+(?:à|au)\s+[A-Z]?[a-z]*\s*(?:20\d{2}|19\d{2}))',
+        # Format: Mois Année - Mois Année (ex: Janvier 2021- Avril 2022, Juin 2013 – Décembre 2013)
+        r'(?:^|\n)(?=\s*[A-Z][a-z]+\s+(?:20\d{2}|19\d{2})\s*[-–—]\s*[A-Z]?[a-z]*\s+(?:20\d{2}|19\d{2}))',
+        # Format: Année - Année (ex: 2010 – Mai 2013, 2009 – 2010)
+        r'(?:^|\n)(?=\s*(?:20\d{2}|19\d{2})\s+[-–—]\s*(?:20\d{2}|19\d{2}))',
+        # Format: de/du/depuis Mois Année
+        r'(?:^|\n)(?=\s*(?:de|du|d[eù]|from|since)\s+[A-Z][a-z]+\s+(?:20\d{2}|19\d{2}))',
+        # Format: Année - Présent
+        r'(?:^|\n)(?=\s*(?:20\d{2}|19\d{2})\s+[-–—]\s*(?:présent|present|current|actuel))',
+    ]
+    
+    for pattern in patterns_with_newlines:
+        for match in re.finditer(pattern, raw_text, re.IGNORECASE | re.MULTILINE):
             positions.append(match.start())
+    
     positions = sorted(set(positions))
+    
     if not positions:
-        return [text.strip()] if text.strip() else []
+        return [raw_text.strip()] if raw_text.strip() else []
+    
+    # Maintenant on découpe le texte original selon les positions trouvées
+    blocks = []
     for i, pos in enumerate(positions):
         start = pos
-        end = positions[i + 1] if i + 1 < len(positions) else len(text)
-        block = text[start:end].strip()
+        end = positions[i + 1] if i + 1 < len(positions) else len(raw_text)
+        block = raw_text[start:end].strip()
         if block:
             blocks.append(block)
+    
     return blocks
 def is_stage_block(block_text):
     block_lower = block_text.lower()
@@ -775,12 +791,58 @@ def extract_duration_years_from_block(block_text):
                 return round(float(delta), 1)
         except (ValueError, IndexError):
             pass
-    depuis = re.search(r'depuis\s+(20\d{2})', text, re.IGNORECASE)
-    if depuis:
+    # Pattern: Depuis Mois Année (ex: depuis avril 2023)
+    depuis_mois = re.search(r'depuis\s+[a-z]+\s+(20\d{2})', text, re.IGNORECASE)
+    if depuis_mois:
         try:
-            start_year = int(depuis.group(1))
+            start_year = int(depuis_mois.group(1))
             current_year = datetime.datetime.now().year
             delta = current_year - start_year
+            if 0 < delta <= 40:
+                return round(float(delta), 1)
+        except (ValueError, IndexError):
+            pass
+    # Pattern: Mois Année à Mois Année (ex: mai 2022 à mars 2023, janvier 2021- avril 2022)
+    mois_annee = re.search(r'([a-z]+)\s+(20\d{2})\s*[-–—]?\s*(?:à|au|-|–|—)\s*([a-z]+)?\s*(20\d{2})', text, re.IGNORECASE)
+    if mois_annee:
+        try:
+            start_year = int(mois_annee.group(2))
+            end_year = int(mois_annee.group(4))
+            delta = end_year - start_year
+            # Si même année, calculer en mois
+            if delta == 0 and mois_annee.group(1) and mois_annee.group(3):
+                mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
+                            'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
+                start_month = mois_map.get(mois_annee.group(1).lower(), 1)
+                end_month = mois_map.get(mois_annee.group(3).lower() if mois_annee.group(3) else 'décembre', 12)
+                if end_month >= start_month:
+                    months = end_month - start_month + 1
+                else:
+                    months = 12 - start_month + end_month + 1
+                years_calc = max(0.5, round(months / 12.0, 1))
+                return years_calc
+            elif delta > 0:
+                return round(float(delta), 1)
+        except (ValueError, IndexError):
+            pass
+    # Pattern: Mois Année à Année (ex: décembre 2014 à 2021)
+    mois_a_annee = re.search(r'([a-z]+)\s+(20\d{2})\s+(?:à|au)\s+(20\d{2})', text, re.IGNORECASE)
+    if mois_a_annee:
+        try:
+            start_year = int(mois_a_annee.group(2))
+            end_year = int(mois_a_annee.group(3))
+            delta = end_year - start_year
+            if 0 < delta <= 40:
+                return round(float(delta), 1)
+        except (ValueError, IndexError):
+            pass
+    # Pattern: Année - Année (ex: 2009 – 2010, 2010 – Mai 2013)
+    annee_annee = re.search(r'(20\d{2})\s+[-–—]\s*(?:[a-z]+\s+)?(20\d{2})', text, re.IGNORECASE)
+    if annee_annee:
+        try:
+            start_year = int(annee_annee.group(1))
+            end_year = int(annee_annee.group(2))
+            delta = end_year - start_year
             if 0 < delta <= 40:
                 return round(float(delta), 1)
         except (ValueError, IndexError):
