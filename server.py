@@ -213,6 +213,86 @@ def test_ia_connection():
     except Exception as e:
         logger.error(f"❌ Erreur connexion {_PROVIDER}: {e}")
         return False
+def extract_json_fallback(text):
+    """Extrait les donnees minimales de la reponse textuelle quand le JSON est mal forme"""
+    logger.info("🔧 Utilisation du fallback d'extraction JSON")
+    import re as re_json
+    flags = []
+    flag_patterns = [
+        (r'Aucune experience.*?bancaire', 'Aucune experience dans le secteur bancaire ou financier reglemente'),
+        (r'Moins de.*?ans.*?banque', 'Moins de 5 ans d\'experience professionnelle dans une banque ou institution financiere'),
+        (r'Aucune experience manageriale', 'Aucune experience manageriale demontree'),
+        (r'Diplome.*?inferieur', 'Niveau de diplome inferieur a Bac+4'),
+        (r'Aucune exposition.*?risque', 'Aucune exposition a la gestion du risque de credit')
+    ]
+    for pattern, default in flag_patterns:
+        if re_json.search(pattern, text, re_json.IGNORECASE):
+            flags.append(default)
+    points_forts = []
+    if re_json.search(r'experience.*?bancaire', text, re_json.IGNORECASE):
+        points_forts.append("Experience bancaire detectee")
+    if re_json.search(r'management|manager|encadrement', text, re_json.IGNORECASE):
+        points_forts.append("Experience manageriale detectee")
+    if re_json.search(r'credit|risque|npl|provision', text, re_json.IGNORECASE):
+        points_forts.append("Exposition au risque de credit detectee")
+    points_vigilance = []
+    if re_json.search(r'manque|insuffisant|faible', text, re_json.IGNORECASE):
+        points_vigilance.append("⚠️ Certains criteres ne sont pas satisfaits")
+    if re_json.search(r'sans.*?experience|experience.*?limitee', text, re_json.IGNORECASE):
+        points_vigilance.append("⚠️ Experience professionnelle limitee")
+    score = 0
+    if re_json.search(r'prioritaire|excellent|tres.*?bon', text, re_json.IGNORECASE):
+        score = 12
+    elif re_json.search(r'bon|satisfaisant|correct', text, re_json.IGNORECASE):
+        score = 8
+    elif re_json.search(r'faible|insuffisant|limite', text, re_json.IGNORECASE):
+        score = 4
+    synthese = "Analyse automatique: "
+    if points_forts:
+        synthese += "Points forts: " + ", ".join(points_forts) + ". "
+    if points_vigilance:
+        synthese += "Points de vigilance: " + ", ".join(points_vigilance) + ". "
+    if flags:
+        synthese += "Criteres eliminatoires: " + ", ".join(flags) + ". "
+    synthese += text[:300] + "..."
+    return {
+        'flags_eliminatoires': flags,
+        'points_forts': points_forts,
+        'points_vigilance': points_vigilance,
+        'score_total': score,
+        'synthese_recruteur': synthese
+    }
+def parse_json_robust(result_text):
+    """Parse le JSON de maniere robuste avec nettoyage et fallback"""
+    import re as re_json
+    try:
+        analyse = json.loads(result_text)
+        logger.info("✅ JSON parse avec succes")
+        return analyse
+    except json.JSONDecodeError as e:
+        logger.warning(f"⚠️ Erreur parsing JSON direct: {e}")
+        cleaned_text = result_text
+        cleaned_text = re_json.sub(r'//.*?$', '', cleaned_text, flags=re_json.MULTILINE)
+        cleaned_text = re_json.sub(r',(\s*[}\]])', r'\1', cleaned_text)
+        cleaned_text = re_json.sub(r'[\x00-\x1F\x7F]', '', cleaned_text)
+        try:
+            analyse = json.loads(cleaned_text)
+            logger.info("✅ JSON parse apres nettoyage")
+            return analyse
+        except json.JSONDecodeError as e2:
+            logger.warning(f"⚠️ Erreur parsing JSON apres nettoyage: {e2}")
+            json_match = re_json.search(r'\{[\s\S]*\}', cleaned_text)
+            if json_match:
+                try:
+                    analyse = json.loads(json_match.group())
+                    logger.info("✅ JSON extrait avec regex")
+                    return analyse
+                except json.JSONDecodeError as e3:
+                    logger.error(f"❌ Erreur parsing JSON regex: {e3}")
+                    return None
+            else:
+                logger.error("❌ Aucun JSON trouve dans la reponse")
+                return None
 app = Flask(__name__)
 ALLOWED_ORIGINS = ["https://recrutment.onrender.com", "https://backend1-fiq5.onrender.com", "http://localhost:5000", "http://localhost:3000"]
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"], "supports_credentials": True, "max_age": 600}})
@@ -229,7 +309,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v7.4-minimax-m3',
+        'version': 'v7.5-minimax-robust',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -246,7 +326,8 @@ def health_check():
             'zip_max_workers': _ZIP_MAX_WORKERS,
             'intelligent_scoring': True,
             'advanced_reasoning': True,
-            'free_ia': "OpenRouter" in _PROVIDER
+            'free_ia': "OpenRouter" in _PROVIDER,
+            'json_robust_parsing': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -1086,16 +1167,10 @@ ATTESTATIONS/CERTIFICATS :
         logger.info(f"✅ Analyse {_PROVIDER} terminee: {len(result_text)} caracteres")
         if hasattr(response.choices[0].message, 'reasoning_details') and response.choices[0].message.reasoning_details:
             logger.info("🧠 Reasoning details disponibles")
-        try:
-            analyse = json.loads(result_text)
-        except json.JSONDecodeError:
-            import re as re_json
-            json_match = re_json.search(r'\{[\s\S]*\}', result_text)
-            if json_match:
-                analyse = json.loads(json_match.group())
-            else:
-                logger.error(f"❌ Impossible de parser la reponse {_PROVIDER}")
-                return None
+        analyse = parse_json_robust(result_text)
+        if analyse is None:
+            logger.warning("⚠️ Utilisation du fallback d'extraction JSON")
+            analyse = extract_json_fallback(result_text)
         flags_elim = analyse.get('flags_eliminatoires', [])
         if isinstance(flags_elim, list):
             flags_elim = [f for f in flags_elim if f]
@@ -1119,7 +1194,8 @@ ATTESTATIONS/CERTIFICATS :
             'points_vigilance': points_vigilance,
             'synthese_recruteur': synthese,
             'raisonnement_detaille': analyse.get('raisonnement', ''),
-            'reasoning_enabled': OPENROUTER_REASONING_ENABLED
+            'reasoning_enabled': OPENROUTER_REASONING_ENABLED,
+            'json_parse_method': 'robust'
         }
         return {
             'score': score_total,
@@ -1775,15 +1851,9 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
                 api_params["extra_body"] = {"reasoning": {"enabled": True}}
             response = _client.chat.completions.create(**api_params)
         result_text = response.choices[0].message.content
-        try:
-            analyse = json.loads(result_text)
-        except json.JSONDecodeError:
-            import re as re_json
-            json_match = re_json.search(r'\{[\s\S]*\}', result_text)
-            if json_match:
-                analyse = json.loads(json_match.group())
-            else:
-                return None
+        analyse = parse_json_robust(result_text)
+        if analyse is None:
+            analyse = extract_json_fallback(result_text)
         tool_use = {"input": analyse}
         if not tool_use:
             return None
@@ -3168,7 +3238,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v7.4-minimax-m3",
+        "version": "v7.5-minimax-robust",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3183,6 +3253,7 @@ def health_version():
         "ia_model": _MODEL,
         "ia_free": "OpenRouter" in _PROVIDER,
         "reasoning_enabled": OPENROUTER_REASONING_ENABLED,
+        "json_robust_parsing": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3191,7 +3262,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v7.4 - {_PROVIDER} Reasoning Engine")
+    logger.info(f"🚀 RecrutBank API v7.5 - {_PROVIDER} Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3201,6 +3272,7 @@ if __name__ == '__main__':
         logger.info(f"Modele: {_MODEL}")
         logger.info(f"Gratuit: {'✅ Oui' if 'OpenRouter' in _PROVIDER else '❌ Non (payant)'}")
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
+        logger.info(f"JSON Robust Parsing: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         test_ia_connection()
     else:
