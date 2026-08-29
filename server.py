@@ -746,10 +746,13 @@ def is_stage_block(block_text):
             return True
     return False
 def extract_duration_years_from_block(block_text):
+    """Extrait la durée en années d'un bloc d'expérience professionnelle."""
     years = 0.0
     text = block_text.lower()
     _ACCENT_MAP = str.maketrans('àâäéèêëîïôùûüçœæÀÂÄÉÈÊÎÏÔÙÛÜÇŒÆáãõñÁÃÕÑ', 'aaaeeeeiioouucaaAAEEEEIIOUUUCAAaaonaaon')
     text = text.translate(_ACCENT_MAP)
+    
+    # Pattern 1: Durée explicite en ans (ex: 5 ans, 3.5 ans)
     duration_patterns = [
         r'(\d+[.,]?\d*)\s*(?:ans?|annee?s?|years?|años?|anos?)',
         r'\(\s*(\d+[.,]?\d*)\s*\)\s*(?:ans?|annee?s?|years?)',
@@ -766,17 +769,65 @@ def extract_duration_years_from_block(block_text):
                     return years
             except (ValueError, IndexError):
                 pass
-    pattern_range = re.compile(r'(20\d{2})\s*(?:-|–|—|au|jusqu\'au|à)\s*(20\d{2})', re.IGNORECASE)
-    m = pattern_range.search(text)
-    if m:
+    
+    # Pattern 2: Depuis Mois Année (ex: depuis avril 2023)
+    depuis_mois = re.search(r'depuis\s+([a-z]+)\s+(20\d{2})', text, re.IGNORECASE)
+    if depuis_mois:
         try:
-            start_year = int(m.group(1))
-            end_year = int(m.group(2))
+            mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
+                        'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
+            start_month = mois_map.get(depuis_mois.group(1).lower(), 1)
+            start_year = int(depuis_mois.group(2))
+            current_year = datetime.datetime.now().year
+            current_month = datetime.datetime.now().month
+            total_months = (current_year - start_year) * 12 + (current_month - start_month)
+            if total_months > 0:
+                return round(max(0.5, total_months / 12.0), 1)
+        except (ValueError, IndexError):
+            pass
+    
+    # Pattern 3: Mois Année à Mois Année (ex: mai 2022 à mars 2023, janvier 2021- avril 2022)
+    mois_annee = re.search(r'([a-z]+)\s+(20\d{2})\s*[-–—]?\s*(?:à|au|-|–|—)\s*([a-z]+)?\s*(20\d{2})', text, re.IGNORECASE)
+    if mois_annee:
+        try:
+            mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
+                        'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
+            start_month = mois_map.get(mois_annee.group(1).lower(), 1)
+            start_year = int(mois_annee.group(2))
+            end_month = mois_map.get(mois_annee.group(3).lower() if mois_annee.group(3) else 'décembre', 12)
+            end_year = int(mois_annee.group(4))
+            
+            total_months = (end_year - start_year) * 12 + (end_month - start_month) + 1
+            if total_months > 0:
+                return round(max(0.5, total_months / 12.0), 1)
+        except (ValueError, IndexError):
+            pass
+    
+    # Pattern 4: Mois Année à Année (ex: décembre 2014 à 2021)
+    mois_a_annee = re.search(r'([a-z]+)\s+(20\d{2})\s+(?:à|au)\s+(20\d{2})', text, re.IGNORECASE)
+    if mois_a_annee:
+        try:
+            start_year = int(mois_a_annee.group(2))
+            end_year = int(mois_a_annee.group(3))
             delta = end_year - start_year
             if 0 < delta <= 40:
                 return round(float(delta), 1)
         except (ValueError, IndexError):
             pass
+    
+    # Pattern 5: Année - Année (ex: 2009 – 2010, 2010 – Mai 2013)
+    annee_annee = re.search(r'(20\d{2})\s+[-–—]\s*(?:[a-z]+\s+)?(20\d{2})', text, re.IGNORECASE)
+    if annee_annee:
+        try:
+            start_year = int(annee_annee.group(1))
+            end_year = int(annee_annee.group(2))
+            delta = end_year - start_year
+            if 0 < delta <= 40:
+                return round(float(delta), 1)
+        except (ValueError, IndexError):
+            pass
+    
+    # Pattern 6: De/From Année à Année/Présent
     from_to = re.search(r'(?:depuis|de|from)\s+(20\d{2})\s*(?:[àa]|au|jusqu\'au|to|until|-|–|—)\s*(20\d{2}|présent|present|current|now)', text, re.IGNORECASE)
     if from_to:
         try:
@@ -791,62 +842,8 @@ def extract_duration_years_from_block(block_text):
                 return round(float(delta), 1)
         except (ValueError, IndexError):
             pass
-    # Pattern: Depuis Mois Année (ex: depuis avril 2023)
-    depuis_mois = re.search(r'depuis\s+[a-z]+\s+(20\d{2})', text, re.IGNORECASE)
-    if depuis_mois:
-        try:
-            start_year = int(depuis_mois.group(1))
-            current_year = datetime.datetime.now().year
-            delta = current_year - start_year
-            if 0 < delta <= 40:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
-    # Pattern: Mois Année à Mois Année (ex: mai 2022 à mars 2023, janvier 2021- avril 2022)
-    mois_annee = re.search(r'([a-z]+)\s+(20\d{2})\s*[-–—]?\s*(?:à|au|-|–|—)\s*([a-z]+)?\s*(20\d{2})', text, re.IGNORECASE)
-    if mois_annee:
-        try:
-            start_year = int(mois_annee.group(2))
-            end_year = int(mois_annee.group(4))
-            delta = end_year - start_year
-            # Si même année, calculer en mois
-            if delta == 0 and mois_annee.group(1) and mois_annee.group(3):
-                mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
-                            'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
-                start_month = mois_map.get(mois_annee.group(1).lower(), 1)
-                end_month = mois_map.get(mois_annee.group(3).lower() if mois_annee.group(3) else 'décembre', 12)
-                if end_month >= start_month:
-                    months = end_month - start_month + 1
-                else:
-                    months = 12 - start_month + end_month + 1
-                years_calc = max(0.5, round(months / 12.0, 1))
-                return years_calc
-            elif delta > 0:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
-    # Pattern: Mois Année à Année (ex: décembre 2014 à 2021)
-    mois_a_annee = re.search(r'([a-z]+)\s+(20\d{2})\s+(?:à|au)\s+(20\d{2})', text, re.IGNORECASE)
-    if mois_a_annee:
-        try:
-            start_year = int(mois_a_annee.group(2))
-            end_year = int(mois_a_annee.group(3))
-            delta = end_year - start_year
-            if 0 < delta <= 40:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
-    # Pattern: Année - Année (ex: 2009 – 2010, 2010 – Mai 2013)
-    annee_annee = re.search(r'(20\d{2})\s+[-–—]\s*(?:[a-z]+\s+)?(20\d{2})', text, re.IGNORECASE)
-    if annee_annee:
-        try:
-            start_year = int(annee_annee.group(1))
-            end_year = int(annee_annee.group(2))
-            delta = end_year - start_year
-            if 0 < delta <= 40:
-                return round(float(delta), 1)
-        except (ValueError, IndexError):
-            pass
+    
+    # Pattern 7: De/From Année à Présent/Aujourd'hui
     de_anos = re.search(r'(?:de|from)\s+(20\d{2})\s*(?:[àa]|au|to|until)\s*(?:nos\s+jours|aujourd\'hui|ce\s+jour)', text, re.IGNORECASE)
     if de_anos:
         try:
@@ -857,6 +854,7 @@ def extract_duration_years_from_block(block_text):
                 return round(float(delta), 1)
         except (ValueError, IndexError):
             pass
+    
     return 0.0
 def detect_institution_type(text):
     text_lower = text.lower()
