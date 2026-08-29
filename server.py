@@ -213,55 +213,140 @@ def test_ia_connection():
     except Exception as e:
         logger.error(f"❌ Erreur connexion {_PROVIDER}: {e}")
         return False
+
+def extract_json_from_text(text):
+    """Extrait le JSON d'une reponse textuelle qui peut contenir du texte explicatif"""
+    import re as re_json
+    if not text:
+        return None
+    text = text.strip()
+    json_patterns = [
+        r'(?:```json\s*)?(\{[\s\S]*?\})(?:\s*```)?',
+        r'(\{[\s\S]*\})',
+        r'(\[[\s\S]*\])'
+    ]
+    for pattern in json_patterns:
+        matches = re_json.findall(pattern, text)
+        if matches:
+            for match in matches:
+                try:
+                    parsed = json.loads(match.strip())
+                    if isinstance(parsed, (dict, list)):
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+    return None
+
+def parse_json_robust(result_text):
+    """Parse le JSON de maniere robuste avec nettoyage et fallback"""
+    import re as re_json
+    if not result_text:
+        return None
+    try:
+        analyse = json.loads(result_text.strip())
+        logger.info("✅ JSON parse avec succes")
+        return analyse
+    except json.JSONDecodeError as e:
+        logger.warning(f"⚠️ Erreur parsing JSON direct: {e}")
+        cleaned_text = result_text
+        cleaned_text = re_json.sub(r'//.*?$', '', cleaned_text, flags=re_json.MULTILINE)
+        cleaned_text = re_json.sub(r',(\s*[}\]])', r'\1', cleaned_text)
+        cleaned_text = re_json.sub(r'[\x00-\x1F\x7F]', '', cleaned_text)
+        cleaned_text = re_json.sub(r'```json\s*', '', cleaned_text)
+        cleaned_text = re_json.sub(r'\s*```', '', cleaned_text)
+        try:
+            analyse = json.loads(cleaned_text)
+            logger.info("✅ JSON parse apres nettoyage")
+            return analyse
+        except json.JSONDecodeError as e2:
+            logger.warning(f"⚠️ Erreur parsing JSON apres nettoyage: {e2}")
+            json_obj = extract_json_from_text(cleaned_text)
+            if json_obj:
+                logger.info("✅ JSON extrait avec regex")
+                return json_obj
+            else:
+                logger.error("❌ Aucun JSON trouve dans la reponse")
+                return None
+
 def extract_json_fallback(text):
     """Extrait les donnees minimales de la reponse textuelle avec sous-scores complets"""
-    logger.info("🔧 Utilisation du fallback d'extraction JSON avec sous-scores")
+    logger.info("🔧 Utilisation du fallback d'extraction JSON avec sous-scores complets")
     import re as re_json
     flags = []
     flag_patterns = [
-        (r'Aucune experience.*?bancaire', 'Aucune experience dans le secteur bancaire ou financier reglemente'),
-        (r'Moins de.*?ans.*?banque', 'Moins de 5 ans d\'experience professionnelle dans une banque ou institution financiere'),
-        (r'Aucune experience manageriale', 'Aucune experience manageriale demontree'),
-        (r'Diplome.*?inferieur', 'Niveau de diplome inferieur a Bac+4'),
-        (r'Aucune exposition.*?risque', 'Aucune exposition a la gestion du risque de credit')
+        (r'Aucune experience.*?bancaire|pas d\'experience.*?bancaire|sans experience.*?bancaire', 'Aucune experience dans le secteur bancaire ou financier reglemente'),
+        (r'Moins de.*?ans.*?banque|experience.*?inferieure.*?ans', 'Moins de 5 ans d\'experience professionnelle dans une banque ou institution financiere'),
+        (r'Aucune experience manageriale|pas d\'experience manageriale|sans management', 'Aucune experience manageriale demontree'),
+        (r'Diplome.*?inferieur|niveau.*?diplome.*?insuffisant', 'Niveau de diplome inferieur a Bac+4'),
+        (r'Aucune exposition.*?risque|pas d\'exposition.*?risque', 'Aucune exposition a la gestion du risque de credit')
     ]
     for pattern, default in flag_patterns:
         if re_json.search(pattern, text, re_json.IGNORECASE):
             flags.append(default)
     points_forts = []
-    if re_json.search(r'experience.*?bancaire', text, re_json.IGNORECASE):
+    if re_json.search(r'experience.*?bancaire|banque|bancaire', text, re_json.IGNORECASE):
         points_forts.append("Experience bancaire detectee")
-    if re_json.search(r'management|manager|encadrement', text, re_json.IGNORECASE):
+    if re_json.search(r'management|manager|encadrement|supervision|leadership', text, re_json.IGNORECASE):
         points_forts.append("Experience manageriale detectee")
-    if re_json.search(r'credit|risque|npl|provision', text, re_json.IGNORECASE):
+    if re_json.search(r'credit|risque|npl|provision|portefeuille', text, re_json.IGNORECASE):
         points_forts.append("Exposition au risque de credit detectee")
+    if re_json.search(r'certification|certificat|formation.*?bancaire', text, re_json.IGNORECASE):
+        points_forts.append("Certifications professionnelles detectees")
     points_vigilance = []
-    if re_json.search(r'manque|insuffisant|faible', text, re_json.IGNORECASE):
+    if re_json.search(r'manque|insuffisant|faible|limite', text, re_json.IGNORECASE):
         points_vigilance.append("⚠️ Certains criteres ne sont pas satisfaits")
-    if re_json.search(r'sans.*?experience|experience.*?limitee', text, re_json.IGNORECASE):
+    if re_json.search(r'sans.*?experience|experience.*?limitee|experience.*?courte', text, re_json.IGNORECASE):
         points_vigilance.append("⚠️ Experience professionnelle limitee")
-    score = 0
-    if re_json.search(r'prioritaire|excellent|tres.*?bon', text, re_json.IGNORECASE):
-        score = 12
-    elif re_json.search(r'bon|satisfaisant|correct', text, re_json.IGNORECASE):
-        score = 8
-    elif re_json.search(r'faible|insuffisant|limite', text, re_json.IGNORECASE):
-        score = 4
     sous_scores = {}
-    sous_scores["Experience bancaire"] = 3 if re_json.search(r'experience.*?bancaire.*?\d+\s*ans', text, re_json.IGNORECASE) else (2 if re_json.search(r'experience.*?bancaire', text, re_json.IGNORECASE) else 0)
-    sous_scores["Diplome"] = 3 if re_json.search(r'master|mba|doctorat|phd|ingenieur', text, re_json.IGNORECASE) else (2 if re_json.search(r'bac\+4|bac 4|maitrise|licence professionnelle', text, re_json.IGNORECASE) else (1 if re_json.search(r'licence|bachelor|bac\+3|bac 3', text, re_json.IGNORECASE) else 0))
-    sous_scores["Management"] = 3 if re_json.search(r'manager|directeur|chef.*?service|responsable.*?equipe', text, re_json.IGNORECASE) else (2 if re_json.search(r'management|encadrement|supervision|coordination', text, re_json.IGNORECASE) else (1 if re_json.search(r'equipe|collaborateurs|subordonnes', text, re_json.IGNORECASE) else 0))
-    sous_scores["Risque de credit"] = 3 if re_json.search(r'credit|risque.*?credit|npl|provision.*?portefeuille', text, re_json.IGNORECASE) else (2 if re_json.search(r'credit|risque', text, re_json.IGNORECASE) else (1 if re_json.search(r'finance|analyse financiere', text, re_json.IGNORECASE) else 0))
-    sous_scores["Coherence du parcours"] = 3 if re_json.search(r'\d+\s*(?:ans|annees).*?(?:progression|evolution|promotion)', text, re_json.IGNORECASE) else (2 if re_json.search(r'\d+\s*(?:ans|annees).*?experience', text, re_json.IGNORECASE) else 1)
-    sous_scores["Qualite du CV"] = 3 if re_json.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*rapports|\d+\s*millions', text, re_json.IGNORECASE) else (2 if len(text) > 1000 else 1)
-    synthese = "Analyse automatique: "
-    if points_forts:
-        synthese += "Points forts: " + ", ".join(points_forts) + ". "
-    if points_vigilance:
-        synthese += "Points de vigilance: " + ", ".join(points_vigilance) + ". "
-    if flags:
-        synthese += "Criteres eliminatoires: " + ", ".join(flags) + ". "
-    synthese += text[:300] + "..."
+    exp_match = re_json.search(r'experience\s*(?:bancaire|professionnelle)\s*(?:de|:)?\s*(\d+)', text, re_json.IGNORECASE)
+    if exp_match:
+        years = int(exp_match.group(1))
+        sous_scores["experience_bancaire"] = 3 if years >= 5 else (2 if years >= 3 else (1 if years >= 1 else 0))
+    else:
+        if re_json.search(r'experience.*?bancaire.*?\d+\s*ans', text, re_json.IGNORECASE):
+            sous_scores["experience_bancaire"] = 2
+        elif re_json.search(r'experience.*?bancaire', text, re_json.IGNORECASE):
+            sous_scores["experience_bancaire"] = 1
+        else:
+            sous_scores["experience_bancaire"] = 0
+    if re_json.search(r'master|mba|doctorat|phd|ingenieur|bac\+5|bac 5', text, re_json.IGNORECASE):
+        sous_scores["diplome"] = 3
+    elif re_json.search(r'bac\+4|bac 4|maitrise|licence professionnelle', text, re_json.IGNORECASE):
+        sous_scores["diplome"] = 2
+    elif re_json.search(r'licence|bachelor|bac\+3|bac 3', text, re_json.IGNORECASE):
+        sous_scores["diplome"] = 1
+    else:
+        sous_scores["diplome"] = 0
+    if re_json.search(r'manager|directeur|chef.*?service|responsable.*?equipe|leadership.*?fort', text, re_json.IGNORECASE):
+        sous_scores["management"] = 3
+    elif re_json.search(r'management|encadrement|supervision|coordination|gestion d\'equipe', text, re_json.IGNORECASE):
+        sous_scores["management"] = 2
+    elif re_json.search(r'equipe|collaborateurs|subordonnes|animateur', text, re_json.IGNORECASE):
+        sous_scores["management"] = 1
+    else:
+        sous_scores["management"] = 0
+    if re_json.search(r'credit|risque.*?credit|npl|provision.*?portefeuille|ifrs 9|risk management', text, re_json.IGNORECASE):
+        sous_scores["risque_credit"] = 3
+    elif re_json.search(r'credit|risque|analyse financiere|gestion de portefeuille', text, re_json.IGNORECASE):
+        sous_scores["risque_credit"] = 2
+    elif re_json.search(r'finance|comptabilite|economie', text, re_json.IGNORECASE):
+        sous_scores["risque_credit"] = 1
+    else:
+        sous_scores["risque_credit"] = 0
+    if re_json.search(r'\d+\s*(?:ans|annees).*?(?:progression|evolution|promotion|carriere)', text, re_json.IGNORECASE):
+        sous_scores["coherence_parcours"] = 3
+    elif re_json.search(r'\d+\s*(?:ans|annees).*?experience', text, re_json.IGNORECASE):
+        sous_scores["coherence_parcours"] = 2
+    else:
+        sous_scores["coherence_parcours"] = 1
+    if re_json.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*rapports|\d+\s*millions|\d+\s*clients|chiffres|resultats', text, re_json.IGNORECASE):
+        sous_scores["qualite_cv"] = 3
+    elif len(text) > 1000:
+        sous_scores["qualite_cv"] = 2
+    elif len(text) > 500:
+        sous_scores["qualite_cv"] = 1
+    else:
+        sous_scores["qualite_cv"] = 0
     total_sous_score = sum(sous_scores.values())
     if total_sous_score >= 14:
         score = 12
@@ -271,6 +356,19 @@ def extract_json_fallback(text):
         score = 4
     else:
         score = 0
+    if flags:
+        score = 0
+    synthese = "Analyse automatique: "
+    if points_forts:
+        synthese += "Points forts: " + ", ".join(points_forts) + ". "
+    if points_vigilance:
+        synthese += "Points de vigilance: " + ", ".join(points_vigilance) + ". "
+    if flags:
+        synthese += "Criteres eliminatoires: " + ", ".join(flags) + ". "
+    if len(text) > 50:
+        synthese += text[:300] + "..."
+    else:
+        synthese += "Analyse du CV complete."
     return {
         'flags_eliminatoires': flags,
         'points_forts': points_forts,
@@ -279,44 +377,14 @@ def extract_json_fallback(text):
         'synthese_recruteur': synthese,
         'sous_scores': sous_scores,
         'checklist': {
-            'experience_bancaire': sous_scores["Experience bancaire"] >= 2,
-            'diplome_suffisant': sous_scores["Diplome"] >= 2,
-            'management_detecte': sous_scores["Management"] >= 2,
-            'risque_credit_detecte': sous_scores["Risque de credit"] >= 2,
-            'coherence_parcours': sous_scores["Coherence du parcours"] >= 2
+            'experience_bancaire': sous_scores["experience_bancaire"] >= 2,
+            'diplome_suffisant': sous_scores["diplome"] >= 2,
+            'management_detecte': sous_scores["management"] >= 2,
+            'risque_credit_detecte': sous_scores["risque_credit"] >= 2,
+            'coherence_parcours': sous_scores["coherence_parcours"] >= 2
         }
     }
-def parse_json_robust(result_text):
-    """Parse le JSON de maniere robuste avec nettoyage et fallback"""
-    import re as re_json
-    try:
-        analyse = json.loads(result_text)
-        logger.info("✅ JSON parse avec succes")
-        return analyse
-    except json.JSONDecodeError as e:
-        logger.warning(f"⚠️ Erreur parsing JSON direct: {e}")
-        cleaned_text = result_text
-        cleaned_text = re_json.sub(r'//.*?$', '', cleaned_text, flags=re_json.MULTILINE)
-        cleaned_text = re_json.sub(r',(\s*[}\]])', r'\1', cleaned_text)
-        cleaned_text = re_json.sub(r'[\x00-\x1F\x7F]', '', cleaned_text)
-        try:
-            analyse = json.loads(cleaned_text)
-            logger.info("✅ JSON parse apres nettoyage")
-            return analyse
-        except json.JSONDecodeError as e2:
-            logger.warning(f"⚠️ Erreur parsing JSON apres nettoyage: {e2}")
-            json_match = re_json.search(r'\{[\s\S]*\}', cleaned_text)
-            if json_match:
-                try:
-                    analyse = json.loads(json_match.group())
-                    logger.info("✅ JSON extrait avec regex")
-                    return analyse
-                except json.JSONDecodeError as e3:
-                    logger.error(f"❌ Erreur parsing JSON regex: {e3}")
-                    return None
-            else:
-                logger.error("❌ Aucun JSON trouve dans la reponse")
-                return None
+
 app = Flask(__name__)
 ALLOWED_ORIGINS = ["https://recrutment.onrender.com", "https://backend1-fiq5.onrender.com", "http://localhost:5000", "http://localhost:3000"]
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"], "supports_credentials": True, "max_age": 600}})
@@ -1139,7 +1207,31 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
     Etape 4: Identifier les competences techniques et manageriales
     Etape 5: Detecter les signaux de qualite (resultats quantifies, certifications)
     Etape 6: Synthetiser et donner une recommandation argumentee
-    FORMAT DE SORTIE : Structure JSON avec des scores et des justifications detaillees."""
+    FORMAT DE SORTIE : UNIQUEMENT du JSON valide, sans texte explicatif avant ou apres.
+    Le JSON doit contenir les champs suivants:
+    {
+        "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
+        "points_forts": ["liste des points forts du candidat"],
+        "points_vigilance": ["liste des points de vigilance"],
+        "score_total": 0-14,
+        "synthese_recruteur": "synthese pour le recruteur",
+        "sous_scores": {
+            "experience_bancaire": 0-3,
+            "diplome": 0-3,
+            "management": 0-3,
+            "risque_credit": 0-3,
+            "coherence_parcours": 0-3,
+            "qualite_cv": 0-3
+        },
+        "checklist": {
+            "experience_bancaire": true/false,
+            "diplome_suffisant": true/false,
+            "management_detecte": true/false,
+            "risque_credit_detecte": true/false,
+            "coherence_parcours": true/false
+        }
+    }
+    NE METS PAS de texte avant ou apres le JSON. Reponds UNIQUEMENT avec le JSON."""
     def fmt_list(items):
         return "\n".join(f"  {i+1}. {c}" for i, c in enumerate(items)) if items else "  (aucun)"
     user_message = f"""POSTE : {poste}
@@ -1165,13 +1257,7 @@ ATTESTATIONS/CERTIFICATS :
 3. Donne des SCORES JUSTIFIES sur chaque critere.
 4. Identifie les FORCES et FAIBLESSES du profil.
 5. Produis une SYNTHESE claire et actionable pour le recruteur.
-6. Utilise le format JSON attendu avec les sous-scores suivants:
-   - "experience_bancaire": 0-3
-   - "diplome": 0-3
-   - "management": 0-3
-   - "risque_credit": 0-3
-   - "coherence_parcours": 0-3
-   - "qualite_cv": 0-3"""
+6. Utilise le format JSON attendu avec les sous-scores."""
     try:
         with _ia_semaphore:
             api_params = {
@@ -1202,6 +1288,9 @@ ATTESTATIONS/CERTIFICATS :
         if analyse is None:
             logger.warning("⚠️ Utilisation du fallback d'extraction JSON")
             analyse = extract_json_fallback(result_text)
+        if analyse is None:
+            logger.error("❌ Echec complet de l'extraction JSON, utilisation du fallback minimal")
+            analyse = extract_json_fallback(cv_text[:1000])
         flags_elim = analyse.get('flags_eliminatoires', [])
         if isinstance(flags_elim, list):
             flags_elim = [f for f in flags_elim if f]
@@ -1213,12 +1302,12 @@ ATTESTATIONS/CERTIFICATS :
         sous_scores = analyse.get('sous_scores', {})
         if not sous_scores:
             sous_scores = {
-                "experience_bancaire": analyse.get('experience_bancaire', 0),
-                "diplome": analyse.get('diplome', 0),
-                "management": analyse.get('management', 0),
-                "risque_credit": analyse.get('risque_credit', 0),
-                "coherence_parcours": analyse.get('coherence_parcours', 0),
-                "qualite_cv": analyse.get('qualite_cv', 0)
+                "experience_bancaire": 0,
+                "diplome": 0,
+                "management": 0,
+                "risque_credit": 0,
+                "coherence_parcours": 0,
+                "qualite_cv": 0
             }
         score_total = 0 if flags_elim else int(analyse.get('score_total', sum(sous_scores.values())))
         score_max = get_score_max_for_poste(poste)
