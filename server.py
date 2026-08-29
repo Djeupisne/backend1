@@ -770,12 +770,13 @@ def extract_duration_years_from_block(block_text):
             except (ValueError, IndexError):
                 pass
     
+    mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
+                'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
+    
     # Pattern 2: Depuis Mois Année (ex: depuis avril 2023)
-    depuis_mois = re.search(r'depuis\s+([a-z]+)\s+(20\d{2})', text, re.IGNORECASE)
+    depuis_mois = re.search(r'depuis\s+([a-z]+)\s+(20\d{2}|19\d{2})', text, re.IGNORECASE)
     if depuis_mois:
         try:
-            mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
-                        'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
             start_month = mois_map.get(depuis_mois.group(1).lower(), 1)
             start_year = int(depuis_mois.group(2))
             current_year = datetime.datetime.now().year
@@ -787,11 +788,9 @@ def extract_duration_years_from_block(block_text):
             pass
     
     # Pattern 3: Mois Année à Mois Année (ex: mai 2022 à mars 2023, janvier 2021- avril 2022)
-    mois_annee = re.search(r'([a-z]+)\s+(20\d{2})\s*[-–—]?\s*(?:à|au|-|–|—)\s*([a-z]+)?\s*(20\d{2})', text, re.IGNORECASE)
+    mois_annee = re.search(r'([a-z]+)\s+(20\d{2}|19\d{2})\s*[-–—]?\s*(?:à|au|-|–|—)\s*([a-z]+)?\s*(20\d{2}|19\d{2})', text, re.IGNORECASE)
     if mois_annee:
         try:
-            mois_map = {'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
-                        'juillet': 7, 'aout': 8, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12}
             start_month = mois_map.get(mois_annee.group(1).lower(), 1)
             start_year = int(mois_annee.group(2))
             end_month = mois_map.get(mois_annee.group(3).lower() if mois_annee.group(3) else 'décembre', 12)
@@ -804,7 +803,7 @@ def extract_duration_years_from_block(block_text):
             pass
     
     # Pattern 4: Mois Année à Année (ex: décembre 2014 à 2021)
-    mois_a_annee = re.search(r'([a-z]+)\s+(20\d{2})\s+(?:à|au)\s+(20\d{2})', text, re.IGNORECASE)
+    mois_a_annee = re.search(r'([a-z]+)\s+(20\d{2}|19\d{2})\s+(?:à|au)\s+(20\d{2}|19\d{2})', text, re.IGNORECASE)
     if mois_a_annee:
         try:
             start_year = int(mois_a_annee.group(2))
@@ -816,7 +815,7 @@ def extract_duration_years_from_block(block_text):
             pass
     
     # Pattern 5: Année - Année (ex: 2009 – 2010, 2010 – Mai 2013)
-    annee_annee = re.search(r'(20\d{2})\s+[-–—]\s*(?:[a-z]+\s+)?(20\d{2})', text, re.IGNORECASE)
+    annee_annee = re.search(r'(20\d{2}|19\d{2})\s+[-–—]\s*(?:[a-z]+\s+)?(20\d{2}|19\d{2})', text, re.IGNORECASE)
     if annee_annee:
         try:
             start_year = int(annee_annee.group(1))
@@ -828,7 +827,7 @@ def extract_duration_years_from_block(block_text):
             pass
     
     # Pattern 6: De/From Année à Année/Présent
-    from_to = re.search(r'(?:depuis|de|from)\s+(20\d{2})\s*(?:[àa]|au|jusqu\'au|to|until|-|–|—)\s*(20\d{2}|présent|present|current|now)', text, re.IGNORECASE)
+    from_to = re.search(r'(?:depuis|de|from)\s+(20\d{2}|19\d{2})\s*(?:[àa]|au|jusqu\'au|to|until|-|–|—)\s*(20\d{2}|19\d{2}|présent|present|current|now)', text, re.IGNORECASE)
     if from_to:
         try:
             start_year = int(from_to.group(1))
@@ -844,12 +843,24 @@ def extract_duration_years_from_block(block_text):
             pass
     
     # Pattern 7: De/From Année à Présent/Aujourd'hui
-    de_anos = re.search(r'(?:de|from)\s+(20\d{2})\s*(?:[àa]|au|to|until)\s*(?:nos\s+jours|aujourd\'hui|ce\s+jour)', text, re.IGNORECASE)
+    de_anos = re.search(r'(?:de|from)\s+(20\d{2}|19\d{2})\s*(?:[àa]|au|to|until)\s*(?:nos\s+jours|aujourd\'hui|ce\s+jour)', text, re.IGNORECASE)
     if de_anos:
         try:
             start_year = int(de_anos.group(1))
             current_year = datetime.datetime.now().year
             delta = current_year - start_year
+            if 0 < delta <= 40:
+                return round(float(delta), 1)
+        except (ValueError, IndexError):
+            pass
+    
+    # Pattern 8: Extraction fallback - chercher toutes les années dans le bloc
+    all_years = re.findall(r'(20\d{2}|19\d{2})', block_text)
+    if len(all_years) >= 2:
+        try:
+            years_int = sorted([int(y) for y in all_years])
+            # Prendre la première et la dernière année
+            delta = years_int[-1] - years_int[0]
             if 0 < delta <= 40:
                 return round(float(delta), 1)
         except (ValueError, IndexError):
