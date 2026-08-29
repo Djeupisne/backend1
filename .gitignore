@@ -1,25 +1,3 @@
-```
-# Compiled and build artifacts
-*.pyc
-__pycache__/
-*.o
-*.obj
+(server.py has been modified, but it's a source file and should not be ignored)
 
-# Dependencies
-.venv/
-venv/
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Environment
-.env
-.env.local
-*.env.*
-
-# Editors
-.vscode/
-.idea/
-```
+Nothing to output.
