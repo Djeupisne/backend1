@@ -213,7 +213,6 @@ def test_ia_connection():
     except Exception as e:
         logger.error(f"❌ Erreur connexion {_PROVIDER}: {e}")
         return False
-
 def extract_json_from_text(text):
     """Extrait le JSON d'une reponse textuelle qui peut contenir du texte explicatif"""
     import re as re_json
@@ -236,7 +235,6 @@ def extract_json_from_text(text):
                 except json.JSONDecodeError:
                     continue
     return None
-
 def parse_json_robust(result_text):
     """Parse le JSON de maniere robuste avec nettoyage et fallback"""
     import re as re_json
@@ -269,7 +267,6 @@ def parse_json_robust(result_text):
             else:
                 logger.error("❌ Aucun JSON trouve dans la reponse")
                 return None
-
 def extract_json_fallback(text):
     """Extrait les donnees minimales de la reponse textuelle avec sous-scores complets"""
     logger.info("🔧 Utilisation du fallback d'extraction JSON avec sous-scores complets")
@@ -353,8 +350,8 @@ def extract_json_fallback(text):
         sous_scores["qualite_cv"] = 1
     else:
         sous_scores["qualite_cv"] = 0
-    # Score total = somme des sous-scores (conservé même avec flags)
     score_total = sum(sous_scores.values())
+    score_total = min(14, score_total)
     synthese = "Analyse automatique: "
     if points_forts:
         synthese += "Points forts: " + ", ".join(points_forts) + ". "
@@ -362,7 +359,7 @@ def extract_json_fallback(text):
         synthese += "Points de vigilance: " + ", ".join(points_vigilance) + ". "
     if flags:
         synthese += "❌ CRITERES ELIMINATOIRES NON SATISFAITS: " + ", ".join(flags) + ". "
-        synthese += "Candidat REJETE immediatement malgre un score de " + str(score_total) + "/" + str(min(14, score_total + 2)) + "."
+        synthese += "Candidat REJETE immediatement malgre un score de " + str(score_total) + "/14."
     if len(text) > 50:
         synthese += text[:300] + "..."
     else:
@@ -371,7 +368,7 @@ def extract_json_fallback(text):
         'flags_eliminatoires': flags,
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
-        'score_total': score_total,  # Score conservé même avec flags
+        'score_total': score_total,
         'synthese_recruteur': synthese,
         'sous_scores': sous_scores,
         'checklist': {
@@ -382,7 +379,6 @@ def extract_json_fallback(text):
             'coherence_parcours': sous_scores["coherence_parcours"] >= 2
         }
     }
-
 app = Flask(__name__)
 ALLOWED_ORIGINS = ["https://recrutment.onrender.com", "https://backend1-fiq5.onrender.com", "http://localhost:5000", "http://localhost:3000"]
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"], "supports_credentials": True, "max_age": 600}})
@@ -399,7 +395,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v7.8-minimax-score-conserve',
+        'version': 'v7.9-minimax-somme-sous-scores',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -420,7 +416,8 @@ def health_check():
             'json_robust_parsing': True,
             'sous_scores_complets': True,
             'eliminatoire_rejet': True,
-            'score_conserve': True
+            'score_conserve': True,
+            'score_somme_sous_scores': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -907,7 +904,6 @@ def get_recommandation_from_score(score, poste=None):
     else:
         return "Rejet"
 def get_statut_from_decision(decision, flags_elim=None):
-    # Si des critères eliminatoires sont présents -> rejet immédiat
     if flags_elim and len(flags_elim) > 0:
         return "rejete"
     if not decision:
@@ -1218,7 +1214,7 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
         "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
         "points_forts": ["liste des points forts du candidat"],
         "points_vigilance": ["liste des points de vigilance"],
-        "score_total": 0-14 (score conserve meme avec flags eliminatoires),
+        "score_total": SOMME_DES_SOUS_SCORES (0-14),
         "synthese_recruteur": "synthese pour le recruteur",
         "sous_scores": {
             "experience_bancaire": 0-3,
@@ -1261,10 +1257,11 @@ ATTESTATIONS/CERTIFICATS :
 2. RAISONNE ETAPE PAR ETAPE avant de conclure.
 3. Verifie CHAQUE critere eliminatoire.
 4. Si UN SEUL critere eliminatoire n'est pas satisfait -> REJET, mais score_total conserve (ne pas mettre a 0).
-5. Donne des SCORES JUSTIFIES sur chaque critere.
-6. Identifie les FORCES et FAIBLESSES du profil.
-7. Produis une SYNTHESE claire et actionable pour le recruteur.
-8. Utilise le format JSON attendu avec les sous-scores."""
+5. Donne des SCORES JUSTIFIES sur chaque critere (0-3).
+6. Le score_total est la SOMME des 6 sous-scores.
+7. Identifie les FORCES et FAIBLESSES du profil.
+8. Produis une SYNTHESE claire et actionable pour le recruteur.
+9. Utilise le format JSON attendu avec les sous-scores."""
     try:
         with _ia_semaphore:
             api_params = {
@@ -1316,9 +1313,10 @@ ATTESTATIONS/CERTIFICATS :
                 "coherence_parcours": 0,
                 "qualite_cv": 0
             }
-        # Score total conserve meme avec flags eliminatoires
         score_total = int(analyse.get('score_total', sum(sous_scores.values())))
         score_max = get_score_max_for_poste(poste)
+        if score_total > score_max:
+            score_total = score_max
         decision = get_recommandation_from_score(score_total, poste)
         if flags_elim:
             decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
@@ -1411,7 +1409,6 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv
     }
-    # Score conserve meme avec flags eliminatoires
     score = sum(sous_scores.values())
     score = min(14, score)
     if score >= 11:
@@ -3489,7 +3486,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v7.8-minimax-score-conserve",
+        "version": "v7.9-minimax-somme-sous-scores",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3508,6 +3505,7 @@ def health_version():
         "sous_scores_complets": True,
         "eliminatoire_rejet": True,
         "score_conserve": True,
+        "score_somme_sous_scores": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3516,7 +3514,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v7.8 - {_PROVIDER} Reasoning Engine")
+    logger.info(f"🚀 RecrutBank API v7.9 - {_PROVIDER} Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3529,6 +3527,7 @@ if __name__ == '__main__':
         logger.info(f"JSON Robust Parsing: ✅ Active")
         logger.info(f"Sous-scores complets: ✅ 6 dimensions")
         logger.info(f"Eliminatoire = Rejet, Score conserve: ✅ Active")
+        logger.info(f"Score = Somme des sous-scores: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         test_ia_connection()
     else:
