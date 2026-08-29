@@ -353,10 +353,8 @@ def extract_json_fallback(text):
         sous_scores["qualite_cv"] = 1
     else:
         sous_scores["qualite_cv"] = 0
-    total_sous_score = sum(sous_scores.values())
-    score = total_sous_score
-    if flags:
-        score = 0
+    # Score total = somme des sous-scores (conservé même avec flags)
+    score_total = sum(sous_scores.values())
     synthese = "Analyse automatique: "
     if points_forts:
         synthese += "Points forts: " + ", ".join(points_forts) + ". "
@@ -364,7 +362,7 @@ def extract_json_fallback(text):
         synthese += "Points de vigilance: " + ", ".join(points_vigilance) + ". "
     if flags:
         synthese += "❌ CRITERES ELIMINATOIRES NON SATISFAITS: " + ", ".join(flags) + ". "
-        synthese += "Candidat REJETE immediatement."
+        synthese += "Candidat REJETE immediatement malgre un score de " + str(score_total) + "/" + str(min(14, score_total + 2)) + "."
     if len(text) > 50:
         synthese += text[:300] + "..."
     else:
@@ -373,7 +371,7 @@ def extract_json_fallback(text):
         'flags_eliminatoires': flags,
         'points_forts': points_forts,
         'points_vigilance': points_vigilance,
-        'score_total': score,
+        'score_total': score_total,  # Score conservé même avec flags
         'synthese_recruteur': synthese,
         'sous_scores': sous_scores,
         'checklist': {
@@ -401,7 +399,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v7.7-minimax-scores-corrects',
+        'version': 'v7.8-minimax-score-conserve',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -421,7 +419,8 @@ def health_check():
             'free_ia': "OpenRouter" in _PROVIDER,
             'json_robust_parsing': True,
             'sous_scores_complets': True,
-            'eliminatoire_rejet': True
+            'eliminatoire_rejet': True,
+            'score_conserve': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -908,6 +907,7 @@ def get_recommandation_from_score(score, poste=None):
     else:
         return "Rejet"
 def get_statut_from_decision(decision, flags_elim=None):
+    # Si des critères eliminatoires sont présents -> rejet immédiat
     if flags_elim and len(flags_elim) > 0:
         return "rejete"
     if not decision:
@@ -1203,11 +1203,11 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
     4. Les stages, benefolats et formations NE COMPTENT PAS comme experience pro.
     5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
     6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
-    7. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE immediatement, meme si le score est eleve.
+    7. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE immediatement, mais le score total est conserve (il ne doit pas etre mis a 0).
     METHODE DE RAISONNEMENT :
     Etape 1: Analyser la structure du CV (qualite, clarte, professionnalisme)
     Etape 2: Verifier les criteres eliminatoires UN PAR UN (avec justifications) - CRITIQUE
-    Etape 3: Si un critere eliminatoire est manquant -> REJET, score_total = 0
+    Etape 3: Si un critere eliminatoire est manquant -> REJET, mais score_total conserve
     Etape 4: Evaluer la coherence du parcours (progression, stabilite, logique)
     Etape 5: Identifier les competences techniques et manageriales
     Etape 6: Detecter les signaux de qualite (resultats quantifies, certifications)
@@ -1218,7 +1218,7 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
         "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
         "points_forts": ["liste des points forts du candidat"],
         "points_vigilance": ["liste des points de vigilance"],
-        "score_total": 0-14 (0 si flags_eliminatoires non vide),
+        "score_total": 0-14 (score conserve meme avec flags eliminatoires),
         "synthese_recruteur": "synthese pour le recruteur",
         "sous_scores": {
             "experience_bancaire": 0-3,
@@ -1260,7 +1260,7 @@ ATTESTATIONS/CERTIFICATS :
 1. Analyse le CV comme un expert RH.
 2. RAISONNE ETAPE PAR ETAPE avant de conclure.
 3. Verifie CHAQUE critere eliminatoire.
-4. Si UN SEUL critere eliminatoire n'est pas satisfait -> REJET, score_total = 0.
+4. Si UN SEUL critere eliminatoire n'est pas satisfait -> REJET, mais score_total conserve (ne pas mettre a 0).
 5. Donne des SCORES JUSTIFIES sur chaque critere.
 6. Identifie les FORCES et FAIBLESSES du profil.
 7. Produis une SYNTHESE claire et actionable pour le recruteur.
@@ -1316,7 +1316,8 @@ ATTESTATIONS/CERTIFICATS :
                 "coherence_parcours": 0,
                 "qualite_cv": 0
             }
-        score_total = 0 if flags_elim else int(analyse.get('score_total', sum(sous_scores.values())))
+        # Score total conserve meme avec flags eliminatoires
+        score_total = int(analyse.get('score_total', sum(sous_scores.values())))
         score_max = get_score_max_for_poste(poste)
         decision = get_recommandation_from_score(score_total, poste)
         if flags_elim:
@@ -1325,7 +1326,7 @@ ATTESTATIONS/CERTIFICATS :
         points_vigilance = analyse.get('points_vigilance', [])
         synthese = analyse.get('synthese_recruteur', '')
         if flags_elim:
-            synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". " + synthese
+            synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". Score: {score_total}/{score_max}. " + synthese
         details = {
             'moteur': f'{_PROVIDER} v2',
             'model': _MODEL,
@@ -1410,7 +1411,8 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv
     }
-    score = 0 if flags_elim else sum(sous_scores.values())
+    # Score conserve meme avec flags eliminatoires
+    score = sum(sous_scores.values())
     score = min(14, score)
     if score >= 11:
         decision = "Entretien prioritaire"
@@ -1448,7 +1450,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_vigilance.append("Verifier en entretien : experience et management")
     synthese = f"Candidat avec un score de {score}/14. "
     if flags_elim:
-        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". "
+        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". Score: {score}/14. "
     elif "prioritaire" in decision:
         synthese += "Profil tres solide, recommande pour entretien prioritaire."
     else:
@@ -1571,7 +1573,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         "coherence_parcours": coherence,
         "qualite_cv": qualite
     }
-    total_score = 0 if flags_elim else sum(sous_scores.values())
+    total_score = sum(sous_scores.values())
     total_score = min(12, total_score)
     if total_score >= 10:
         decision = "Entretien prioritaire"
@@ -1603,7 +1605,7 @@ def calculate_score_charge_admin_credit(cv_text, lettre_text, attestation_texts_
         points_vigilance.append("CV/lettre a enrichir")
     synthese = _generate_synthese_rac(cv_text, lettre_text, total_score, points_forts, points_vigilance)
     if flags_elim:
-        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". " + synthese
+        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". Score: {total_score}/12. " + synthese
     return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags_elim if flags_elim else [], 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s)" if flags_elim else ""), 'points_forts': points_forts, 'points_vigilance': points_vigilance + flags_elim if flags_elim else points_vigilance, 'synthese': synthese}
 def _generate_synthese_rac(cv_text, lettre_text, score, points_forts, points_vigilance):
     synthese = ""
@@ -1703,7 +1705,7 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv + lettre_score
     }
-    total_score = 0 if flags else sum(sous_scores.values())
+    total_score = sum(sous_scores.values())
     total_score = min(12, total_score)
     if total_score >= 10:
         decision = "Entretien prioritaire"
@@ -1715,7 +1717,7 @@ def calculate_score_chef_section_compensation(cv_text, lettre_text, attestation_
         decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
     synthese = f"Candidat avec un score de {total_score}/12"
     if flags:
-        synthese = f"❌ REJET IMMEDIAT - {len(flags)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags) + ". " + synthese
+        synthese = f"❌ REJET IMMEDIAT - {len(flags)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags) + ". Score: {total_score}/12. " + synthese
     return {'score': total_score, 'score_max': 12, 'decision': decision, 'flags_eliminatoires': flags, 'sous_scores': sous_scores, 'checklist': {}, 'detail': f"Score: {total_score}/12 — {decision}" + (f" - {len(flags)} critere(s) eliminatoire(s)" if flags else ""), 'points_forts': ["Experience en compensation interbancaire" if adequation >= 2 else ""], 'points_vigilance': ["Manque d'exposition BEAC" if exposition_beac < 2 else ""] + flags, 'synthese': synthese}
 def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts_list):
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
@@ -1823,7 +1825,7 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
     sous_scores["experience_bancaire"] = exp_score + bi_score + sql_score
     if sous_scores["experience_bancaire"] > 3:
         sous_scores["experience_bancaire"] = 3
-    total_score = 0 if flags_elim else sum(sous_scores.values())
+    total_score = sum(sous_scores.values())
     total_score = min(14, total_score)
     if total_score >= 11:
         decision = "Entretien prioritaire"
@@ -1857,7 +1859,7 @@ def calculate_score_data_analyst_finance(cv_text, lettre_text, attestation_texts
         points_vigilance.append("Exposition au secteur bancaire limitee")
     synthese = f"Candidat avec un score de {total_score}/14. "
     if flags_elim:
-        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". "
+        synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + ". Score: {total_score}/14. "
     elif total_score >= 11:
         synthese += "Profil tres solide pour le poste de Data Analyst Finance. Excellente adequation avec les exigences du poste. A recommander pour entretien prioritaire."
     elif total_score >= 7:
@@ -1921,7 +1923,7 @@ def analyze_cv_against_grille(cv_text, lettre_text, attestation_texts_list, post
         "coherence_parcours": coherence,
         "qualite_cv": qualite_cv + lettre_motiv
     }
-    score_final = 0 if flags_elim else sum(sous_scores.values())
+    score_final = sum(sous_scores.values())
     score_final = min(10, score_final)
     nb_elim_manquants = len(flags_elim)
     return {'score': score_final, 'checklist': checklist, 'flags_eliminatoires': flags_elim if nb_elim_manquants > 0 else [], 'signaux_detectes': signaux, 'details': details, 'sous_scores': sous_scores, 'score_breakdown': {'bloc1_eliminatoire': True if flags_elim else False, 'adequation_experience': adequation, 'coherence_parcours': coherence, 'exposition_risque_metier': risque_metier, 'qualite_cv': qualite_cv, 'lettre_motivation': lettre_motiv, 'score_final': score_final, 'note': f"Score: {score_final}/10" + (f" - {len(flags_elim)} critere(s) eliminatoire(s)" if flags_elim else "")}}
@@ -2010,7 +2012,7 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     4. Les stages, benefolats et formations NE COMPTENT PAS comme experience professionnelle.
     5. Tu justifies CHAQUE evaluation avec une citation courte du document concerne.
     6. Tu suis STRICTEMENT la grille fournie.
-    7. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE."""
+    7. Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE, mais le score total est conserve."""
     try:
         grille = GRILLE.get(poste, {})
         def fmt_list(items):
@@ -2066,7 +2068,7 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
                 "coherence_parcours": 0,
                 "qualite_cv": 0
             }
-        score_total = 0 if flags_elim else int(analyse.get('score_total', sum(sous_scores.values())))
+        score_total = int(analyse.get('score_total', sum(sous_scores.values())))
         decision = get_recommandation_from_score(score_total, poste)
         if flags_elim:
             decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
@@ -2109,6 +2111,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                 lines.append(f"  • {clean}")
         if len(flags) > 5:
             lines.append(f"  • +{len(flags)-5} autre(s)")
+        lines.append(f"\n📊 Score conserve: {score}/{score_max}")
         if note and "Decision" not in note and len(note) > 5:
             lines.append(f"\nNOTE RECRUTEUR : {note}")
         return "\n".join(lines)
@@ -2161,6 +2164,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                 clean = str(flag).replace('', '').replace('', '').strip()
                 if clean and len(clean) > 5:
                     lines.append(f"  • {clean}")
+            lines.append(f"\n📊 Score conserve: {score}/{score_max}")
             return "\n".join(lines)
         if "Entretien prioritaire" in decision_auto or "Shortlist" in decision_auto:
             lines = ["✅ PROFIL RECOMMANDE :"]
@@ -2674,7 +2678,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             update_data["analyse_details"] = json.dumps(details, ensure_ascii=False)
             update_data["score_breakdown"] = json.dumps(score_breakdown, ensure_ascii=False)
             supabase.table('candidats').update(update_data).eq('token', token).execute()
-            logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut}")
+            logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut} (flags: {len(flags_elim)})")
         del cv_text, lm_text, att_texts, result
         gc.collect()
     except Exception as e:
@@ -3485,7 +3489,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v7.7-minimax-scores-corrects",
+        "version": "v7.8-minimax-score-conserve",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "12: 10/7, 14: 11/7, 100: 80/70/60, 10: 8/5",
@@ -3503,6 +3507,7 @@ def health_version():
         "json_robust_parsing": True,
         "sous_scores_complets": True,
         "eliminatoire_rejet": True,
+        "score_conserve": True,
         "deployed_at": datetime.datetime.now().isoformat()
     }), 200
 if __name__ == '__main__':
@@ -3511,7 +3516,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v7.7 - {_PROVIDER} Reasoning Engine")
+    logger.info(f"🚀 RecrutBank API v7.8 - {_PROVIDER} Reasoning Engine")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3523,7 +3528,7 @@ if __name__ == '__main__':
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
         logger.info(f"JSON Robust Parsing: ✅ Active")
         logger.info(f"Sous-scores complets: ✅ 6 dimensions")
-        logger.info(f"Eliminatoire = Rejet immediat: ✅ Active")
+        logger.info(f"Eliminatoire = Rejet, Score conserve: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         test_ia_connection()
     else:
