@@ -1077,13 +1077,11 @@ ATTESTATIONS/CERTIFICATS :
                 } if "OpenRouter" in _PROVIDER else {}
             }
             if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
-                api_params["reasoning"] = {"enabled": True}
-                logger.info("🧠 Reasoning active pour l'analyse")
+                api_params["extra_body"] = {"reasoning": {"enabled": True}}
+                logger.info("🧠 Reasoning active pour l'analyse (via extra_body)")
             response = _client.chat.completions.create(**api_params)
         result_text = response.choices[0].message.content
         logger.info(f"✅ Analyse {_PROVIDER} terminee: {len(result_text)} caracteres")
-        if hasattr(response.choices[0].message, 'reasoning_details') and response.choices[0].message.reasoning_details:
-            logger.info(f"🧠 Reasoning details disponibles")
         try:
             analyse = json.loads(result_text)
         except json.JSONDecodeError:
@@ -1770,7 +1768,7 @@ def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
                 "extra_headers": {"HTTP-Referer": "https://recrutment.onrender.com", "X-Title": "RecrutBank CV Analyzer"} if "OpenRouter" in _PROVIDER else {}
             }
             if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
-                api_params["reasoning"] = {"enabled": True}
+                api_params["extra_body"] = {"reasoning": {"enabled": True}}
             response = _client.chat.completions.create(**api_params)
         result_text = response.choices[0].message.content
         try:
@@ -3203,7 +3201,7 @@ if __name__ == '__main__':
         test_ia_connection()
     else:
         logger.warning("⚠️ MODE FALLBACK UNIQUEMENT - Aucune IA disponible")
-        logger.warning("Vérifiez OPENROUTER_API_KEY ou DEEPSEEK_API_KEY")
+        logger.warning("Verifiez OPENROUTER_API_KEY ou DEEPSEEK_API_KEY")
         logger.warning("Assurez-vous que openai est installe")
     logger.info(f"Mode raisonnement avance: {'ACTIF ✅' if IA_ANALYSE_ACTIVE else 'INACTIF ❌'}")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
