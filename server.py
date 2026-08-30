@@ -1762,60 +1762,86 @@ ATTESTATIONS/CERTIFICATS :
             logger.error("❌ Echec complet de l'extraction JSON, utilisation du fallback minimal")
             analyse = extract_json_fallback(cv_text[:1000])
         flags_elim = analyse.get('flags_eliminatoires', [])
-        if isinstance(flags_elim, list):
-            flags_elim = [f for f in flags_elim if f]
-        else:
-            flags_elim = []
-        lm = analyse.get('lettre_motivation', {})
-        if lm.get('eliminatoire', False):
-            flags_elim.append(f"Lettre: {lm.get('commentaire', 'eliminatoire')}")
-        sous_scores = analyse.get('sous_scores', {})
-        is_chef_agence = bool(re.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center', cv_text, re.IGNORECASE))
-        sous_scores = validate_chef_division_scores(sous_scores, is_chef_agence)
-        score_total = int(analyse.get('score_total', sum(sous_scores.values())))
-        score_max = get_score_max_for_poste(poste)
-        if score_total > score_max:
-            score_total = score_max
-        decision = get_recommandation_from_score(score_total, poste)
-        if flags_elim:
-            decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
-        points_forts = analyse.get('points_forts', [])
-        points_vigilance = analyse.get('points_vigilance', [])
-        synthese = analyse.get('synthese_recruteur', '')
-        if flags_elim:
-            synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + f". Score: {score_total}/{score_max}. " + synthese
-        details = {
-            'moteur': f'{_PROVIDER} v2',
-            'model': _MODEL,
-            'analyse_raw': analyse,
-            'points_forts': points_forts,
-            'points_vigilance': points_vigilance,
-            'synthese_recruteur': synthese,
-            'raisonnement_detaille': analyse.get('raisonnement', ''),
-            'reasoning_enabled': OPENROUTER_REASONING_ENABLED,
-            'json_parse_method': 'robust'
-        }
-        result = {
-            'score': score_total,
-            'score_max': score_max,
-            'decision': decision,
-            'flags_eliminatoires': flags_elim,
-            'sous_scores': sous_scores,
-            'checklist': analyse.get('checklist', {}),
-            'signaux_detectes': analyse.get('signaux_detectes', []),
-            'points_forts': points_forts,
-            'points_vigilance': points_vigilance,
-            'synthese': synthese,
-            'details': details,
-            'score_breakdown': {
-                'score_final': score_total,
-                'score_max': score_max,
-                'decision': decision,
-                'sous_scores': sous_scores,
-                'chef_agence_detecte': is_chef_agence
-            }
-        }
-        return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
+if isinstance(flags_elim, list):
+    flags_elim = [f for f in flags_elim if f]
+else:
+    flags_elim = []
+lm = analyse.get('lettre_motivation', {})
+if lm.get('eliminatoire', False):
+    flags_elim.append(f"Lettre: {lm.get('commentaire', 'eliminatoire')}")
+
+# ✅ Récupérer les sous-scores BRUTS de l'IA (sans normalisation)
+ia_sous_scores = analyse.get('sous_scores', {})
+
+# ✅ Définir les max pour chaque critère
+max_scores = {
+    "experience_corporate": 3,
+    "management": 3,
+    "risque_credit": 2,
+    "cross_selling": 2,
+    "coherence_parcours": 2,
+    "qualite_cv": 1,
+    "certification": 1
+}
+
+# ✅ Calculer le score total à partir des sous-scores bruts (SOMME)
+score_total = 0
+for key, max_val in max_scores.items():
+    val = ia_sous_scores.get(key, 0)
+    # Limiter chaque score à son max pour éviter les dépassements
+    if val > max_val:
+        val = max_val
+    score_total += val
+score_total = min(14, score_total)
+
+score_max = get_score_max_for_poste(poste)
+if score_total > score_max:
+    score_total = score_max
+
+# ✅ Détection Chef d'agence pour les flags uniquement
+is_chef_agence = bool(re.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center', cv_text, re.IGNORECASE))
+
+decision = get_recommandation_from_score(score_total, poste)
+if flags_elim:
+    decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
+points_forts = analyse.get('points_forts', [])
+points_vigilance = analyse.get('points_vigilance', [])
+synthese = analyse.get('synthese_recruteur', '')
+if flags_elim:
+    synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + f". Score: {score_total}/{score_max}. " + synthese
+details = {
+    'moteur': f'{_PROVIDER} v2',
+    'model': _MODEL,
+    'analyse_raw': analyse,
+    'points_forts': points_forts,
+    'points_vigilance': points_vigilance,
+    'synthese_recruteur': synthese,
+    'raisonnement_detaille': analyse.get('raisonnement', ''),
+    'reasoning_enabled': OPENROUTER_REASONING_ENABLED,
+    'json_parse_method': 'robust'
+}
+result = {
+    'score': score_total,
+    'score_max': score_max,
+    'decision': decision,
+    'flags_eliminatoires': flags_elim,
+    'sous_scores': ia_sous_scores,  # ✅ STOCKER LES SOUS-SCORES BRUTS DE L'IA
+    'checklist': analyse.get('checklist', {}),
+    'signaux_detectes': analyse.get('signaux_detectes', []),
+    'points_forts': points_forts,
+    'points_vigilance': points_vigilance,
+    'synthese': synthese,
+    'details': details,
+    'score_breakdown': {
+        'score_final': score_total,
+        'score_max': score_max,
+        'decision': decision,
+        'sous_scores': ia_sous_scores,  # ✅ STOCKER LES SOUS-SCORES BRUTS DE L'IA
+        'chef_agence_detecte': is_chef_agence,
+        'score_calcule': 'somme_des_sous_scores_ia'
+    }
+}
+return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
     except Exception as e:
         logger.error(f"❌ Erreur analyse {_PROVIDER}: {e}")
         return None
@@ -2610,42 +2636,56 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     logger.info(f"Fallback vers analyse_grille pour {poste}")
                     result = analyze_cv_against_grille(cv_text, lm_text, att_texts, poste)
                 logger.info(f"Score calcule pour {poste}: {result.get('score', 0)}/10 - {result.get('decision', 'Inconnu')}")
-        score = result.get('score', 0)
-        score_max = result.get('score_max', get_score_max_for_poste(poste))
-        decision = result.get('decision') or get_recommandation_from_score(score, poste)
-        flags_elim = result.get('flags_eliminatoires', [])
-        statut = get_statut_from_decision(decision, flags_elim)
-        if score > score_max:
-            score = score_max
-        details = result.get('details', {})
-        details['points_forts'] = result.get('points_forts', [])
-        details['points_vigilance'] = result.get('points_vigilance', [])
-        details['synthese_recruteur'] = result.get('synthese', '')
-        details['moteur'] = _PROVIDER if IA_ANALYSE_ACTIVE else 'scoring_specifique_v2'
-        sous_scores = result.get('sous_scores', {})
-        if not sous_scores:
-            sous_scores = {
-                "experience_corporate": 0,
-                "management": 0,
-                "risque_credit": 0,
-                "cross_selling": 0,
-                "coherence_parcours": 0,
-                "qualite_cv": 0,
-                "certification": 0
-            }
-        score_breakdown = {'score_final': score, 'score_max': score_max, 'decision': decision, 'moteur_analyse': details['moteur'], 'sous_scores': sous_scores}
-        if supabase:
-            update_data = {"score": str(score), "decision": decision, "statut": statut, "analyse_status": "completed", "analyse_auto_date": datetime.datetime.now().isoformat()}
-            if result.get('checklist'):
-                update_data["checklist"] = json.dumps(result.get('checklist', {}), ensure_ascii=False)
-            if flags_elim:
-                update_data["flags_eliminatoires"] = json.dumps(flags_elim, ensure_ascii=False)
-            if result.get('signaux_detectes'):
-                update_data["signaux_detectes"] = json.dumps(result.get('signaux_detectes', []), ensure_ascii=False)
-            update_data["analyse_details"] = json.dumps(details, ensure_ascii=False)
-            update_data["score_breakdown"] = json.dumps(score_breakdown, ensure_ascii=False)
-            supabase.table('candidats').update(update_data).eq('token', token).execute()
-            logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut} (flags: {len(flags_elim)})")
+        # ✅ Récupérer le score calculé par l'IA (somme des sous-scores)
+score = result.get('score', 0)
+score_max = result.get('score_max', get_score_max_for_poste(poste))
+decision = result.get('decision') or get_recommandation_from_score(score, poste)
+flags_elim = result.get('flags_eliminatoires', [])
+statut = get_statut_from_decision(decision, flags_elim)
+if score > score_max:
+    score = score_max
+
+details = result.get('details', {})
+details['points_forts'] = result.get('points_forts', [])
+details['points_vigilance'] = result.get('points_vigilance', [])
+details['synthese_recruteur'] = result.get('synthese', '')
+details['moteur'] = _PROVIDER if IA_ANALYSE_ACTIVE else 'scoring_specifique_v2'
+
+# ✅ Récupérer les sous-scores (déjà les scores bruts de l'IA)
+sous_scores = result.get('sous_scores', {})
+if not sous_scores:
+    sous_scores = {
+        "experience_corporate": 0,
+        "management": 0,
+        "risque_credit": 0,
+        "cross_selling": 0,
+        "coherence_parcours": 0,
+        "qualite_cv": 0,
+        "certification": 0
+    }
+
+# ✅ Stocker les sous-scores bruts et le score calculé
+score_breakdown = {
+    'score_final': score,
+    'score_max': score_max,
+    'decision': decision,
+    'moteur_analyse': details['moteur'],
+    'sous_scores': sous_scores,
+    'score_calcule': 'somme_des_sous_scores_ia'  # ✅ Indicateur que le score est la somme des sous-scores
+}
+
+if supabase:
+    update_data = {"score": str(score), "decision": decision, "statut": statut, "analyse_status": "completed", "analyse_auto_date": datetime.datetime.now().isoformat()}
+    if result.get('checklist'):
+        update_data["checklist"] = json.dumps(result.get('checklist', {}), ensure_ascii=False)
+    if flags_elim:
+        update_data["flags_eliminatoires"] = json.dumps(flags_elim, ensure_ascii=False)
+    if result.get('signaux_detectes'):
+        update_data["signaux_detectes"] = json.dumps(result.get('signaux_detectes', []), ensure_ascii=False)
+    update_data["analyse_details"] = json.dumps(details, ensure_ascii=False)
+    update_data["score_breakdown"] = json.dumps(score_breakdown, ensure_ascii=False)
+    supabase.table('candidats').update(update_data).eq('token', token).execute()
+    logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut} (flags: {len(flags_elim)})")
         del cv_text, lm_text, att_texts, result
         gc.collect()
     except Exception as e:
