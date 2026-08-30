@@ -1,1 +1,1 @@
-Nothing needs to be added to .gitignore since only a Python source file (server.py) was modified and there are no build artifacts, dependencies, or temporary files in the changes.
+Nothing should be ignored since only a source file (`server.py`) was modified and there are no build artifacts, dependencies, or temporary files in the changes.
