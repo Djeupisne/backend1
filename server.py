@@ -265,6 +265,72 @@ def parse_json_robust(result_text):
             else:
                 logger.error("❌ Aucun JSON trouve dans la reponse")
                 return None
+def detect_profils_metier(raw_text):
+    import re as re_json
+    chef_patterns = [
+        r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence',
+        r'responsable d\'agence|responsable d agence|manager d\'agence|manager d agence',
+        r'agence manager|branch manager|agency manager',
+        r'chef de centre|directeur de centre|responsable de centre',
+        r'acting branch manager|profit center manager|profit center',
+        r'responsable de succursale|directeur de succursale',
+        r'responsable d\'activité|chef d\'activité',
+        r'pilotage.*?agence|gestion.*?agence',
+        r'responsable.*?agence.*?bancaire'
+    ]
+    is_chef_agence = any(re_json.search(p, raw_text, re_json.IGNORECASE) for p in chef_patterns)
+    gestionnaire_patterns = [
+        r'gestionnaire de portefeuille|portfolio manager',
+        r'charge de portefeuille|portfolio officer|credit portfolio',
+        r'gestionnaire de compte|account manager|relationship manager',
+        r'chargé de clientèle|charge de clientele|chargé d\'affaires|charge d affaires',
+        r'analyste credit|analyste crédit|analyste de crédit',
+        r'montage credit|montage crédit|instruction credit|instruction crédit',
+        r'responsable de portefeuille|gestionnaire de clientèle|gestionnaire de clientele',
+        r'commercial.*?corporate|commercial.*?sme|commercial.*?pme',
+        r'business manager|client manager|portfolio manager.*?sme',
+        r'gestion.*?portefeuille.*?client|suivi.*?portefeuille'
+    ]
+    is_gestionnaire_portefeuille = any(re_json.search(p, raw_text, re_json.IGNORECASE) for p in gestionnaire_patterns)
+    portfolio_patterns = [
+        r'gestion de portefeuille',
+        r'portefeuille.*?client',
+        r'portefeuille.*?credit|portefeuille.*?crédit',
+        r'portefeuille.*?entreprise',
+        r'suivi.*?portefeuille',
+        r'portefeuille.*?sme|portefeuille.*?pme',
+        r'portefeuille.*?local corporate',
+        r'portefeuille.*?grandes entreprises',
+        r'portefeuille.*?npl',
+        r'portefeuille.*?provision',
+        r'recouvrement|relance client',
+        r'gestion des impayés|gestion des impayes',
+        r'créances douteuses|créances impayées|creances douteuses|creances impayees'
+    ]
+    has_portfolio_management = any(re_json.search(p, raw_text, re_json.IGNORECASE) for p in portfolio_patterns)
+    corporate_patterns = [
+        r'local corporate|corporate local',
+        r'sme|pme',
+        r'petites et moyennes entreprises',
+        r'moyennes entreprises|grandes entreprises',
+        r'entreprises|corporate banking',
+        r'portefeuille.*?entreprise',
+        r'acquisition.*?client|développement.*?portefeuille|developpement.*?portefeuille',
+        r'segment.*?entreprise|marché.*?corporate|marche.*?corporate',
+        r'gestion.*?portefeuille.*?client'
+    ]
+    has_local_corporate = any(re_json.search(p, raw_text, re_json.IGNORECASE) for p in corporate_patterns)
+    cross_patterns = [
+        r'cross[- ]?selling|ventes croisées|ventes croisees',
+        r'cash management',
+        r'tsg',
+        r'trade finance',
+        r'partenariat interdépartemental|synergie commerciale',
+        r'offre.*?cross|produit.*?croisé'
+    ]
+    has_cross_selling = any(re_json.search(p, raw_text, re_json.IGNORECASE) for p in cross_patterns)
+    logger.info(f"🔍 Detection profils metier: ChefAgence={is_chef_agence}, GestionnairePortefeuille={is_gestionnaire_portefeuille}, PortfolioMgmt={has_portfolio_management}, LocalCorporate={has_local_corporate}, CrossSelling={has_cross_selling}")
+    return (is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling)
 def validate_chef_division_scores(sous_scores, is_chef_agence=False):
     max_scores = {
         "experience_corporate": 3,
@@ -290,13 +356,15 @@ def validate_chef_division_scores(sous_scores, is_chef_agence=False):
         if key not in sous_scores:
             sous_scores[key] = defaults[key]
     if is_chef_agence:
-        sous_scores["management"] = 3
-        sous_scores["experience_corporate"] = 3
-        sous_scores["risque_credit"] = 2
+        sous_scores["management"] = max(sous_scores.get("management", 0), 3)
+        sous_scores["experience_corporate"] = max(sous_scores.get("experience_corporate", 0), 3)
+        sous_scores["risque_credit"] = max(sous_scores.get("risque_credit", 0), 2)
         logger.info("✅ Chef d'agence : management=3, experience_corporate=3, risque_credit=2")
     for key, max_val in max_scores.items():
         if sous_scores.get(key, 0) > max_val:
             sous_scores[key] = max_val
+        if sous_scores.get(key, 0) < 0:
+            sous_scores[key] = 0
     return sous_scores
 def normalize_scores_by_grille(sous_scores, poste):
     if poste == "Chef de Division Local Corporate":
@@ -336,12 +404,10 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
     if not result:
         return result
     poste = result.get('poste', '')
-    raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + "\n".join(attestation_texts_list) if attestation_texts_list else ""
-    is_chef_agence = bool(re_json.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center', raw_full, re_json.IGNORECASE))
-    is_gestionnaire_portefeuille = bool(re_json.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit|gestionnaire de clientèle|gestionnaire de clientele|commercial|chargé d\'affaires|charge d affaires|responsable de portefeuille', raw_full, re_json.IGNORECASE))
-    has_portfolio_management = bool(re_json.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises|portefeuille.*?npl|portefeuille.*?provision|recouvrement|relance client|gestion des impayés|gestion des impayes', raw_full, re_json.IGNORECASE))
-    has_local_corporate = bool(re_json.search(r'local corporate|sme|pme|petites et moyennes entreprises|pm|moyennes entreprises|grandes entreprises|entreprises|corporate local|local corporate banking|portefeuille.*?entreprise|gestion.*?portefeuille.*?client|acquisition.*?client|developpement.*?portefeuille', raw_full, re_json.IGNORECASE))
-    has_cross_selling = bool(re_json.search(r'cross[- ]?selling|ventes croisees|cash management|tsg|trade finance|partenariat interdépartemental|synergie commerciale', raw_full, re_json.IGNORECASE))
+    raw_full = (cv_text or '') + "\n" + (lettre_text or '')
+    if attestation_texts_list:
+        raw_full += "\n" + "\n".join(attestation_texts_list)
+    is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(raw_full)
     sous_scores = result.get('sous_scores', {})
     if not sous_scores:
         sous_scores = {}
@@ -349,27 +415,31 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
         if is_chef_agence:
             if sous_scores.get("management", 0) < 2:
                 sous_scores["management"] = 2
+                logger.info("✅ Chef d'agence : management booste a 2 minimum")
             if sous_scores.get("risque_credit", 0) < 2:
                 sous_scores["risque_credit"] = 2
+                logger.info("✅ Chef d'agence : risque_credit booste a 2 minimum")
             if sous_scores.get("experience_corporate", 0) < 2:
                 sous_scores["experience_corporate"] = 2
-            logger.info("✅ Chef d'agence : management>=2, risque_credit>=2, experience_corporate>=2")
+                logger.info("✅ Chef d'agence : experience_corporate booste a 2 minimum")
         if is_gestionnaire_portefeuille or has_portfolio_management:
             if sous_scores.get("risque_credit", 0) < 2:
                 sous_scores["risque_credit"] = 2
+                logger.info("✅ Gestionnaire portefeuille : risque_credit booste a 2 minimum")
             if sous_scores.get("experience_corporate", 0) < 2:
                 sous_scores["experience_corporate"] = 2
+                logger.info("✅ Gestionnaire portefeuille : experience_corporate booste a 2 minimum")
             if sous_scores.get("cross_selling", 0) < 1:
                 sous_scores["cross_selling"] = 1
-            logger.info("✅ Gestionnaire de portefeuille : risque_credit>=2, experience_corporate>=2, cross_selling>=1")
+                logger.info("✅ Gestionnaire portefeuille : cross_selling booste a 1 minimum")
         if has_local_corporate:
             if sous_scores.get("experience_corporate", 0) < 2:
                 sous_scores["experience_corporate"] = 2
-            logger.info("✅ Local Corporate/SME : experience_corporate>=2")
+                logger.info("✅ Local Corporate detecte : experience_corporate booste a 2 minimum")
         if has_cross_selling:
             if sous_scores.get("cross_selling", 0) < 1:
                 sous_scores["cross_selling"] = 1
-            logger.info("✅ Cross-selling : cross_selling>=1")
+                logger.info("✅ Cross-selling detecte : cross_selling booste a 1 minimum")
         sous_scores = validate_chef_division_scores(sous_scores, is_chef_agence)
         score_total = sous_scores.get("experience_corporate", 0) + sous_scores.get("management", 0) + sous_scores.get("risque_credit", 0) + sous_scores.get("cross_selling", 0) + sous_scores.get("coherence_parcours", 0) + sous_scores.get("qualite_cv", 0) + sous_scores.get("certification", 0)
     else:
@@ -383,13 +453,16 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
         for flag in flags_elim:
             flag_lower = flag.lower()
             if is_chef_agence:
-                if any(keyword in flag_lower for keyword in ['portefeuille', 'sme', 'pme', 'local corporate', 'corporate', 'manageriale', 'management', 'risque', 'credit', 'npl', 'provision', 'experience', 'exposition']):
+                if any(keyword in flag_lower for keyword in ['portefeuille', 'sme', 'pme', 'local corporate', 'corporate', 'manageriale', 'management', 'encadrement', 'equipe', 'risque', 'credit', 'crédit', 'npl', 'provision', 'impaye', 'recouvrement', 'exposition']):
+                    logger.info(f"🔧 Suppression flag pour Chef d'agence: {flag}")
                     continue
-            if (is_gestionnaire_portefeuille or has_portfolio_management):
-                if any(keyword in flag_lower for keyword in ['portefeuille', 'sme', 'pme', 'local corporate', 'corporate', 'risque', 'credit', 'npl', 'provision']):
+            if is_gestionnaire_portefeuille or has_portfolio_management:
+                if any(keyword in flag_lower for keyword in ['portefeuille', 'sme', 'pme', 'local corporate', 'corporate', 'risque', 'credit', 'crédit', 'npl', 'provision', 'impaye', 'recouvrement', 'exposition']):
+                    logger.info(f"🔧 Suppression flag pour Gestionnaire portefeuille: {flag}")
                     continue
             if has_local_corporate:
-                if any(keyword in flag_lower for keyword in ['sme', 'pme', 'local corporate', 'corporate']):
+                if any(keyword in flag_lower for keyword in ['sme', 'pme', 'local corporate', 'corporate', 'portefeuille']):
+                    logger.info(f"🔧 Suppression flag pour Local Corporate detecte: {flag}")
                     continue
             if flag_lower and flag_lower.strip() and len(flag_lower) > 3:
                 new_flags.append(flag)
@@ -400,6 +473,7 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
     result['flags_eliminatoires'] = new_flags
     if len(new_flags) == 0 and len(flags_elim) > 0:
         result['decision'] = get_recommandation_from_score(score_total, poste)
+        logger.info(f"🔧 Tous les flags supprimes, decision recalculee: {result['decision']}")
     if 'score_breakdown' in result:
         result['score_breakdown']['sous_scores'] = sous_scores
         result['score_breakdown']['score_final'] = score_total
@@ -407,15 +481,15 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
         result['score_breakdown']['decision'] = result.get('decision', '')
         result['score_breakdown']['flags_eliminatoires'] = new_flags
         result['score_breakdown']['chef_agence_detecte'] = is_chef_agence
+        result['score_breakdown']['gestionnaire_portefeuille_detecte'] = is_gestionnaire_portefeuille or has_portfolio_management
+        result['score_breakdown']['local_corporate_detecte'] = has_local_corporate
+        result['score_breakdown']['cross_selling_detecte'] = has_cross_selling
+        result['score_breakdown']['business_rules_appliquees'] = True
     return result
 def extract_json_fallback(text):
     logger.info("🔧 Utilisation du fallback d'extraction JSON avec grille officielle")
     import re as re_json
-    is_chef_agence = bool(re_json.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center', text, re_json.IGNORECASE))
-    is_gestionnaire_portefeuille = bool(re_json.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit|gestionnaire de clientèle|gestionnaire de clientele|commercial|chargé d\'affaires|charge d affaires|responsable de portefeuille', text, re_json.IGNORECASE))
-    has_portfolio_management = bool(re_json.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises|portefeuille.*?npl|portefeuille.*?provision|recouvrement|relance client|gestion des impayés|gestion des impayes', text, re_json.IGNORECASE))
-    has_local_corporate = bool(re_json.search(r'local corporate|sme|pme|petites et moyennes entreprises|pm|moyennes entreprises|grandes entreprises|entreprises|corporate local|local corporate banking|portefeuille.*?entreprise|gestion.*?portefeuille.*?client|acquisition.*?client|developpement.*?portefeuille', text, re_json.IGNORECASE))
-    has_cross_selling = bool(re_json.search(r'cross[- ]?selling|ventes croisees|cash management|tsg|trade finance|partenariat interdépartemental|synergie commerciale', text, re_json.IGNORECASE))
+    is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(text)
     flags = []
     flag_patterns = [
         (r'Aucune experience.*?bancaire|pas d\'experience.*?bancaire|sans experience.*?bancaire', 'Aucune experience dans le secteur bancaire ou financier reglemente'),
@@ -428,14 +502,16 @@ def extract_json_fallback(text):
     if not is_chef_agence:
         if not (is_gestionnaire_portefeuille or has_portfolio_management or has_local_corporate):
             flags.append("Aucune experience en gestion d'un portefeuille de clients SME/PME/Local Corporate")
-    management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe', 'pilotage', 'responsable', 'coordination', 'supervision', 'direction']
-    management_count = sum(1 for kw in management_keywords if kw in text.lower())
-    if management_count < 2:
-        flags.append("Aucune experience manageriale : ni encadrement d'equipe, ni pilotage d'une activite commerciale")
-    credit_keywords = ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
-    credit_count = sum(1 for kw in credit_keywords if kw in text.lower())
-    if credit_count < 1:
-        flags.append("Aucune exposition a la gestion du risque de credit ou au suivi de la qualite d'un portefeuille (NPL, provisions)")
+    if not is_chef_agence:
+        management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe', 'pilotage', 'responsable', 'coordination', 'supervision', 'direction']
+        management_count = sum(1 for kw in management_keywords if kw in text.lower())
+        if management_count < 2:
+            flags.append("Aucune experience manageriale : ni encadrement d'equipe, ni pilotage d'une activite commerciale")
+    if not (is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management):
+        credit_keywords = ['credit', 'crédit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
+        credit_count = sum(1 for kw in credit_keywords if kw in text.lower())
+        if credit_count < 1:
+            flags.append("Aucune exposition a la gestion du risque de credit ou au suivi de la qualite d'un portefeuille (NPL, provisions)")
     points_forts = []
     if re_json.search(r'experience.*?bancaire|banque|bancaire', text, re_json.IGNORECASE):
         points_forts.append("Experience bancaire detectee")
@@ -504,7 +580,7 @@ def extract_json_fallback(text):
             management = 1
         else:
             management = 0
-        credit_keywords = ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
+        credit_keywords = ['credit', 'crédit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
         credit_count = sum(1 for kw in credit_keywords if kw in text.lower())
         if is_gestionnaire_portefeuille or has_portfolio_management:
             risque_credit = 2
@@ -598,7 +674,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v9.8-poste-passe-aux-business-rules',
+        'version': 'v9.9-business-rules-v2',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -642,7 +718,10 @@ def health_check():
             'bac3_compensable_10ans': True,
             'ia_scores_gardes': True,
             'score_total_somme_sous_scores_ia': True,
-            'poste_passe_aux_business_rules': True
+            'poste_passe_aux_business_rules': True,
+            'chef_agence_exemption': True,
+            'gestionnaire_portefeuille_exemption': True,
+            'business_rules_v2': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -1022,7 +1101,12 @@ GRILLE = {
             "coherence_parcours": 2,
             "qualite_cv": 1,
             "certification": 1
-        }
+        },
+        "regles_metier": [
+            "Chef d'agence / Directeur d'agence : valide automatiquement le management, le portefeuille commercial et le risque de credit (NPL/provisions).",
+            "Gestionnaire de portefeuille / Relationship Manager SME/Corporate : valide automatiquement l'exposition au risque de credit et la gestion des impayes.",
+            "Bac+3 compensable par 10+ annees d'experience averee en SME/Local Corporate."
+        ]
     },
     "Data Analyst Finance": {
         "eliminatoire": [
@@ -1346,7 +1430,7 @@ def detect_banking_experience_years(text):
         years_int = sorted([int(y) for y in years])
         total_years = years_int[-1] - years_int[0]
         if total_years > 0 and total_years < 50:
-            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'credit', 'institution financiere', 'local corporate', 'sme', 'pme']
+            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere', 'local corporate', 'sme', 'pme']
             for kw in bank_keywords:
                 if kw in text_lower:
                     return total_years
@@ -1365,7 +1449,7 @@ def detect_banking_experience_years(text):
             continue
         block_lower = block.lower()
         is_banking = False
-        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'credit', 'institution financiere', 'local corporate', 'sme', 'pme']
+        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere', 'local corporate', 'sme', 'pme']
         for kw in banking_keywords:
             if kw in block_lower:
                 is_banking = True
@@ -1384,7 +1468,7 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
     semantic_expansions = {
         "management": ["manager", "leadership", "supervision", "coordination", "direction", "pilotage", "encadrement", "gestion d'equipe", "team management", "team lead", "superviseur", "chef d'agence", "directeur d'agence", "responsable d'agence", "branch manager", "acting branch manager", "profit center manager"],
         "cross-selling": ["ventes croisees", "cross selling", "cross-selling", "synergie commerciale", "commercial synergy", "partenariat", "partnership", "collaboration commerciale", "cash management", "tsg", "trade finance"],
-        "risk": ["risque", "risk", "NPL", "non performing", "provisions", "IFRS 9", "credit", "credit", "portefeuille", "portfolio", "CIR", "cout du risque", "creances douteuses", "creances impayees", "impayes"],
+        "risk": ["risque", "risk", "NPL", "non performing", "provisions", "IFRS 9", "credit", "crédit", "portefeuille", "portfolio", "CIR", "cout du risque", "creances douteuses", "creances impayees", "impayes"],
         "corporate": ["local corporate", "corporate", "sme", "pme", "petites et moyennes entreprises", "pm", "moyennes entreprises", "grandes entreprises", "entreprises", "corporate local", "local corporate banking", "chef d'agence", "directeur d'agence", "gestionnaire de portefeuille", "gestionnaire de compte"],
         "certification": ["certification", "certificat", "certified", "ITB", "Moody's", "Ecobank", "MBA", "Master", "formation", "frankfurt school", "financement des pme"]
     }
@@ -1427,11 +1511,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
     poste = "Chef de Division Local Corporate"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
-    is_chef_agence = bool(re.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center', cv_text, re.IGNORECASE))
-    is_gestionnaire_portefeuille = bool(re.search(r'gestionnaire de portefeuille|portfolio manager|charge de portefeuille|portfolio officer|credit portfolio|gestionnaire de compte|account manager|relationship manager|chargé de clientèle|charge de clientele|analyste credit|analyste crédit|montage credit|montage crédit|instruction credit|instruction crédit|gestionnaire de clientèle|gestionnaire de clientele|commercial|chargé d\'affaires|charge d affaires|responsable de portefeuille', cv_text, re.IGNORECASE))
-    has_portfolio_management = bool(re.search(r'gestion de portefeuille|portefeuille.*?client|portefeuille.*?credit|portefeuille.*?entreprise|suivi.*?portefeuille|portefeuille.*?sme|portefeuille.*?pme|portefeuille.*?local corporate|portefeuille.*?grandes entreprises|portefeuille.*?npl|portefeuille.*?provision|recouvrement|relance client|gestion des impayés|gestion des impayes', cv_text, re.IGNORECASE))
-    has_local_corporate = bool(re.search(r'local corporate|sme|pme|petites et moyennes entreprises|pm|moyennes entreprises|grandes entreprises|entreprises|corporate local|local corporate banking|portefeuille.*?entreprise|gestion.*?portefeuille.*?client|acquisition.*?client|developpement.*?portefeuille', cv_text, re.IGNORECASE))
-    has_cross_selling = bool(re.search(r'cross[- ]?selling|ventes croisees|cash management|tsg|trade finance|partenariat interdépartemental|synergie commerciale', cv_text, re.IGNORECASE))
+    is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(raw_full)
     banking_years = detect_banking_experience_years(raw_full)
     flags_elim = []
     if banking_years < 1:
@@ -1448,15 +1528,17 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             flags_elim.append("Niveau de diplome inferieur a Bac +4 (Master ou equivalent requis)")
     if not is_chef_agence:
         if not (is_gestionnaire_portefeuille or has_portfolio_management or has_local_corporate):
-            flags_elim.append("Aucune experience en gestion d'un portefeuille de clients SME (PME)/local corporate ou d'entreprises")
-    management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe', 'pilotage', 'responsable', 'coordination', 'supervision', 'direction']
-    management_count = sum(1 for kw in management_keywords if kw in cv_text.lower())
-    if management_count < 2:
-        flags_elim.append("Aucune experience manageriale : ni encadrement d'equipe, ni pilotage d'une activite commerciale")
-    credit_keywords = ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
-    credit_count = sum(1 for kw in credit_keywords if kw in cv_text.lower())
-    if credit_count < 1:
-        flags_elim.append("Aucune exposition a la gestion du risque de credit ou au suivi de la qualite d'un portefeuille (NPL, provisions)")
+            flags_elim.append("Aucune experience en gestion d'un portefeuille de clients SME/PME/local corporate ou d'entreprises")
+    if not is_chef_agence:
+        management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe', 'pilotage', 'responsable', 'coordination', 'supervision', 'direction']
+        management_count = sum(1 for kw in management_keywords if kw in cv_text.lower())
+        if management_count < 2:
+            flags_elim.append("Aucune experience manageriale : ni encadrement d'equipe, ni pilotage d'une activite commerciale")
+    if not (is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management):
+        credit_keywords = ['credit', 'crédit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
+        credit_count = sum(1 for kw in credit_keywords if kw in cv_text.lower())
+        if credit_count < 1:
+            flags_elim.append("Aucune exposition a la gestion du risque de credit ou au suivi de la qualite d'un portefeuille (NPL, provisions)")
     sous_scores = {}
     if is_chef_agence:
         sous_scores["experience_corporate"] = 3
@@ -1483,7 +1565,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             sous_scores["management"] = 1
         else:
             sous_scores["management"] = 0
-        credit_keywords = ['credit', 'credit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
+        credit_keywords = ['credit', 'crédit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
         credit_count = sum(1 for kw in credit_keywords if kw in cv_text.lower())
         if is_gestionnaire_portefeuille or has_portfolio_management:
             sous_scores["risque_credit"] = 2
@@ -1580,6 +1662,14 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_forts.append("Certification professionnelle ou connaissance du marche CEMAC/UEMOA")
     if is_chef_agence:
         points_forts.append("✅ Chef d'agence - Experience manageriale, risque de credit et portefeuille corporate confirmes")
+    if is_gestionnaire_portefeuille:
+        points_forts.append("✅ Gestionnaire de portefeuille - Risque de credit et relation client confirmes")
+    if has_portfolio_management:
+        points_forts.append("✅ Gestion de portefeuille detectee - Exposition au risque de credit confirmee")
+    if has_local_corporate:
+        points_forts.append("✅ Experience Local Corporate/SME detectee")
+    if has_cross_selling:
+        points_forts.append("✅ Cross-selling / Cash Management / TSG detecte")
     synthese = f"Candidat avec un score de {score}/14. "
     if flags_elim:
         synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + f". Score conserve: {score}/14. "
@@ -1615,8 +1705,12 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             'sous_scores': sous_scores,
             'criteres_notes': 7,
             'chef_agence_detecte': is_chef_agence,
+            'gestionnaire_portefeuille_detecte': is_gestionnaire_portefeuille or has_portfolio_management,
+            'local_corporate_detecte': has_local_corporate,
+            'cross_selling_detecte': has_cross_selling,
             'eliminatoires_passes': len(flags_elim) == 0,
-            'nb_eliminatoires': len(flags_elim)
+            'nb_eliminatoires': len(flags_elim),
+            'business_rules_appliquees': True
         }
     }
     return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
@@ -1626,53 +1720,81 @@ def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, p
     grille = GRILLE.get(poste, {})
     scoring_grille = """
 GRILLE DE SCORING OFFICIELLE (MAX 14) :
-1. Adéquation de l'expérience en SME/Local Corporate (0-3) :
-- 3/3 : Pilotage d'une division/local corporate avec objectifs atteints, résultats quantifiés
-- 2/3 : Gestion d'un portefeuille SME/Local Corporate avec développement démontré
+1. Adequation de l'experience en SME/Local Corporate (0-3) :
+- 3/3 : Pilotage d'une division/local corporate avec objectifs atteints, resultats quantifies
+- 2/3 : Gestion d'un portefeuille SME/Local Corporate avec developpement demontre
 - 1/3 : Exposition basique au segment SME/Local Corporate
-- 0/3 : Aucune expérience en SME/Local Corporate
-2. Capacité managériale (0-3) :
-- 3/3 : Pilotage P&L, équipe importante, leadership démontré
-- 2/3 : Encadrement d'équipe, coordination d'activité commerciale
+- 0/3 : Aucune experience en SME/Local Corporate
+2. Capacite manageriale (0-3) :
+- 3/3 : Pilotage P&L, equipe importante, leadership demontre
+- 2/3 : Encadrement d'equipe, coordination d'activite commerciale
 - 1/3 : Supervision basique, gestion de projet
-- 0/3 : Aucune expérience managériale
-3. Maîtrise du risque de crédit (0-2) :
-- 2/2 : Gestion active du NPL, provisions, suivi qualité du portefeuille
-- 1/2 : Exposition au risque de crédit ou au suivi de portefeuille
-- 0/2 : Aucune exposition au risque de crédit
+- 0/3 : Aucune experience manageriale
+3. Maitrise du risque de credit (0-2) :
+- 2/2 : Gestion active du NPL, provisions, suivi qualite du portefeuille
+- 1/2 : Exposition au risque de credit ou au suivi de portefeuille
+- 0/2 : Aucune exposition au risque de credit
 4. Cross-selling / Cash Management / TSG (0-2) :
-- 2/2 : Expérience avérée en cross-selling avec résultats
+- 2/2 : Experience averee en cross-selling avec resultats
 - 1/2 : Exposition au cross-selling ou aux solutions Cash Management/TSG
 - 0/2 : Aucune exposition
-5. Cohérence et progression du parcours (0-2) :
-- 2/2 : Progression hiérarchique visible, responsabilités croissantes
-- 1/2 : Parcours stable sans régression
-- 0/2 : Parcours incohérent ou régressions
-6. Qualité du CV (0-1) :
-- 1/1 : Résultats chiffrés, précision des missions
-- 0/1 : CV descriptif sans résultats
-7. Certification professionnelle ou connaissance du marché (0-1) :
+5. Coherence et progression du parcours (0-2) :
+- 2/2 : Progression hierarchique visible, responsabilites croissantes
+- 1/2 : Parcours stable sans regression
+- 0/2 : Parcours incoherent ou regressions
+6. Qualite du CV (0-1) :
+- 1/1 : Resultats chiffres, precision des missions
+- 0/1 : CV descriptif sans resultats
+7. Certification professionnelle ou connaissance du marche (0-1) :
 - 1/1 : Certification (ITB, Moody's, Ecobank) ou connaissance CEMAC/UEMOA
-- 0/1 : Aucune certification ni connaissance du marché
+- 0/1 : Aucune certification ni connaissance du marche
 """
-    system_prompt = f"""Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
-REGLES ABSOLUES D'ANALYSE :
-1. Tu DOIS raisonner etape par etape comme un expert humain.
+    system_prompt = f"""Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA). Tu as travaille pour Ecobank, UBA, Orabank et connais parfaitement le metier de Chef de Division Local Corporate.
+
+REGLE ABSOLUE D'ANALYSE : Tu DOIS comprendre le SENS des phrases et le CONTEXTE METIER. Tu ne te bases pas uniquement sur des mots-cles, tu analyses la logique du parcours professionnel.
+
+🏦 CONTEXTE METIER BANCAIRE AFRICAIN :
+Un CHEF DE DIVISION LOCAL CORPORATE dans une banque en zone CEMAC/UEMOA pilote une ligne d'activite dediee aux PME, Grandes Entreprises et Institutionnels. Il gere un portefeuille de clients avec des objectifs de revenus, volumes et marges. Il encadre une equipe de commerciaux et/ou d'analystes (3 a 10 personnes). Il assure le suivi de la qualite du portefeuille (NPL, CIR, provisions). Il developpe des synergies cross-selling avec les metiers (TSG, Cash Management, Trade Finance).
+
+🔴 REGLES METIER ABSOLUES (NON NEGOCIABLES) :
+
+1. CHEF D'AGENCE / DIRECTEUR D'AGENCE / BRANCH MANAGER :
+   - Dans la pratique bancaire, un Chef d'agence gere OBLIGATOIREMENT une equipe de 3 a 10 personnes. Il est responsable du portefeuille commercial de l'agence (PME, Local Corporate). Il est le premier responsable des relances clients, creances douteuses (NPL) et provisions.
+   → VALIDE AUTOMATIQUEMENT : management, portefeuille commercial, risque de credit
+   → Ne peut PAS etre rejete sur ces criteres
+   → Score minimum garanti : management=3/3, experience_corporate=3/3, risque_credit=2/2
+
+2. GESTIONNAIRE DE PORTEFEUILLE / RELATIONSHIP MANAGER / CHARGE D'AFFAIRES / GESTIONNAIRE DE COMPTE (SME, Corporate, Grandes Entreprises) :
+   - Est le premier agent de recouvrement de la banque. Si un client est en impaye, c'est LUI qui gere la relance. Est directement expose au risque de credit et a la gestion des NPL.
+   → VALIDE AUTOMATIQUEMENT : exposition au risque de credit et gestion de portefeuille
+   → Score minimum garanti : risque_credit=2/2, experience_corporate=2/3
+
+3. EXEMPTIONS AUX CRITERES ELIMINATOIRES :
+   - "Aucune experience en gestion d'un portefeuille SME/Local Corporate" : EXEMPTE si Chef d'agence ou Gestionnaire de portefeuille
+   - "Aucune experience manageriale" : EXEMPTE si Chef d'agence
+   - "Aucune exposition au risque de credit" : EXEMPTE si Chef d'agence ou Gestionnaire de portefeuille
+
+4. COMPENSATION DIPLOME :
+   - Bac+3 compensable par 10+ annees d'experience avere en SME/Local Corporate
+
+📋 REGLES D'ANALYSE :
+1. Les STAGES, BENEVOLATS et FORMATIONS ne comptent PAS comme experience professionnelle.
 2. Tu ne JAMAIS inventer des faits qui ne sont PAS dans les documents.
-3. Si une information n'est PAS mentionnee, tu la consideres comme ABSENTE.
-4. Les stages, benefolats et formations NE COMPTENT PAS comme experience pro.
-5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
-6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
-7. Les NPL (Non-Performing Loans) sont des creances douteuses ou impayees.
+3. Si une information n'est PAS mentionnee, elle est ABSENTE.
+4. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
+5. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
+6. Les NPL (Non-Performing Loans) = creances douteuses ou impayees.
+
 {scoring_grille}
-REGLES METIER IMPORTANTES :
-- Un CHEF D'AGENCE ou DIRECTEUR D'AGENCE remplit automatiquement les criteres eliminatoires : experience en gestion d'un portefeuille SME/Local Corporate, experience manageriale, exposition au risque de credit.
-- Pour le SCORING, un Chef d'agence a automatiquement 3/3 en management, 3/3 en experience_corporate, et 2/2 en risque_credit.
-- Un GESTIONNAIRE DE PORTEFEUILLE remplit automatiquement les criteres eliminatoires : exposition au risque de credit et experience corporate. Score MINIMUM de 2/2 en risque_credit et 2/3 en experience_corporate.
-CRITERES ELIMINATOIRES (rejet immediat si non satisfaits) :
+
+🔴 CRITERES ELIMINATOIRES (rejet immediat, score conserve) :
 {chr(10).join(f'- {c}' for c in grille.get('eliminatoire', []))}
-Si un critere eliminatoire n'est PAS satisfait, le candidat est REJETE immediatement, mais le score total est conserve.
-FORMAT DE SORTIE : UNIQUEMENT du JSON valide, sans texte explicatif.
+
+⚠️ EXCEPTIONS AUX CRITERES ELIMINATOIRES (voir regles metier ci-dessus) :
+- Chef d'agence : exempte des criteres 4, 5 et 6
+- Gestionnaire de portefeuille : exempte des criteres 4 et 6
+
+📤 FORMAT DE SORTIE : UNIQUEMENT du JSON valide, sans texte explicatif.
 Le JSON doit contenir:
 {{
 "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
@@ -1720,9 +1842,9 @@ LETTRE DE MOTIVATION :
 ATTESTATIONS/CERTIFICATS :
 {''.join(attestation_texts_list)[:3000] if attestation_texts_list else '(Aucune attestation)'}
 === INSTRUCTIONS ===
-1. Analyse le CV comme un expert RH.
+1. Analyse le CV comme un expert RH qui comprend le SENS des phrases.
 2. RAISONNE ETAPE PAR ETAPE avant de conclure.
-3. Verifie CHAQUE critere eliminatoire.
+3. Verifie CHAQUE critere eliminatoire en tenant compte des EXEMPTIONS.
 4. Si UN SEUL critere eliminatoire n'est pas satisfait -> REJET, mais score_total conserve.
 5. Donne des SCORES JUSTIFIES sur chaque critere selon la grille.
 6. Le score_total est la SOMME des sous-scores.
@@ -1790,7 +1912,7 @@ ATTESTATIONS/CERTIFICATS :
             score_max = get_score_max_for_poste(poste)
             if score_total > score_max:
                 score_total = score_max
-            is_chef_agence = bool(re.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center', cv_text, re.IGNORECASE))
+            is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(cv_text)
             decision = get_recommandation_from_score(score_total, poste)
             if flags_elim:
                 decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
@@ -1829,7 +1951,11 @@ ATTESTATIONS/CERTIFICATS :
                     'decision': decision,
                     'sous_scores': ia_sous_scores,
                     'chef_agence_detecte': is_chef_agence,
-                    'score_calcule': 'somme_des_sous_scores_ia'
+                    'gestionnaire_portefeuille_detecte': is_gestionnaire_portefeuille or has_portfolio_management,
+                    'local_corporate_detecte': has_local_corporate,
+                    'cross_selling_detecte': has_cross_selling,
+                    'score_calcule': 'somme_des_sous_scores_ia',
+                    'business_rules_appliquees': True
                 }
             }
             return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
@@ -1896,14 +2022,14 @@ Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list
             if lm.get('eliminatoire'):
                 flags_elim.append(f"Lettre: {lm.get('commentaire', 'eliminatoire')}")
             sous_scores = analyse.get('sous_scores', {})
-            is_chef_agence = bool(re.search(r'chef d\'agence|chef d agence|directeur d\'agence|directeur d agence|responsable d\'agence|responsable d agence|manager d\'agence|manager d agence|agence manager|branch manager|agency manager|chef de centre|directeur de centre|responsable de centre|acting branch manager|profit center manager|profit center', cv_text, re.IGNORECASE))
+            is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(cv_text)
             sous_scores = validate_chef_division_scores(sous_scores, is_chef_agence)
             score_total = int(analyse.get('score_total', sum(sous_scores.values())))
             decision = get_recommandation_from_score(score_total, poste)
             if flags_elim:
                 decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
             score_max = get_score_max_for_poste(poste)
-            result = {'poste': poste, 'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'sous_scores': sous_scores, 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': sous_scores, 'score_final': score_total, 'score_max': score_max, 'decision': decision, 'chef_agence_detecte': is_chef_agence}}
+            result = {'poste': poste, 'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'sous_scores': sous_scores, 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': sous_scores, 'score_final': score_total, 'score_max': score_max, 'decision': decision, 'chef_agence_detecte': is_chef_agence, 'gestionnaire_portefeuille_detecte': is_gestionnaire_portefeuille or has_portfolio_management, 'local_corporate_detecte': has_local_corporate, 'cross_selling_detecte': has_cross_selling, 'business_rules_appliquees': True}}
             return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
@@ -2507,7 +2633,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             'decision': decision,
             'moteur_analyse': details['moteur'],
             'sous_scores': sous_scores,
-            'score_calcule': 'somme_des_sous_scores_ia'
+            'score_calcule': 'somme_des_sous_scores_ia',
+            'business_rules_appliquees': True
         }
         if supabase:
             update_data = {"score": str(score), "decision": decision, "statut": statut, "analyse_status": "completed", "analyse_auto_date": datetime.datetime.now().isoformat()}
@@ -3380,7 +3507,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v9.8-poste-passe-aux-business-rules",
+        "version": "v9.9-business-rules-v2",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "Chef Division Corporate: 11/7, Data Analyst: 11/7",
@@ -3419,7 +3546,10 @@ def health_version():
         },
         "nb_criteres_notes": 7,
         "deployed_at": datetime.datetime.now().isoformat(),
-        "bugfix": "poste_desormais_passe_aux_business_rules_pour_eviter_plafonnement_a_10"
+        "bugfix": "business_rules_v2_avec_exemptions_chef_agence_et_gestionnaire_portefeuille",
+        "chef_agence_exemption": True,
+        "gestionnaire_portefeuille_exemption": True,
+        "bac3_compensation": True
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
@@ -3427,7 +3557,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v9.8 - Fix bug plafonnement score")
+    logger.info(f"🚀 RecrutBank API v9.9 - Business Rules V2")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3459,8 +3589,9 @@ if __name__ == '__main__':
         logger.info(f"Bac+3 compensable par 10+ ans d'experience: ✅ Active")
         logger.info(f"Validation stricte des scores pour Chef Division: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
-        logger.info(f"🐛 BUGFIX v9.8: Le 'poste' est desormais passe a apply_business_rules")
-        logger.info(f"   -> Plus de plafonnement errone a 10 pour Chef Division Corporate")
+        logger.info(f"🐛 BUGFIX v9.9: Exemptions pour Chef d'agence et Gestionnaire de portefeuille")
+        logger.info(f"   -> Plus de faux flags sur management, portefeuille et risque credit")
+        logger.info(f"   -> Détection des profils via detect_profils_metier()")
         test_ia_connection()
     else:
         logger.warning("⚠️ MODE FALLBACK UNIQUEMENT - Aucune IA disponible")
