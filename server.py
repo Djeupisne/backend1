@@ -347,10 +347,13 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
         sous_scores = {}
     if poste == "Chef de Division Local Corporate":
         if is_chef_agence:
-            sous_scores["management"] = 3
-            sous_scores["risque_credit"] = 2
-            sous_scores["experience_corporate"] = 3
-            logger.info("✅ Chef d'agence : management=3, risque_credit=2, experience_corporate=3")
+            if sous_scores.get("management", 0) < 2:
+                sous_scores["management"] = 2
+            if sous_scores.get("risque_credit", 0) < 2:
+                sous_scores["risque_credit"] = 2
+            if sous_scores.get("experience_corporate", 0) < 2:
+                sous_scores["experience_corporate"] = 2
+            logger.info("✅ Chef d'agence : management>=2, risque_credit>=2, experience_corporate>=2")
         if is_gestionnaire_portefeuille or has_portfolio_management:
             if sous_scores.get("risque_credit", 0) < 2:
                 sous_scores["risque_credit"] = 2
@@ -596,7 +599,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v9.5-grille-officielle-chef-division-max-scores',
+        'version': 'v9.6-ia-scores-gardes',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -620,7 +623,7 @@ def health_check():
             'score_conserve': True,
             'score_somme_sous_scores': True,
             'local_corporate_sme': True,
-            'chef_agence_max_scores': True,
+            'chef_agence_auto_scoring': True,
             'portefeuille_auto_credit': True,
             'business_rules_stable': True,
             'flags_auto_suppression': True,
@@ -638,9 +641,8 @@ def health_check():
             },
             'nb_criteres_notes': 7,
             'bac3_compensable_10ans': True,
-            'chef_agence_scores_max': True,
-            'validation_stricte': True,
-            'score_recalcule_automatiquement': True
+            'ia_scores_gardes': True,
+            'score_total_somme_sous_scores_ia': True
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -3503,7 +3505,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v9.5-grille-officielle-chef-division-max-scores",
+        "version": "v9.6-ia-scores-gardes",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "Chef Division Corporate: 11/7, Data Analyst: 11/7",
@@ -3524,7 +3526,7 @@ def health_version():
         "score_conserve": True,
         "score_somme_sous_scores": True,
         "local_corporate_sme": True,
-        "chef_agence_max_scores": True,
+        "chef_agence_auto_scoring": True,
         "portefeuille_auto_credit": True,
         "business_rules_stable": True,
         "flags_auto_suppression": True,
@@ -3549,7 +3551,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v9.5 - Grille Officielle Chef Division - Max Scores")
+    logger.info(f"🚀 RecrutBank API v9.6 - IA Scores Gardes")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
