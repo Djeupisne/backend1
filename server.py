@@ -371,7 +371,7 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
                 sous_scores["cross_selling"] = 1
             logger.info("✅ Cross-selling : cross_selling>=1")
     sous_scores = validate_chef_division_scores(sous_scores, is_chef_agence)
-    score_total = 0
+    # Recalculer le score total APRES validation des sous-scores
     if poste == "Chef de Division Local Corporate":
         score_total = sous_scores.get("experience_corporate", 0) + sous_scores.get("management", 0) + sous_scores.get("risque_credit", 0) + sous_scores.get("cross_selling", 0) + sous_scores.get("coherence_parcours", 0) + sous_scores.get("qualite_cv", 0) + sous_scores.get("certification", 0)
     else:
