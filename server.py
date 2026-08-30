@@ -405,6 +405,7 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
     if 'score_breakdown' in result:
         result['score_breakdown']['sous_scores'] = sous_scores
         result['score_breakdown']['score_final'] = score_total
+        result['score_breakdown']['score'] = score_total
         result['score_breakdown']['decision'] = result.get('decision', '')
         result['score_breakdown']['flags_eliminatoires'] = new_flags
         result['score_breakdown']['chef_agence_detecte'] = is_chef_agence
