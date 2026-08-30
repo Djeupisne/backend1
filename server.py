@@ -1950,8 +1950,9 @@ def generate_detailed_reason(candidat, poste, score, score_max):
             lines.append(f"\nNOTE RECRUTEUR : {note}")
         return "\n".join(lines)
     if statut == "retenu":
+        lines = []
         if strengths:
-            lines = ["✅ POINTS FORTS :"]
+            lines.append("✅ POINTS FORTS :")
             for s in strengths[:4]:
                 lines.append(f"  • {s}")
         if sous_scores:
@@ -1960,10 +1961,11 @@ def generate_detailed_reason(candidat, poste, score, score_max):
                     lines.append(f"  • {key}: {value}/3")
         if note and "Decision" not in note and len(note) > 5:
             lines.append(f"\nNOTE RECRUTEUR : {note}")
-        return "\n".join(lines)
-    if note and "Decision" not in note and len(note) > 5:
-        return f"✅ RETENU - {note}"
-    return "✅ RETENU - Candidature retenue"
+        if lines:
+            return "\n".join(lines)
+        if note and "Decision" not in note and len(note) > 5:
+            return f"✅ RETENU - {note}"
+        return "✅ RETENU - Candidature retenue"
     if statut == "entretien":
         lines = ["🔄 POTENTIEL A EVALUER :"]
         if strengths:
@@ -1977,20 +1979,22 @@ def generate_detailed_reason(candidat, poste, score, score_max):
             lines.append(f"\nNOTE RECRUTEUR : {note}")
         return "\n".join(lines)
     if statut == "rejete":
+        lines = []
         if weaknesses:
-            lines = ["❌ POINTS DE VIGILANCE :"]
+            lines.append("❌ POINTS DE VIGILANCE :")
             for w in weaknesses[:4]:
                 lines.append(f"  • {w}")
         if note and "Decision" not in note and len(note) > 5:
             lines.append(f"\nNOTE RECRUTEUR : {note}")
-        return "\n".join(lines)
-    if note and "Decision" not in note and len(note) > 5:
-        return f"❌ REJETE - {note}"
-    if score == 0:
-        return "❌ REJETE - Analyse automatique : le candidat ne repond pas aux criteres eliminatoires du poste"
-    if score < 7:
-        return f"❌ REJETE - Score insuffisant ({score}/{score_max}) - Profil ne correspond pas aux exigences du poste"
-    return "❌ REJETE - Profil ne correspond pas aux exigences du poste"
+        if lines:
+            return "\n".join(lines)
+        if note and "Decision" not in note and len(note) > 5:
+            return f"❌ REJETE - {note}"
+        if score == 0:
+            return "❌ REJETE - Analyse automatique : le candidat ne repond pas aux criteres eliminatoires du poste"
+        if score < 7:
+            return f"❌ REJETE - Score insuffisant ({score}/{score_max}) - Profil ne correspond pas aux exigences du poste"
+        return "❌ REJETE - Profil ne correspond pas aux exigences du poste"
     else:
         if flags:
             lines = ["❌ CRITERES ELIMINATOIRES :"]
@@ -3457,7 +3461,7 @@ if __name__ == '__main__':
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
         logger.info(f"🐛 BUGFIX v9.8: Le 'poste' est desormais passe a apply_business_rules")
         logger.info(f"   -> Plus de plafonnement errone a 10 pour Chef Division Corporate")
-    test_ia_connection()
+        test_ia_connection()
     else:
         logger.warning("⚠️ MODE FALLBACK UNIQUEMENT - Aucune IA disponible")
         logger.warning("Verifiez OPENROUTER_API_KEY ou DEEPSEEK_API_KEY")
