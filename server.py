@@ -2493,17 +2493,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         details['points_vigilance'] = result.get('points_vigilance', [])
         details['synthese_recruteur'] = result.get('synthese', '')
         details['moteur'] = _PROVIDER if IA_ANALYSE_ACTIVE else 'scoring_specifique_v2'
-        sous_scores = result.get('sous_scores', {})
-        if not sous_scores:
-            sous_scores = {
-                "experience_corporate": 0,
-                "management": 0,
-                "risque_credit": 0,
-                "cross_selling": 0,
-                "coherence_parcours": 0,
-                "qualite_cv": 0,
-                "certification": 0
-            }
+        details['sous_scores'] = sous_scores
         score_breakdown = {
             'score_final': score,
             'score_max': score_max,
