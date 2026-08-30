@@ -1,0 +1,2325 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tableau de Bord – Recrutement | RecrutBank</title>
+<style>
+:root {
+--primary: #1a3a5c;
+--primary-hover: #152d47;
+--primary-light: #e8eef5;
+--success: #16a34a;
+--success-light: #dcfce7;
+--warning: #d97706;
+--warning-light: #fef3c7;
+--danger: #dc2626;
+--danger-light: #fee2e2;
+--info: #2563eb;
+--info-light: #dbeafe;
+--text: #1a2433;
+--text-secondary: #64748b;
+--text-muted: #94a3b8;
+--border: #e2e8f0;
+--bg-light: #f8fafc;
+--bg-white: #ffffff;
+--shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+--shadow: 0 2px 8px rgba(0,0,0,0.06);
+--shadow-lg: 0 4px 16px rgba(0,0,0,0.08);
+--radius: 8px;
+--radius-lg: 12px;
+}
+* { box-sizing: border-box; }
+body {
+margin: 0;
+padding: 0;
+font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+background: var(--bg-light);
+color: var(--text);
+font-size: 14px;
+line-height: 1.5;
+-webkit-font-smoothing: antialiased;
+}
+.navbar {
+background: var(--primary);
+color: white;
+padding: 0 1.5rem;
+height: 60px;
+display: flex;
+align-items: center;
+justify-content: space-between;
+box-shadow: var(--shadow);
+position: sticky;
+top: 0;
+z-index: 100;
+}
+.brand {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+font-size: 1.1rem;
+font-weight: 600;
+}
+.brand-icon {
+width: 32px;
+height: 32px;
+background: rgba(255,255,255,0.15);
+border-radius: 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 1.1rem;
+}
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.brand-text .tag { font-size: 0.7rem; font-weight: 400; opacity: 0.7; }
+.nav-links {
+display: flex;
+align-items: center;
+gap: 1rem;
+flex-wrap: wrap;
+}
+.nav-links a {
+color: rgba(255,255,255,0.8);
+text-decoration: none;
+font-size: 0.85rem;
+transition: color 0.2s;
+}
+.nav-links a:hover { color: white; }
+.dash-layout {
+display: grid;
+grid-template-columns: 240px 1fr;
+min-height: calc(100vh - 60px);
+}
+.sidebar {
+background: var(--bg-white);
+border-right: 1px solid var(--border);
+padding: 1.5rem 0;
+}
+.sidebar-user {
+padding: 0 1.25rem 1.5rem;
+border-bottom: 1px solid var(--border);
+margin-bottom: 1rem;
+display: flex;
+align-items: center;
+gap: 0.75rem;
+}
+.avatar {
+width: 40px;
+height: 40px;
+border-radius: 50%;
+background: var(--primary-light);
+color: var(--primary);
+display: flex;
+align-items: center;
+justify-content: center;
+font-weight: 700;
+font-size: 1rem;
+flex-shrink: 0;
+}
+.u-name { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+.u-role { font-size: 0.75rem; color: var(--text-muted); }
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; }
+.sidebar nav a {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+padding: 0.65rem 1.25rem;
+color: var(--text-secondary);
+text-decoration: none;
+font-size: 0.88rem;
+font-weight: 500;
+border-left: 3px solid transparent;
+transition: all 0.15s;
+}
+.sidebar nav a:hover {
+background: var(--bg-light);
+color: var(--text);
+}
+.sidebar nav a.active {
+background: var(--primary-light);
+color: var(--primary);
+border-left-color: var(--primary);
+font-weight: 600;
+}
+.sidebar nav a .icon { font-size: 1rem; width: 20px; text-align: center; }
+.dash-main {
+padding: 2rem;
+overflow-x: hidden;
+}
+.dash-title {
+font-size: 1.5rem;
+font-weight: 700;
+color: var(--text);
+margin: 0 0 0.25rem 0;
+}
+.dash-subtitle {
+color: var(--text-muted);
+font-size: 0.875rem;
+margin: 0 0 1.5rem 0;
+}
+.page-header {
+display: flex;
+justify-content: space-between;
+align-items: flex-start;
+margin-bottom: 1.5rem;
+flex-wrap: wrap;
+gap: 1rem;
+}
+.card {
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+box-shadow: var(--shadow-sm);
+overflow: hidden;
+}
+.card-header {
+padding: 1rem 1.25rem;
+border-bottom: 1px solid var(--border);
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+.card-title {
+font-size: 0.95rem;
+font-weight: 600;
+color: var(--text);
+margin: 0;
+}
+.card-body { padding: 1.25rem; }
+.stats-grid {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+gap: 1rem;
+margin-bottom: 1.5rem;
+}
+.stat-card {
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+padding: 1.25rem;
+box-shadow: var(--shadow-sm);
+position: relative;
+transition: transform 0.2s, box-shadow 0.2s;
+}
+.stat-card:hover {
+transform: translateY(-2px);
+box-shadow: var(--shadow);
+}
+.stat-card::before {
+content: '';
+position: absolute;
+top: 0;
+left: 0;
+right: 0;
+height: 3px;
+background: var(--primary);
+border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.stat-card.blue::before { background: var(--primary); }
+.stat-card.amber::before { background: var(--warning); }
+.stat-card.green::before { background: var(--success); }
+.stat-card.red::before { background: var(--danger); }
+.stat-card.purple::before { background: #7c3aed; }
+.stat-icon {
+width: 36px;
+height: 36px;
+border-radius: 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 1.1rem;
+margin-bottom: 0.75rem;
+}
+.stat-card.blue .stat-icon { background: var(--primary-light); color: var(--primary); }
+.stat-card.amber .stat-icon { background: var(--warning-light); color: var(--warning); }
+.stat-card.green .stat-icon { background: var(--success-light); color: var(--success); }
+.stat-card.red .stat-icon { background: var(--danger-light); color: var(--danger); }
+.stat-card.purple .stat-icon { background: #ede9fe; color: #7c3aed; }
+.stat-value {
+font-size: 1.75rem;
+font-weight: 700;
+color: var(--text);
+line-height: 1;
+margin-bottom: 0.25rem;
+}
+.stat-label {
+font-size: 0.8rem;
+color: var(--text-muted);
+font-weight: 500;
+text-transform: uppercase;
+letter-spacing: 0.3px;
+}
+.chart-grid {
+display: grid;
+grid-template-columns: 1fr 1.5fr;
+gap: 1rem;
+margin-bottom: 1.5rem;
+}
+@media (max-width: 992px) { .chart-grid { grid-template-columns: 1fr; } }
+.chart-box {
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+padding: 1.25rem;
+box-shadow: var(--shadow-sm);
+}
+.chart-box h4 {
+margin: 0 0 1rem 0;
+font-size: 0.95rem;
+font-weight: 600;
+color: var(--text);
+}
+.donut-wrap {
+position: relative;
+width: 180px;
+height: 180px;
+margin: 0 auto 1rem;
+}
+.donut-wrap svg { transform: rotate(-90deg); }
+.donut-center {
+position: absolute;
+inset: 0;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+pointer-events: none;
+}
+.donut-center .dn { font-size: 1.75rem; font-weight: 800; color: var(--text); }
+.donut-center .dl { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.chart-legend {
+display: flex;
+flex-wrap: wrap;
+gap: 0.5rem 1rem;
+justify-content: center;
+font-size: 0.78rem;
+color: var(--text-secondary);
+}
+.legend-dot {
+display: inline-block;
+width: 10px;
+height: 10px;
+border-radius: 50%;
+margin-right: 0.3rem;
+vertical-align: middle;
+}
+.bar-chart { display: flex; flex-direction: column; gap: 0.6rem; }
+.bar-row { display: flex; align-items: center; gap: 0.7rem; font-size: 0.78rem; }
+.bar-label {
+width: 140px;
+min-width: 140px;
+white-space: nowrap;
+overflow: hidden;
+text-overflow: ellipsis;
+font-weight: 500;
+color: var(--text-secondary);
+}
+.bar-track {
+flex: 1;
+height: 8px;
+background: var(--bg-light);
+border-radius: 4px;
+overflow: hidden;
+}
+.bar-fill {
+height: 100%;
+background: linear-gradient(90deg, var(--primary), #3b82f6);
+border-radius: 4px;
+transition: width 0.5s;
+}
+.bar-val {
+width: 30px;
+text-align: right;
+font-weight: 700;
+color: var(--text);
+font-size: 0.8rem;
+}
+.btn {
+display: inline-flex;
+align-items: center;
+justify-content: center;
+gap: 0.4rem;
+padding: 0.5rem 1rem;
+border: 1px solid transparent;
+border-radius: 6px;
+font-weight: 500;
+font-size: 0.85rem;
+cursor: pointer;
+transition: all 0.15s;
+text-decoration: none;
+white-space: nowrap;
+font-family: inherit;
+}
+.btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.btn:active { transform: translateY(0); }
+.btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-success { background: var(--success); color: white; }
+.btn-success:hover { background: #15803d; }
+.btn-warning { background: var(--warning); color: white; }
+.btn-warning:hover { background: #b45309; }
+.btn-danger { background: var(--danger); color: white; }
+.btn-danger:hover { background: #b91c1c; }
+.btn-info { background: var(--info); color: white; }
+.btn-info:hover { background: #1d4ed8; }
+.btn-outline {
+background: transparent;
+border: 1px solid var(--border);
+color: var(--text-secondary);
+}
+.btn-outline:hover {
+background: var(--bg-light);
+border-color: var(--text-muted);
+color: var(--text);
+}
+.btn-ghost {
+background: transparent;
+color: var(--text-secondary);
+border: none;
+}
+.btn-ghost:hover { background: var(--bg-light); color: var(--text); }
+.btn-delete {
+background: transparent;
+color: var(--danger);
+border: 1px solid var(--danger);
+}
+.btn-delete:hover { background: var(--danger-light); }
+.form-control {
+padding: 0.5rem 0.75rem;
+border: 1px solid var(--border);
+border-radius: 6px;
+font-size: 0.85rem;
+font-family: inherit;
+color: var(--text);
+background: var(--bg-white);
+transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-control:focus {
+outline: none;
+border-color: var(--primary);
+box-shadow: 0 0 0 3px rgba(26, 58, 92, 0.1);
+}
+.form-control::placeholder { color: var(--text-muted); }
+.form-group { margin-bottom: 1rem; }
+.form-group label {
+display: block;
+font-size: 0.8rem;
+font-weight: 600;
+color: var(--text-secondary);
+margin-bottom: 0.35rem;
+text-transform: uppercase;
+letter-spacing: 0.3px;
+}
+.export-section {
+background: linear-gradient(135deg, #1e3a5c 0%, #2563eb 100%);
+color: white;
+padding: 1.25rem 1.5rem;
+border-radius: var(--radius-lg);
+margin-bottom: 1rem;
+box-shadow: var(--shadow);
+display: flex;
+align-items: center;
+justify-content: space-between;
+flex-wrap: wrap;
+gap: 1rem;
+}
+.export-section h3 {
+color: white;
+margin: 0;
+font-size: 1rem;
+font-weight: 600;
+display: flex;
+align-items: center;
+gap: 0.5rem;
+}
+.export-section .export-subtitle {
+color: rgba(255,255,255,0.8);
+font-size: 0.8rem;
+margin: 0.25rem 0 0 0;
+font-weight: 400;
+}
+.export-controls {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+flex-wrap: wrap;
+flex: 1;
+justify-content: flex-end;
+}
+.export-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.export-btn {
+padding: 0.5rem 0.9rem;
+border: none;
+border-radius: 6px;
+font-weight: 600;
+font-size: 0.8rem;
+cursor: pointer;
+transition: all 0.15s;
+display: inline-flex;
+align-items: center;
+gap: 0.35rem;
+background: rgba(255,255,255,0.15);
+color: white;
+backdrop-filter: blur(10px);
+}
+.export-btn:hover {
+background: rgba(255,255,255,0.25);
+transform: translateY(-1px);
+}
+.export-btn.solid { background: white; color: var(--primary); }
+.export-btn.solid:hover { background: #f1f5f9; }
+.dossier-section {
+background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+color: white;
+padding: 1.25rem 1.5rem;
+border-radius: var(--radius-lg);
+margin-bottom: 1rem;
+box-shadow: var(--shadow);
+display: flex;
+align-items: center;
+justify-content: space-between;
+flex-wrap: wrap;
+gap: 1rem;
+}
+.dossier-section h3 {
+color: white;
+margin: 0;
+font-size: 1rem;
+font-weight: 600;
+display: flex;
+align-items: center;
+gap: 0.5rem;
+}
+.dossier-section .dossier-subtitle {
+color: rgba(255,255,255,0.8);
+font-size: 0.8rem;
+margin: 0.25rem 0 0 0;
+font-weight: 400;
+}
+.dossier-controls {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+flex-wrap: wrap;
+flex: 1;
+justify-content: flex-end;
+}
+.reanalyze-section {
+background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+color: white;
+padding: 1.25rem 1.5rem;
+border-radius: var(--radius-lg);
+margin-bottom: 1rem;
+box-shadow: var(--shadow);
+display: flex;
+align-items: center;
+justify-content: space-between;
+flex-wrap: wrap;
+gap: 1rem;
+}
+.reanalyze-section h3 {
+color: white;
+margin: 0;
+font-size: 1rem;
+font-weight: 600;
+}
+.reanalyze-section p {
+color: rgba(255,255,255,0.9);
+font-size: 0.8rem;
+margin: 0.25rem 0 0 0;
+}
+.reanalyze-controls {
+display: flex;
+align-items: center;
+gap: 0.75rem;
+flex-wrap: wrap;
+flex: 1;
+justify-content: flex-end;
+}
+.reanalyze-status {
+color: white;
+font-size: 0.8rem;
+font-weight: 600;
+padding: 0.35rem 0.75rem;
+background: rgba(255,255,255,0.2);
+border-radius: 6px;
+backdrop-filter: blur(10px);
+}
+.reanalyze-progress-inline {
+margin-top: 1rem;
+background: rgba(255,255,255,0.95);
+border-radius: 8px;
+padding: 1rem;
+width: 100%;
+color: var(--text);
+}
+.reanalyze-progress-inline .progress-header {
+display: flex;
+justify-content: space-between;
+margin-bottom: 0.5rem;
+font-size: 0.85rem;
+font-weight: 600;
+}
+.progress-bar-bg {
+background: #e5e7eb;
+height: 8px;
+border-radius: 4px;
+overflow: hidden;
+}
+.progress-bar-fill {
+background: linear-gradient(90deg, #d97706, #16a34a);
+height: 100%;
+width: 0%;
+transition: width 0.5s;
+border-radius: 4px;
+}
+.progress-detail {
+margin-top: 0.5rem;
+font-size: 0.75rem;
+color: var(--text-muted);
+}
+.filter-bar {
+display: flex;
+gap: 0.5rem;
+padding: 1rem 1.25rem;
+border-bottom: 1px solid var(--border);
+flex-wrap: wrap;
+align-items: center;
+}
+.filter-bar .form-control { min-width: 140px; }
+.table-wrap { overflow-x: auto; }
+table {
+width: 100%;
+border-collapse: collapse;
+font-size: 0.85rem;
+}
+thead th {
+background: var(--bg-light);
+padding: 0.75rem 1rem;
+text-align: left;
+font-weight: 600;
+color: var(--text-secondary);
+font-size: 0.75rem;
+text-transform: uppercase;
+letter-spacing: 0.3px;
+border-bottom: 1px solid var(--border);
+white-space: nowrap;
+}
+tbody td {
+padding: 0.85rem 1rem;
+border-bottom: 1px solid var(--border);
+vertical-align: middle;
+}
+tbody tr { transition: background 0.1s; }
+tbody tr:hover { background: var(--bg-light); }
+tbody tr:last-child td { border-bottom: none; }
+.td-small { color: var(--text-muted); font-size: 0.78rem; }
+.td-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.badge {
+display: inline-flex;
+align-items: center;
+padding: 0.2rem 0.6rem;
+border-radius: 12px;
+font-size: 0.72rem;
+font-weight: 600;
+white-space: nowrap;
+}
+.badge-pending { background: var(--warning-light); color: #92400e; }
+.badge-retained { background: var(--success-light); color: #166534; }
+.badge-rejected { background: var(--danger-light); color: #991b1b; }
+.badge-interview { background: var(--info-light); color: #1e40af; }
+.badge-eliminatoire { background: #7f1d1d; color: white; }
+.empty-state {
+text-align: center;
+padding: 3rem 1rem;
+color: var(--text-muted);
+}
+.empty-icon { font-size: 2.5rem; margin-bottom: 0.5rem; opacity: 0.4; }
+.modal-overlay {
+display: none;
+position: fixed;
+inset: 0;
+background: rgba(15, 23, 42, 0.6);
+backdrop-filter: blur(4px);
+z-index: 1000;
+justify-content: center;
+align-items: center;
+padding: 1rem;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+background: var(--bg-white);
+border-radius: var(--radius-lg);
+box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+max-height: 90vh;
+overflow: hidden;
+display: flex;
+flex-direction: column;
+animation: modalSlideIn 0.2s ease-out;
+max-width: 820px;
+width: 100%;
+}
+@keyframes modalSlideIn {
+from { opacity: 0; transform: translateY(-20px); }
+to { opacity: 1; transform: translateY(0); }
+}
+.modal-header {
+padding: 1.25rem 1.5rem;
+border-bottom: 1px solid var(--border);
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+.modal-header h3 {
+margin: 0;
+font-size: 1.1rem;
+font-weight: 600;
+color: var(--text);
+}
+.modal-close {
+background: none;
+border: none;
+font-size: 1.5rem;
+color: var(--text-muted);
+cursor: pointer;
+padding: 0;
+width: 32px;
+height: 32px;
+display: flex;
+align-items: center;
+justify-content: center;
+border-radius: 6px;
+transition: all 0.15s;
+}
+.modal-close:hover { background: var(--bg-light); color: var(--text); }
+.modal-body {
+padding: 1.5rem;
+overflow-y: auto;
+flex: 1;
+}
+.modal-footer {
+padding: 1rem 1.5rem;
+border-top: 1px solid var(--border);
+display: flex;
+gap: 0.5rem;
+flex-wrap: wrap;
+justify-content: flex-end;
+background: var(--bg-light);
+}
+.tabs {
+display: flex;
+gap: 0;
+border-bottom: 1px solid var(--border);
+margin-bottom: 1.25rem;
+flex-wrap: wrap;
+}
+.tab-btn {
+background: none;
+border: none;
+padding: 0.65rem 1.25rem;
+font-size: 0.85rem;
+font-weight: 500;
+color: var(--text-muted);
+cursor: pointer;
+border-bottom: 2px solid transparent;
+margin-bottom: -1px;
+transition: all 0.15s;
+font-family: inherit;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+color: var(--primary);
+border-bottom-color: var(--primary);
+font-weight: 600;
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.readonly-badge {
+display: inline-flex;
+align-items: center;
+gap: 0.25rem;
+background: var(--bg-light);
+color: var(--text-muted);
+font-size: 0.7rem;
+font-weight: 600;
+padding: 0.15rem 0.5rem;
+border-radius: 4px;
+margin-left: 0.5rem;
+border: 1px solid var(--border);
+text-transform: uppercase;
+letter-spacing: 0.3px;
+}
+.readonly-badge::before { content: "🔒"; font-size: 0.7rem; }
+.grille-section { margin-bottom: 1rem; }
+.grille-header {
+display: flex;
+align-items: center;
+gap: 0.5rem;
+font-weight: 600;
+font-size: 0.82rem;
+padding: 0.4rem 0.75rem;
+border-radius: 6px;
+margin-bottom: 0.4rem;
+border-left: 3px solid;
+}
+.grille-item {
+display: flex;
+align-items: center;
+gap: 0.55rem;
+padding: 0.5rem 0.75rem;
+font-size: 0.83rem;
+border-radius: 4px;
+background: var(--bg-white);
+border: 1px solid transparent;
+transition: all 0.12s;
+margin-bottom: 0.25rem;
+}
+.grille-item.checked { background: var(--success-light); border-color: #bbf7d0; }
+.grille-item.not-checked { background: var(--danger-light); border-color: #fecaca; }
+.grille-item input { margin: 0; cursor: not-allowed; opacity: 0.5; width: 16px; height: 16px; }
+.grille-item .status-icon { margin-left: auto; font-weight: 700; font-size: 1.1rem; }
+.grille-item.checked .status-icon { color: var(--success); }
+.grille-item.not-checked .status-icon { color: var(--danger); }
+.score-breakdown {
+background: var(--bg-light);
+border: 1px solid var(--border);
+border-radius: 8px;
+padding: 1rem;
+margin: 0.8rem 0;
+font-size: 0.82rem;
+}
+.sb-row {
+display: flex;
+justify-content: space-between;
+padding: 0.3rem 0;
+border-bottom: 1px dashed var(--border);
+}
+.sb-row:last-child { border-bottom: none; font-weight: 700; color: var(--primary); font-size: 0.9rem; padding-top: 0.5rem; }
+.sb-label { color: var(--text-secondary); }
+.sb-val { font-weight: 600; }
+.sb-val.elim { color: var(--danger); }
+.sb-val.ok { color: var(--success); }
+.bloc-alert {
+padding: 0.75rem 1rem;
+border-radius: 6px;
+margin: 0.5rem 0;
+font-size: 0.82rem;
+display: flex;
+align-items: flex-start;
+gap: 0.5rem;
+border-left: 4px solid;
+}
+.bloc-alert.elim { background: var(--danger-light); border-color: var(--danger); color: #991b1b; }
+.bloc-alert.attn { background: var(--warning-light); border-color: var(--warning); color: #92400e; }
+.bloc-alert.signal { background: var(--success-light); border-color: var(--success); color: #166534; }
+.bloc-alert strong { display: block; margin-bottom: 0.2rem; font-size: 0.85rem; }
+.star-btn {
+background: none;
+border: none;
+font-size: 1.3rem;
+cursor: default;
+padding: 0 2px;
+line-height: 1;
+}
+.star-btn:disabled { opacity: 0.7; }
+.email-preview {
+background: var(--bg-light);
+border: 1px solid var(--border);
+border-radius: 8px;
+padding: 1rem;
+}
+.ep-field { margin-bottom: 0.4rem; font-size: 0.84rem; }
+.ep-label {
+font-weight: 700;
+color: var(--text-muted);
+font-size: 0.72rem;
+text-transform: uppercase;
+letter-spacing: 0.4px;
+margin-right: 0.4rem;
+}
+.ep-body-area {
+width: 100%;
+margin-top: 0.8rem;
+padding: 0.75rem;
+border: 1px solid var(--border);
+border-radius: 6px;
+font-family: inherit;
+font-size: 0.85rem;
+min-height: 200px;
+resize: vertical;
+background: var(--bg-white);
+line-height: 1.6;
+box-sizing: border-box;
+}
+.alert-info {
+background: var(--info-light);
+color: #1e40af;
+border: 1px solid #bfdbfe;
+padding: 0.75rem 1rem;
+border-radius: 6px;
+font-size: 0.85rem;
+margin-bottom: 1rem;
+}
+.floating-progress {
+position: fixed;
+bottom: 24px;
+right: 24px;
+width: 340px;
+background: var(--bg-white);
+border: 1px solid var(--border);
+border-radius: var(--radius-lg);
+box-shadow: 0 10px 25px rgba(0,0,0,0.12);
+padding: 1.25rem;
+z-index: 1500;
+display: none;
+animation: slideUp 0.3s ease-out;
+border-left: 4px solid var(--warning);
+transition: all 0.3s ease;
+}
+.floating-progress.active { display: block; }
+.floating-progress.completed { border-left-color: var(--success); }
+.floating-progress-header {
+display: flex;
+justify-content: space-between;
+align-items: center;
+margin-bottom: 0.75rem;
+font-size: 0.9rem;
+font-weight: 600;
+color: var(--text);
+}
+.floating-progress-header .icon {
+margin-right: 0.5rem;
+display: inline-block;
+animation: spin 2s linear infinite;
+}
+.floating-progress.completed .floating-progress-header .icon {
+animation: none;
+}
+@keyframes spin {
+100% { transform: rotate(360deg); }
+}
+.floating-progress .progress-bar-bg {
+background: #e5e7eb;
+height: 8px;
+border-radius: 4px;
+overflow: hidden;
+margin-bottom: 0.5rem;
+}
+.floating-progress .progress-bar-fill {
+background: linear-gradient(90deg, #d97706, #f59e0b);
+height: 100%;
+width: 0%;
+transition: width 0.5s ease;
+border-radius: 4px;
+}
+.floating-progress.completed .progress-bar-fill {
+background: linear-gradient(90deg, #16a34a, #22c55e);
+}
+.floating-progress .progress-detail {
+font-size: 0.78rem;
+color: var(--text-muted);
+line-height: 1.4;
+}
+@keyframes slideUp {
+from { opacity: 0; transform: translateY(20px); }
+to { opacity: 1; transform: translateY(0); }
+}
+#reanalyze-status-badge {
+display: none;
+padding: 4px 12px;
+border-radius: 20px;
+font-size: 0.8rem;
+font-weight: 600;
+margin-left: 10px;
+white-space: nowrap;
+background: #fef3cd;
+color: #856404;
+}
+.toast-container {
+position: fixed;
+bottom: 1.5rem;
+right: 1.5rem;
+z-index: 2000;
+display: flex;
+flex-direction: column;
+gap: 0.5rem;
+}
+.toast {
+background: var(--bg-white);
+border-left: 4px solid var(--primary);
+padding: 0.85rem 1.25rem;
+border-radius: 6px;
+box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+min-width: 280px;
+max-width: 400px;
+animation: toastSlideIn 0.3s ease-out;
+font-size: 0.88rem;
+}
+.toast.success { border-left-color: var(--success); }
+.toast.error { border-left-color: var(--danger); }
+.toast.info { border-left-color: var(--info); }
+@keyframes toastSlideIn {
+from { opacity: 0; transform: translateX(20px); }
+to { opacity: 1; transform: translateX(0); }
+}
+.reject-alert {
+background: #fee2e2;
+border: 2px solid #dc2626;
+border-radius: 8px;
+padding: 1rem 1.25rem;
+margin-bottom: 1rem;
+display: none;
+}
+.reject-alert.visible { display: block; }
+.reject-alert .alert-title {
+color: #991b1b;
+font-size: 1rem;
+font-weight: 700;
+margin-bottom: 0.5rem;
+display: flex;
+align-items: center;
+gap: 0.5rem;
+}
+.reject-alert .alert-title .icon { font-size: 1.3rem; }
+.reject-alert .alert-body {
+color: #7f1d1d;
+font-size: 0.9rem;
+line-height: 1.6;
+}
+.reject-alert .alert-body ul {
+margin: 0.5rem 0 0 1.5rem;
+padding: 0;
+}
+.reject-alert .alert-body li {
+margin-bottom: 0.25rem;
+}
+.reject-alert .alert-body .reason {
+font-weight: 600;
+color: #b91c1c;
+}
+.reject-alert .score-conserve {
+margin-top: 0.5rem;
+padding: 0.5rem 0.75rem;
+background: #fef3c7;
+border-radius: 4px;
+font-weight: 600;
+color: #92400e;
+border: 1px solid #fcd34d;
+}
+@media (max-width: 992px) {
+.dash-layout { grid-template-columns: 1fr; }
+.sidebar { display: none; }
+.dash-main { padding: 1rem; }
+.export-section, .dossier-section, .reanalyze-section { flex-direction: column; align-items: stretch; }
+.export-controls, .dossier-controls, .reanalyze-controls { justify-content: flex-start; width: 100%; }
+.export-buttons { width: 100%; }
+.export-btn { flex: 1; }
+.floating-progress { width: calc(100% - 2rem); left: 1rem; right: 1rem; bottom: 1rem; }
+}
+@media (max-width: 576px) {
+.export-buttons { flex-direction: column; }
+.export-btn { width: 100%; }
+.td-actions { flex-direction: column; }
+.td-actions .btn { width: 100%; }
+.stats-grid { grid-template-columns: repeat(2, 1fr); }
+.filter-bar .form-control { min-width: 100%; }
+}
+</style>
+</head>
+<body>
+<nav class="navbar">
+<div class="brand">
+<div class="brand-icon">🏦</div>
+<div class="brand-text">
+<span>RecrutBank</span>
+<span class="tag">Espace Recruteur</span>
+</div>
+</div>
+<div class="nav-links">
+<span id="nav-nom" style="color:rgba(255,255,255,.8);font-size:.85rem"></span>
+<span id="reanalyze-status-badge"></span>
+<a href="index.html">Accueil</a>
+<button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.2);" onclick="logout()">Déconnexion</button>
+</div>
+</nav>
+<div class="dash-layout">
+<aside class="sidebar">
+<div class="sidebar-user">
+<div class="avatar" id="sidebar-avatar">R</div>
+<div>
+<div class="u-name" id="sidebar-nom">Recruteur</div>
+<div class="u-role">Responsable RH</div>
+</div>
+</div>
+<nav>
+<a href="#" id="nav-overview" class="active" onclick="showSection('overview',this);return false;">
+<span class="icon">📊</span> Vue d'ensemble
+</a>
+<a href="#" id="nav-candidats" onclick="showSection('candidats',this);return false;">
+<span class="icon">👥</span> Candidats
+</a>
+</nav>
+</aside>
+<main class="dash-main">
+<div id="section-overview">
+<div class="page-header">
+<div>
+<h1 class="dash-title">Vue d'ensemble</h1>
+<p class="dash-subtitle">Synthèse des candidatures et indicateurs clés</p>
+</div>
+<button class="btn btn-primary btn-sm" onclick="refreshAll()">🔄 Actualiser</button>
+</div>
+<div class="stats-grid">
+<div class="stat-card blue">
+<div class="stat-icon">👥</div>
+<div class="stat-value" id="s-total">–</div>
+<div class="stat-label">Candidatures</div>
+</div>
+<div class="stat-card amber">
+<div class="stat-icon">⏳</div>
+<div class="stat-value" id="s-attente">–</div>
+<div class="stat-label">En attente</div>
+</div>
+<div class="stat-card green">
+<div class="stat-icon">✓</div>
+<div class="stat-value" id="s-retenu">–</div>
+<div class="stat-label">Retenus</div>
+</div>
+<div class="stat-card red">
+<div class="stat-icon">✕</div>
+<div class="stat-value" id="s-rejete">–</div>
+<div class="stat-label">Rejetés</div>
+</div>
+<div class="stat-card purple">
+<div class="stat-icon">📅</div>
+<div class="stat-value" id="s-entretien">–</div>
+<div class="stat-label">Entretiens</div>
+</div>
+</div>
+<div class="chart-grid">
+<div class="chart-box">
+<h4>Répartition par statut</h4>
+<div class="donut-wrap">
+<svg id="donut-svg" viewBox="0 0 36 36" width="180" height="180">
+<circle cx="18" cy="18" r="15.915" fill="none" stroke="#e8edf5" stroke-width="3.5"/>
+<circle id="arc-attente" cx="18" cy="18" r="15.915" fill="none" stroke="#d97706" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+<circle id="arc-retenu" cx="18" cy="18" r="15.915" fill="none" stroke="#16a34a" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+<circle id="arc-entretien" cx="18" cy="18" r="15.915" fill="none" stroke="#2563eb" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+<circle id="arc-rejete" cx="18" cy="18" r="15.915" fill="none" stroke="#dc2626" stroke-width="3.5" stroke-dasharray="0 100" stroke-dashoffset="25"/>
+</svg>
+<div class="donut-center">
+<span class="dn" id="donut-total">0</span>
+<span class="dl">total</span>
+</div>
+</div>
+<div class="chart-legend">
+<span><span class="legend-dot" style="background:#d97706"></span>En attente</span>
+<span><span class="legend-dot" style="background:#16a34a"></span>Retenu</span>
+<span><span class="legend-dot" style="background:#2563eb"></span>Entretien</span>
+<span><span class="legend-dot" style="background:#dc2626"></span>Rejeté</span>
+</div>
+</div>
+<div class="chart-box">
+<h4>Candidatures par poste</h4>
+<div class="bar-chart" id="bar-chart">
+<div class="empty-state"><p>Chargement...</p></div>
+</div>
+</div>
+</div>
+<div class="export-section">
+<div>
+<h3>📊 Exporter les rapports</h3>
+<p class="export-subtitle">Téléchargez les données au format de votre choix avec filtres</p>
+</div>
+<div class="export-controls">
+<select id="export-poste-select" class="form-control" style="background:white;max-width:200px;">
+<option value="">Tous les postes</option>
+</select>
+<select id="export-statut-select" class="form-control" style="background:white;max-width:160px;">
+<option value="">Tous statuts</option>
+<option value="en_attente">En attente</option>
+<option value="retenu">Retenu</option>
+<option value="entretien">Entretien</option>
+<option value="rejete">Rejeté</option>
+</select>
+<input type="date" id="export-date-start" class="form-control" style="background:white;max-width:150px;" title="Date de début">
+<input type="date" id="export-date-end" class="form-control" style="background:white;max-width:150px;" title="Date de fin">
+<input type="number" id="export-min-score" class="form-control" style="background:white;max-width:80px;" placeholder="Score min" title="Score minimum">
+<div class="export-buttons">
+<button class="export-btn solid" onclick="exportReport('excel')">📊 Excel</button>
+<button class="export-btn solid" onclick="exportReport('csv')">📄 CSV</button>
+<button class="export-btn solid" onclick="exportReport('pdf')">📕 PDF</button>
+<button class="export-btn solid" onclick="exportReport('word')">📝 Word</button>
+</div>
+</div>
+</div>
+<div class="dossier-section">
+<div>
+<h3>📁 Dossiers candidats</h3>
+<p class="dossier-subtitle">Téléchargez les pièces jointes (CV, lettres, certificats) par poste et période</p>
+</div>
+<div class="dossier-controls">
+<select id="dossier-poste-select" class="form-control" style="background:white;max-width:200px;">
+<option value="">Tous les postes</option>
+</select>
+<input type="date" id="dossier-date-start" class="form-control" style="background:white;max-width:150px;" title="Date de début">
+<input type="date" id="dossier-date-end" class="form-control" style="background:white;max-width:150px;" title="Date de fin">
+<button class="export-btn solid" onclick="downloadAllDossiers()" style="background:white;color:#059669;">📦 Télécharger ZIP</button>
+</div>
+</div>
+<div class="reanalyze-section">
+<div style="flex:1;min-width:200px">
+<h3>🔄 Réanalyse des postes actifs</h3>
+<p id="reanalyze-info-text">Relance l'analyse automatique uniquement pour les postes ouverts au recrutement</p>
+</div>
+<div class="reanalyze-controls">
+<select id="reanalyze-poste-select" class="form-control" style="background:rgba(255,255,255,0.95);max-width:220px;">
+<option value="">Tous les postes actifs</option>
+</select>
+<button class="export-btn solid" style="color:#d97706;" onclick="triggerManualReanalyze()">🚀 Lancer la réanalyse</button>
+<span id="reanalyze-status" class="reanalyze-status" style="display:none;"></span>
+</div>
+<div id="reanalyze-progress-inline" class="reanalyze-progress-inline" style="display:none;">
+<div class="progress-header">
+<span id="reanalyze-progress-text">Analyse en cours...</span>
+<span id="reanalyze-progress-count">0/0</span>
+</div>
+<div class="progress-bar-bg">
+<div id="reanalyze-progress-bar" class="progress-bar-fill"></div>
+</div>
+<div id="reanalyze-status-detail" class="progress-detail"></div>
+</div>
+</div>
+<div class="card" style="margin-top:1.5rem">
+<div class="card-header">
+<h3 class="card-title">📋 Dernières candidatures</h3>
+<button class="btn btn-ghost btn-sm" onclick="showSection('candidats', document.getElementById('nav-candidats'))">Voir tout →</button>
+</div>
+<div id="recent-table">
+<div class="empty-state"><div class="empty-icon">⏳</div><p>Chargement...</p></div>
+</div>
+</div>
+</div>
+<div id="section-candidats" style="display:none">
+<div class="page-header">
+<div>
+<h1 class="dash-title">Gestion des Candidats</h1>
+<p class="dash-subtitle">Consultez, évaluez et gérez les dossiers de candidature</p>
+</div>
+</div>
+<div class="card">
+<div class="filter-bar">
+<input class="form-control" id="f-search" placeholder="🔍 Rechercher..." oninput="applyFiltersDebounced()" style="min-width:180px;">
+<select class="form-control" id="f-poste" onchange="applyFilters()">
+<option value="">Tous les postes</option>
+</select>
+<select class="form-control" id="f-statut" onchange="applyFilters()">
+<option value="">Tous statuts</option>
+<option value="en_attente">En attente</option>
+<option value="retenu">Retenu</option>
+<option value="entretien">Entretien</option>
+<option value="rejete">Rejeté</option>
+</select>
+<input class="form-control" id="f-date-start" type="date" onchange="applyFilters()" style="max-width:150px;" title="Date début">
+<input class="form-control" id="f-date-end" type="date" onchange="applyFilters()" style="max-width:150px;" title="Date fin">
+<input class="form-control" id="f-min-score" type="number" placeholder="Score min" onchange="applyFilters()" style="max-width:100px;">
+<button class="btn btn-primary btn-sm" onclick="fetchCandidats()">🔄 Actualiser</button>
+</div>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Candidat</th>
+<th>Poste</th>
+<th>Date</th>
+<th>Statut</th>
+<th>Score</th>
+<th>Élim.</th>
+<th>Fichiers</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody id="candidats-tbody">
+<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">Chargement...</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</main>
+</div>
+<div class="modal-overlay" id="modal-candidat">
+<div class="modal">
+<div class="modal-header">
+<h3 id="modal-title">Dossier <span class="readonly-badge">Analyse automatique</span></h3>
+<button class="modal-close" onclick="closeModal()">×</button>
+</div>
+<div class="modal-body">
+<div id="reject-alert" class="reject-alert">
+<div class="alert-title">
+<span class="icon">🚫</span> CANDIDAT REJETÉ
+</div>
+<div class="alert-body" id="reject-reasons"></div>
+</div>
+<div id="modal-infos" style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem 1.4rem;margin-bottom:1.1rem;font-size:.87rem"></div>
+<div id="modal-fichiers" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1.3rem"></div>
+<div id="analyse-resume" style="margin:1rem 0;padding:1rem;background:var(--bg-light);border-radius:8px;border:1px solid var(--border);display:none">
+<h4 style="margin:0 0 .5rem 0;font-size:.95rem;display:flex;align-items:center;gap:.4rem">
+Analyse automatique <span class="readonly-badge" style="font-size:.65rem;padding:.1rem .4rem">non modifiable</span>
+</h4>
+<div id="analyse-content"></div>
+</div>
+<div class="tabs">
+<button class="tab-btn active" onclick="switchTab('eval',this)">📝 Évaluation</button>
+<button class="tab-btn" onclick="switchTab('grille',this)">📋 Grille</button>
+</div>
+<div id="tab-eval" class="tab-content active">
+<div class="form-group" style="margin-bottom:1rem">
+<label>Score <span class="readonly-badge" style="font-size:.65rem">calculé</span></label>
+<div id="stars-row" style="display:flex;gap:0;margin-top:.3rem"></div>
+</div>
+<div class="form-group">
+<label>Notes internes</label>
+<textarea class="form-control" id="modal-note" style="min-height:90px" placeholder="Observations, points forts, réserves..."></textarea>
+</div>
+</div>
+<div id="tab-grille" class="tab-content">
+<div id="grille-content" style="padding-top:.4rem"></div>
+<p style="text-align:center;color:var(--text-muted);font-size:.73rem;margin-top:1rem;font-style:italic;border-top:1px dashed var(--border);padding-top:.8rem">
+Résultats de l'analyse automatique
+</p>
+</div>
+</div>
+<div class="modal-footer">
+<button class="btn btn-success btn-sm" onclick="updateStatut('retenu')">✅ Retenir</button>
+<button class="btn btn-warning btn-sm" onclick="updateStatut('entretien')">📅 Entretien</button>
+<button class="btn btn-danger btn-sm" onclick="updateStatut('rejete')">❌ Rejeter</button>
+<button class="btn btn-info btn-sm" onclick="openEmailModal()">✉️ Email</button>
+<button class="btn btn-info btn-sm" onclick="reanalyzeOne()">🔄 Réanalyser</button>
+<button class="btn btn-danger btn-sm" onclick="deleteCandidat()">🗑️ Supprimer</button>
+<button class="btn btn-ghost btn-sm" onclick="closeModal()">Fermer</button>
+</div>
+</div>
+</div>
+<div class="modal-overlay" id="modal-email">
+<div class="modal" style="max-width:600px">
+<div class="modal-header">
+<h3>✉️ Préparer l'Email</h3>
+<button class="modal-close" onclick="document.getElementById('modal-email').classList.remove('open')">×</button>
+</div>
+<div class="modal-body">
+<div class="alert-info">
+Copiez cet email ou ouvrez-le dans votre client de messagerie.
+</div>
+<div class="form-group">
+<label>Type de message</label>
+<select class="form-control" id="email-type" onchange="buildEmail()" style="width:100%">
+<optgroup label="Postes scoring /14 (Chef Division & Data Analyst)">
+<option value="🥇 Entretien prioritaire">Entretien prioritaire (11-14/14)</option>
+<option value="🥈 Potentiel">Potentiel à évaluer (7-10/14)</option>
+<option value="❌ Rejet">Rejet (<7/14)</option>
+</optgroup>
+<optgroup label="Postes scoring /12 (Compensation & Admin Crédit)">
+<option value="🥇 Entretien prioritaire">Entretien prioritaire (10-12/12)</option>
+<option value="🥈 Entretien si besoin (vivier)">Vivier de réserve (7-9/12)</option>
+<option value="❌ Rejet">Rejet (<7/12)</option>
+</optgroup>
+<optgroup label="Postes scoring /100">
+<option value="Shortlist">Shortlist - Prioritaire</option>
+<option value="À considérer">À considérer</option>
+<option value="Faible">Faible</option>
+<option value="Rejet">Rejet</option>
+</optgroup>
+<optgroup label="Postes classiques (/10)">
+<option value="retenu">Candidature retenue</option>
+<option value="entretien">Convocation entretien</option>
+<option value="rejete">Email de refus</option>
+</optgroup>
+</select>
+</div>
+<div class="email-preview">
+<div class="ep-field"><span class="ep-label">À :</span><span id="ep-to">–</span></div>
+<div class="ep-field"><span class="ep-label">Objet :</span><span id="ep-subject">–</span></div>
+<textarea class="ep-body-area" id="ep-body"></textarea>
+</div>
+</div>
+<div class="modal-footer">
+<button class="btn btn-primary btn-sm" onclick="copyEmail()">📋 Copier</button>
+<button class="btn btn-info btn-sm" onclick="openMailClient()">📧 Ouvrir dans Mail</button>
+<button class="btn btn-ghost btn-sm" onclick="document.getElementById('modal-email').classList.remove('open')">Fermer</button>
+</div>
+</div>
+</div>
+<div id="floating-progress" class="floating-progress">
+<div class="floating-progress-header">
+<span><span class="icon">🔄</span> <span id="floating-progress-title">Réanalyse en cours...</span></span>
+<span id="floating-progress-count">0/0</span>
+</div>
+<div class="progress-bar-bg">
+<div id="floating-progress-bar" class="progress-bar-fill"></div>
+</div>
+<div id="floating-progress-detail" class="progress-detail">Préparation...</div>
+</div>
+<div class="toast-container" id="toast-container"></div>
+<script>
+var API = window.location.hostname === "localhost" ? "http://localhost:5000/api" : "https://backend1-fiq5.onrender.com/api";
+var jwtToken = localStorage.getItem('rh_token');
+var allCandidats = [];
+var currentC = null;
+var reanalyzePollingInterval = null;
+var postesActifs = [];
+var zipJobId = null;
+var zipPollingInterval = null;
+var filterTimeout = null;
+if (!jwtToken) { window.location.href = 'login.html'; }
+var nomRH = localStorage.getItem('rh_nom') || 'Recruteur';
+document.getElementById('nav-nom').textContent = nomRH;
+document.getElementById('sidebar-nom').textContent = nomRH;
+document.getElementById('sidebar-avatar').textContent = nomRH.charAt(0).toUpperCase();
+function logout() { localStorage.clear(); window.location.href = 'login.html'; }
+function authH() { return { 'Authorization': 'Bearer ' + jwtToken, 'Content-Type': 'application/json' }; }
+function showToast(message, type) {
+var container = document.getElementById('toast-container');
+if (!container) return;
+var icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+var toast = document.createElement('div');
+toast.className = 'toast ' + (type || 'info');
+toast.innerHTML = (icons[type] || 'ℹ️') + ' ' + message;
+container.appendChild(toast);
+setTimeout(function() { toast.remove(); }, 3500);
+}
+function parseJSONField(raw) {
+if (!raw) return null;
+try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return null; }
+}
+function fmtDate(iso) {
+if (!iso) return '–';
+try { return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }); } catch { return '–'; }
+}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function getScoreMax(poste) {
+if (!poste) return 10;
+if (["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"].indexOf(poste) !== -1) return 12;
+if (["Chef de Division Local Corporate", "Data Analyst Finance"].indexOf(poste) !== -1) return 14;
+if (["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"].indexOf(poste) !== -1) return 100;
+return 10;
+}
+function getDecisionFromScore(score, poste) {
+var s = parseInt(score) || 0;
+if (!poste) { if (s >= 8) return "🟢 Entretien prioritaire"; if (s >= 5) return "🟡 Potentiel à évaluer en entretien"; return "🔴 Rejet"; }
+if (["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"].indexOf(poste) !== -1) { if (s >= 10) return "🟢 Entretien prioritaire"; if (s >= 7) return "🟡 Potentiel à évaluer en entretien"; return "🔴 Rejet"; }
+if (["Chef de Division Local Corporate", "Data Analyst Finance"].indexOf(poste) !== -1) { if (s >= 11) return "🟢 Entretien prioritaire"; if (s >= 7) return "🟡 Potentiel à évaluer en entretien"; return "🔴 Rejet"; }
+if (["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"].indexOf(poste) !== -1) { if (s >= 80) return "🟢 Shortlist"; if (s >= 60) return "🟡 À considérer"; return "🔴 Rejet"; }
+if (s >= 8) return "🟢 Entretien prioritaire"; if (s >= 5) return "🟡 Potentiel à évaluer en entretien"; return "🔴 Rejet";
+}
+function getStatutFromDecision(decision) {
+if (!decision) return 'en_attente';
+if (decision.includes("🟢") || decision.includes("Shortlist")) return "retenu";
+if (decision.includes("🟡")) return "entretien";
+if (decision.includes("🔴")) return "rejete";
+return 'en_attente';
+}
+function getDisplayStatus(candidat) {
+var statut = candidat.statut || 'en_attente';
+if (statut === "rejete" || statut === "Rejete" || statut === "exclu" || statut === "Exclu") { return "rejete"; }
+if (statut === "retenu" || statut === "Retenu") { return "retenu"; }
+if (statut === "entretien" || statut === "Entretien") { return "entretien"; }
+var flags = candidat.flags_eliminatoires_parsed || [];
+if (flags && flags.length > 0) { return "rejete"; }
+var decision = candidat.decision || '';
+if (decision) {
+if (decision.includes("🟢") || decision.includes("Shortlist")) { return "retenu"; }
+if (decision.includes("🟡")) { return "entretien"; }
+if (decision.includes("🔴") || decision.includes("Rejet") || decision.includes("eliminatoire")) { return "rejete"; }
+}
+if (candidat.score_breakdown_parsed && candidat.score_breakdown_parsed.decision) {
+var dec = candidat.score_breakdown_parsed.decision;
+if (dec.includes("🟢") || dec.includes("Shortlist")) { return "retenu"; }
+if (dec.includes("🟡")) { return "entretien"; }
+if (dec.includes("🔴") || dec.includes("eliminatoire")) { return "rejete"; }
+}
+if (candidat.score && candidat.poste) {
+var dec = getDecisionFromScore(candidat.score, candidat.poste);
+if (dec) {
+if (dec.includes("🟢") || dec.includes("Shortlist")) { return "retenu"; }
+if (dec.includes("🟡")) { return "entretien"; }
+if (dec.includes("🔴")) { return "rejete"; }
+}
+}
+return 'en_attente';
+}
+function hasEliminatoireFlags(candidat) {
+var flags = candidat.flags_eliminatoires_parsed || [];
+return flags && flags.length > 0;
+}
+function badgePill(s) {
+var cls = { en_attente:'badge-pending', retenu:'badge-retained', rejete:'badge-rejected', entretien:'badge-interview' };
+var lbl = { en_attente:'⏳ En attente', retenu:'✅ Retenu', rejete:'❌ Rejeté', entretien:'📅 Entretien' };
+return '<span class="badge ' + (cls[s] || 'badge-pending') + '">' + (lbl[s] || s) + '</span>';
+}
+function showSection(name, el) {
+document.getElementById('section-overview').style.display = name === 'overview' ? 'block' : 'none';
+document.getElementById('section-candidats').style.display = name === 'candidats' ? 'block' : 'none';
+var links = document.querySelectorAll('.sidebar nav a');
+for (var i = 0; i < links.length; i++) { links[i].classList.remove('active'); }
+if (el) el.classList.add('active');
+if (name === 'candidats') renderTable(allCandidats);
+}
+async function fetchStats() {
+try {
+var res = await fetch(API + '/recruteur/stats', { headers: authH() });
+if (res.status === 401) { logout(); return; }
+if (!res.ok) return;
+var d = await res.json();
+var all = await fetch(API + '/recruteur/candidats', { headers: authH() });
+if (all.ok) {
+var data = await all.json();
+var total = data.length;
+var retenus = 0, entretien = 0, rejetes = 0, en_attente = 0;
+for (var i = 0; i < data.length; i++) {
+var status = getDisplayStatus(data[i]);
+if (status === 'retenu') retenus++;
+else if (status === 'entretien') entretien++;
+else if (status === 'rejete') rejetes++;
+else en_attente++;
+}
+document.getElementById('s-total').textContent = total;
+document.getElementById('s-attente').textContent = en_attente;
+document.getElementById('s-retenu').textContent = retenus;
+document.getElementById('s-rejete').textContent = rejetes;
+document.getElementById('s-entretien').textContent = entretien;
+document.getElementById('donut-total').textContent = total;
+renderDonut({ total: total, en_attente: en_attente, retenu: retenus, entretien: entretien, rejete: rejetes });
+}
+renderBarChart(d.by_poste || []);
+} catch (e) { console.error('fetchStats:', e); }
+}
+function renderDonut(d) {
+var total = d.total || 1;
+var segs = [ { id: 'arc-attente', val: d.en_attente }, { id: 'arc-retenu', val: d.retenu }, { id: 'arc-entretien', val: d.entretien }, { id: 'arc-rejete', val: d.rejete } ];
+var circ = 100;
+var offset = 25;
+for (var i = 0; i < segs.length; i++) {
+var s = segs[i];
+var pct = (s.val / total) * circ;
+var el = document.getElementById(s.id);
+el.setAttribute('stroke-dasharray', pct + ' ' + (circ - pct));
+el.setAttribute('stroke-dashoffset', String(-(offset - 25)));
+offset += pct;
+}
+}
+function renderBarChart(byPoste) {
+var el = document.getElementById('bar-chart');
+if (!byPoste || !byPoste.length) { el.innerHTML = '<div class="empty-state"><p>Aucune donnée</p></div>'; return; }
+var max = 1;
+for (var i = 0; i < byPoste.length; i++) { if (byPoste[i].n > max) max = byPoste[i].n; }
+var html = '';
+for (var i = 0; i < byPoste.length; i++) {
+var p = byPoste[i];
+var lbl = p.poste.split(' ').slice(0, 3).join(' ');
+var pct = Math.round((p.n / max) * 100);
+html += '<div class="bar-row">' + '<div class="bar-label" title="' + p.poste + '">' + lbl + '</div>' + '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%"></div></div>' + '<div class="bar-val">' + p.n + '</div>' + '</div>';
+}
+el.innerHTML = html;
+}
+async function fetchPostesActifs() {
+try {
+var res = await fetch(API + '/postes', { headers: authH() });
+if (res.ok) {
+var data = await res.json();
+if (data.postes_actifs) { postesActifs = data.postes_actifs; } else if (Array.isArray(data)) { postesActifs = data; } else { postesActifs = []; }
+populateReanalyzeSelect(postesActifs);
+updateReanalyzeInfo(postesActifs);
+return postesActifs;
+}
+} catch (e) { console.warn('Erreur récupération postes actifs:', e); }
+return [];
+}
+function populateReanalyzeSelect(actifs) {
+var sel = document.getElementById('reanalyze-poste-select');
+if (!sel) return;
+while (sel.options.length > 1) sel.remove(1);
+if (actifs.length === 0) { var opt = document.createElement('option'); opt.value = ''; opt.textContent = 'Aucun poste actif'; opt.disabled = true; sel.appendChild(opt); return; }
+for (var i = 0; i < actifs.length; i++) { var opt2 = document.createElement('option'); opt2.value = actifs[i]; opt2.textContent = actifs[i]; sel.appendChild(opt2); }
+sel.options[0].textContent = actifs.length > 1 ? 'Tous les postes actifs' : 'Tous les postes actifs';
+}
+function updateReanalyzeInfo(actifs) {
+var infoText = document.getElementById('reanalyze-info-text');
+if (!infoText) return;
+if (actifs.length === 0) { infoText.textContent = '⚠️ Aucun poste actif actuellement. La réanalyse sera ignorée.'; infoText.style.color = '#ffebcc'; } else if (actifs.length === 1) { infoText.textContent = '📌 Un poste actif : "' + actifs[0] + '". La réanalyse concerne uniquement ce poste.'; infoText.style.color = 'rgba(255,255,255,0.9)'; } else { infoText.textContent = '📌 ' + actifs.length + ' postes actifs : ' + actifs.join(', ') + '. La réanalyse concerne uniquement ces postes.'; infoText.style.color = 'rgba(255,255,255,0.9)'; }
+}
+async function fetchCandidats() {
+try {
+var res = await fetch(API + '/recruteur/candidats', { headers: authH() });
+if (res.status === 401) { logout(); return; }
+if (!res.ok) { showToast('Erreur chargement candidats', 'error'); return; }
+allCandidats = await res.json();
+for (var i = 0; i < allCandidats.length; i++) {
+var c = allCandidats[i];
+if (c.score_breakdown && !c.score_breakdown_parsed) { c.score_breakdown_parsed = parseJSONField(c.score_breakdown); }
+if (c.flags_eliminatoires && !c.flags_eliminatoires_parsed) { c.flags_eliminatoires_parsed = parseJSONField(c.flags_eliminatoires); }
+if (c.signaux_detectes && !c.signaux_detectes_parsed) { c.signaux_detectes_parsed = parseJSONField(c.signaux_detectes); }
+if (c.analyse_details && !c.analyse_details_parsed) { c.analyse_details_parsed = parseJSONField(c.analyse_details); }
+}
+populatePosteFilter(allCandidats);
+populateExportSelects(allCandidats);
+renderTable(allCandidats);
+renderRecent(allCandidats);
+fetchStats();
+} catch (e) {
+console.error('fetchCandidats:', e);
+showToast('❌ Erreur de connexion au serveur', 'error');
+document.getElementById('candidats-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--danger)">⚠️ Impossible de charger les données. Vérifiez votre connexion.</td></tr>';
+}
+}
+function populatePosteFilter(data) {
+var sel = document.getElementById('f-poste');
+var postes = [];
+for (var i = 0; i < data.length; i++) { if (data[i].poste && postes.indexOf(data[i].poste) === -1) postes.push(data[i].poste); }
+postes.sort();
+while (sel.options.length > 1) sel.remove(1);
+for (var i = 0; i < postes.length; i++) { var opt = document.createElement('option'); opt.value = postes[i]; opt.textContent = postes[i]; sel.appendChild(opt); }
+}
+function populateExportSelects(data) {
+var postes = [];
+for (var i = 0; i < data.length; i++) { if (data[i].poste && postes.indexOf(data[i].poste) === -1) postes.push(data[i].poste); }
+postes.sort();
+var ids = ['export-poste-select', 'dossier-poste-select'];
+for (var j = 0; j < ids.length; j++) {
+var sel = document.getElementById(ids[j]);
+if (!sel) continue;
+while (sel.options.length > 1) sel.remove(1);
+for (var k = 0; k < postes.length; k++) { var opt = document.createElement('option'); opt.value = postes[k]; opt.textContent = postes[k]; sel.appendChild(opt); }
+}
+}
+function applyFilters() {
+var search = document.getElementById('f-search').value.toLowerCase().trim();
+var poste = document.getElementById('f-poste').value;
+var statut = document.getElementById('f-statut').value;
+var dateStart = document.getElementById('f-date-start').value;
+var dateEnd = document.getElementById('f-date-end').value;
+var minScore = parseInt(document.getElementById('f-min-score').value) || 0;
+var result = [];
+for (var i = 0; i < allCandidats.length; i++) {
+var c = allCandidats[i];
+var hay = (c.nom + ' ' + c.prenom + ' ' + c.email + ' ' + c.numero_dossier + ' ' + c.poste).toLowerCase();
+if (search && hay.indexOf(search) === -1) continue;
+if (poste && c.poste !== poste) continue;
+var displayStatus = getDisplayStatus(c);
+if (statut && displayStatus !== statut) continue;
+if (dateStart && c.date_candidature) {
+var candDate = c.date_candidature.split('T')[0];
+if (candDate < dateStart) continue;
+}
+if (dateEnd && c.date_candidature) {
+var candDate = c.date_candidature.split('T')[0];
+if (candDate > dateEnd) continue;
+}
+if (minScore > 0 && (parseInt(c.score) || 0) < minScore) continue;
+result.push(c);
+}
+renderTable(result);
+}
+function applyFiltersDebounced() {
+clearTimeout(filterTimeout);
+filterTimeout = setTimeout(applyFilters, 300);
+}
+function renderTable(data) {
+var tbody = document.getElementById('candidats-tbody');
+if (!data.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-muted)">Aucun candidat trouvé</td></tr>'; return; }
+var sortedData = data.slice(0);
+sortedData.sort(function(a, b) { var scoreA = parseInt(a.score) || 0; var scoreB = parseInt(b.score) || 0; return scoreB - scoreA; });
+var html = '';
+for (var i = 0; i < sortedData.length; i++) {
+var c = sortedData[i];
+var scoreMax = getScoreMax(c.poste);
+var scoreRaw = parseInt(c.score) || 0;
+var score = Math.max(0, Math.min(scoreMax, scoreRaw));
+var starUnit = scoreMax / 5;
+var stars = '';
+for (var j = 0; j < Math.floor(score / starUnit); j++) stars += '★';
+for (var j = 0; j < 5 - Math.floor(score / starUnit); j++) stars += '☆';
+var cvLink = c.cv_filename ? '<a href="' + API + '/recruteur/uploads/' + c.cv_filename + '" target="_blank" class="btn btn-outline btn-sm">CV</a>' : '<span style="color:var(--text-muted);font-size:.78rem">–</span>';
+var lmLink = c.lettre_filename ? '<a href="' + API + '/recruteur/uploads/' + c.lettre_filename + '" target="_blank" class="btn btn-outline btn-sm">LM</a>' : '';
+var attLink = (c.attestation_filenames_parsed && c.attestation_filenames_parsed.length) ? '<a href="' + API + '/recruteur/uploads/' + c.attestation_filenames_parsed[0] + '" target="_blank" class="btn btn-outline btn-sm">📎</a>' : '';
+var statut = getDisplayStatus(c);
+var flags = c.flags_eliminatoires_parsed || [];
+var hasElim = flags && flags.length > 0;
+var elimBadge = hasElim ? '<span class="badge badge-eliminatoire" title="' + escHtml(flags.join(' | ')) + '">🚫 Élim.</span>' : '<span style="color:var(--text-muted);font-size:.7rem">✓</span>';
+html += '<tr>' + '<td><strong>' + escHtml(c.prenom) + ' ' + escHtml(c.nom) + '</strong><br><span class="td-small">' + escHtml(c.email) + '</span></td>' + '<td style="font-size:.82rem">' + escHtml(c.poste) + '</td>' + '<td style="font-size:.8rem;color:var(--text-muted)">' + fmtDate(c.date_candidature) + '</td>' + '<td>' + badgePill(statut) + '</td>' + '<td style="font-size:.85rem;letter-spacing:-1px;font-family:monospace" title="Score: ' + score + '/' + scoreMax + '">' + stars + ' <span style="color:var(--text-secondary);font-family:inherit">(' + score + '/' + scoreMax + ')</span></td>' + '<td>' + elimBadge + '</td>' + '<td style="display:flex;gap:0.25rem;flex-wrap:wrap">' + cvLink + lmLink + attLink + '</td>' + '<td class="td-actions">' + '<button class="btn btn-primary btn-sm" onclick="openModal(\'' + c.id + '\')">📂 Dossier</button>' + '<button class="btn btn-info btn-sm" onclick="quickEmail(\'' + c.id + '\')">✉️</button>' + '<button class="btn btn-outline btn-sm" onclick="quickReanalyze(\'' + c.id + '\')" title="Réanalyser">🔄</button>' + '</td></tr>';
+}
+tbody.innerHTML = html;
+}
+function renderRecent(data) {
+var container = document.getElementById('recent-table');
+var slice = data.slice(0, 8);
+if (!slice.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><p>Aucune candidature.</p></div>'; return; }
+var html = '<div class="table-wrap"><table><thead><tr><th>Candidat</th><th>Poste</th><th>Date</th><th>Statut</th><th>Score</th><th></th></tr></thead><tbody>';
+for (var i = 0; i < slice.length; i++) {
+var c = slice[i];
+var scoreMax = getScoreMax(c.poste);
+var scoreRaw = parseInt(c.score) || 0;
+var score = Math.max(0, Math.min(scoreMax, scoreRaw));
+var starUnit = scoreMax / 5;
+var stars = '';
+for (var j = 0; j < Math.floor(score / starUnit); j++) stars += '★';
+for (var j = 0; j < 5 - Math.floor(score / starUnit); j++) stars += '☆';
+var statut = getDisplayStatus(c);
+html += '<tr style="cursor:pointer" onclick="openModal(\'' + c.id + '\')">' + '<td><strong>' + escHtml(c.prenom) + ' ' + escHtml(c.nom) + '</strong><br><small style="color:var(--text-muted)">' + escHtml(c.email) + '</small></td>' + '<td style="font-size:.82rem">' + escHtml(c.poste) + '</td>' + '<td style="font-size:.8rem;color:var(--text-muted)">' + fmtDate(c.date_candidature) + '</td>' + '<td>' + badgePill(statut) + '</td>' + '<td style="font-size:.9rem;font-family:monospace">' + stars + ' <span style="color:var(--text-secondary);font-family:inherit">(' + score + '/' + scoreMax + ')</span></td>' + '<td onclick="event.stopPropagation()"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openModal(\'' + c.id + '\')">📂 Voir</button></td>' + '</tr>';
+}
+html += '</tbody></table></div>';
+container.innerHTML = html;
+}
+function refreshAll() { fetchStats(); fetchCandidats(); checkReanalyzeStatus(); }
+function closeModal() { document.getElementById('modal-candidat').classList.remove('open'); currentC = null; }
+function switchTab(name, btn) {
+var btns = document.querySelectorAll('.tab-btn');
+for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+var contents = document.querySelectorAll('.tab-content');
+for (var i = 0; i < contents.length; i++) contents[i].classList.remove('active');
+btn.classList.add('active');
+document.getElementById('tab-' + name).classList.add('active');
+}
+function updateEmailOptions(poste) {
+var sel = document.getElementById('email-type');
+while (sel.options.length > 0) sel.remove(0);
+if (["Chef de Division Local Corporate", "Data Analyst Finance"].indexOf(poste) !== -1) {
+var optGroup = document.createElement('optgroup');
+optGroup.label = 'Poste avec scoring /14 (' + poste + ')';
+sel.appendChild(optGroup);
+var opt1 = document.createElement('option');
+opt1.value = '🥇 Entretien prioritaire';
+opt1.textContent = 'Entretien prioritaire (11-14/14)';
+optGroup.appendChild(opt1);
+var opt2 = document.createElement('option');
+opt2.value = '🥈 Potentiel';
+opt2.textContent = 'Potentiel à évaluer (7-10/14)';
+optGroup.appendChild(opt2);
+var opt3 = document.createElement('option');
+opt3.value = '❌ Rejet';
+opt3.textContent = 'Rejet (<7/14)';
+optGroup.appendChild(opt3);
+} else if (["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"].indexOf(poste) !== -1) {
+var optGroup = document.createElement('optgroup');
+optGroup.label = 'Poste avec scoring /12 (' + poste + ')';
+sel.appendChild(optGroup);
+var opt1 = document.createElement('option');
+opt1.value = '🥇 Entretien prioritaire';
+opt1.textContent = 'Entretien prioritaire (10-12/12)';
+optGroup.appendChild(opt1);
+var opt2 = document.createElement('option');
+opt2.value = '🥈 Entretien si besoin (vivier)';
+opt2.textContent = 'Vivier de réserve (7-9/12)';
+optGroup.appendChild(opt2);
+var opt3 = document.createElement('option');
+opt3.value = '❌ Rejet';
+opt3.textContent = 'Rejet (<7/12)';
+optGroup.appendChild(opt3);
+} else if (["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"].indexOf(poste) !== -1) {
+var optGroup = document.createElement('optgroup');
+optGroup.label = 'Poste avec scoring /100 (' + poste + ')';
+sel.appendChild(optGroup);
+var opt1 = document.createElement('option');
+opt1.value = 'Shortlist';
+opt1.textContent = 'Shortlist - Prioritaire (80-100)';
+optGroup.appendChild(opt1);
+var opt2 = document.createElement('option');
+opt2.value = 'À considérer';
+opt2.textContent = 'À considérer (70-79)';
+optGroup.appendChild(opt2);
+var opt3 = document.createElement('option');
+opt3.value = 'Faible';
+opt3.textContent = 'Faible (60-69)';
+optGroup.appendChild(opt3);
+var opt4 = document.createElement('option');
+opt4.value = 'Rejet';
+opt4.textContent = 'Rejet (<60)';
+optGroup.appendChild(opt4);
+} else {
+var optGroup = document.createElement('optgroup');
+optGroup.label = 'Poste classique';
+sel.appendChild(optGroup);
+var opt1 = document.createElement('option');
+opt1.value = 'retenu';
+opt1.textContent = 'Candidature retenue (8-10)';
+optGroup.appendChild(opt1);
+var opt2 = document.createElement('option');
+opt2.value = 'entretien';
+opt2.textContent = 'Convocation entretien (5-7)';
+optGroup.appendChild(opt2);
+var opt3 = document.createElement('option');
+opt3.value = 'rejete';
+opt3.textContent = 'Email de refus (<5)';
+optGroup.appendChild(opt3);
+}
+if (currentC && currentC.score) {
+var score = parseInt(currentC.score) || 0;
+if (["Chef de Division Local Corporate", "Data Analyst Finance"].indexOf(poste) !== -1) {
+if (score >= 11) sel.value = '🥇 Entretien prioritaire';
+else if (score >= 7) sel.value = '🥈 Potentiel';
+else sel.value = '❌ Rejet';
+} else if (["Chef de Section Compensation", "Chargé(e) d'Administration de Crédit"].indexOf(poste) !== -1) {
+if (score >= 10) sel.value = '🥇 Entretien prioritaire';
+else if (score >= 7) sel.value = '🥈 Entretien si besoin (vivier)';
+else sel.value = '❌ Rejet';
+} else if (["Auditeur interne", "Chef service contrôle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marché", "Chef service reporting réglementaire"].indexOf(poste) !== -1) {
+if (score >= 80) sel.value = 'Shortlist';
+else if (score >= 70) sel.value = 'À considérer';
+else if (score >= 60) sel.value = 'Faible';
+else sel.value = 'Rejet';
+}
+}
+}
+function openModal(id) {
+var c = null;
+for (var i = 0; i < allCandidats.length; i++) { if (allCandidats[i].id === id) { c = allCandidats[i]; break; } }
+if (!c) { showToast('Actualisez la liste d\'abord', 'error'); return; }
+currentC = c;
+var statut = getDisplayStatus(c);
+var flags = c.flags_eliminatoires_parsed || [];
+var hasElim = flags && flags.length > 0;
+var rejectAlert = document.getElementById('reject-alert');
+var rejectReasons = document.getElementById('reject-reasons');
+var isRejected = statut === 'rejete' || statut === 'Rejete' || statut === 'exclu' || statut === 'Exclu';
+if (isRejected || hasElim) {
+rejectAlert.classList.add('visible');
+var note = c.note || 'Décision du recruteur';
+var score = parseInt(c.score) || 0;
+var scoreMax = getScoreMax(c.poste);
+var html = '<p><strong>Ce candidat a été rejeté :</strong></p><ul>';
+if (hasElim && flags.length > 0) {
+for (var f = 0; f < flags.length; f++) {
+var clean_f = flags[f].replace('❌', '').replace('⚠️', '').replace('★', '').trim();
+if (clean_f && clean_f.length > 5) {
+html += '<li><span class="reason">• ' + escHtml(clean_f) + '</span></li>';
+}
+}
+}
+if (note && note.length > 10 && !note.includes('Critere')) {
+html += '<li><span class="reason">• ' + escHtml(note) + '</span></li>';
+}
+if (flags.length === 0 && (!note || note.length <= 10)) {
+html += '<li><span class="reason">• Rejeté manuellement par le recruteur</span></li>';
+}
+html += '</ul>';
+if (hasElim) {
+html += '<div class="score-conserve">📊 Score conservé : <strong>' + score + '/' + scoreMax + '</strong> (les critères éliminatoires non satisfaits ont entraîné le rejet)</div>';
+} else {
+html += '<p style="margin-top:0.5rem;"><strong>Score final :</strong> ' + score + '/' + scoreMax + '</p>';
+}
+rejectReasons.innerHTML = html;
+} else { rejectAlert.classList.remove('visible'); }
+document.getElementById('modal-title').innerHTML = escHtml(c.prenom) + ' ' + escHtml(c.nom) + ' <span class="readonly-badge">Analyse automatique</span>';
+document.getElementById('modal-infos').innerHTML = '<div><div style="font-size:.73rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px">Email</div><div>' + escHtml(c.email) + '</div></div>' + '<div><div style="font-size:.73rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px">Téléphone</div><div>' + (c.telephone || '–') + '</div></div>' + '<div><div style="font-size:.73rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px">Poste</div><div><strong style="color:var(--primary)">' + escHtml(c.poste) + '</strong></div></div>' + '<div><div style="font-size:.73rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px">Statut</div><div>' + badgePill(statut) + '</div></div>' + '<div><div style="font-size:.73rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px">N° Dossier</div><div>' + (c.numero_dossier || '–') + '</div></div>' + '<div><div style="font-size:.73rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px">Date candidature</div><div>' + fmtDate(c.date_candidature) + '</div></div>';
+var files = [];
+if (c.cv_filename) files.push('<a href="' + API + '/recruteur/uploads/' + c.cv_filename + '" target="_blank" class="btn btn-primary btn-sm">📄 CV</a>');
+else files.push('<span style="color:var(--text-muted);font-size:.83rem">CV non fourni</span>');
+if (c.lettre_filename) files.push('<a href="' + API + '/recruteur/uploads/' + c.lettre_filename + '" target="_blank" class="btn btn-primary btn-sm">📝 Lettre</a>');
+if (c.attestation_filenames_parsed && c.attestation_filenames_parsed.length) { for (var i = 0; i < c.attestation_filenames_parsed.length; i++) { files.push('<a href="' + API + '/recruteur/uploads/' + c.attestation_filenames_parsed[i] + '" target="_blank" class="btn btn-primary btn-sm">📎 Certificat</a>'); } }
+document.getElementById('modal-fichiers').innerHTML = files.join(' ');
+renderAnalyseResume(c);
+var scoreMax = getScoreMax(c.poste);
+var score = Math.max(0, Math.min(scoreMax, parseInt(c.score) || 0));
+renderStars(score, scoreMax);
+document.getElementById('modal-note').value = c.note || '';
+renderGrille(c.poste, c.checklist || '', c.score_breakdown_parsed);
+var btns = document.querySelectorAll('.tab-btn');
+for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+var contents = document.querySelectorAll('.tab-content');
+for (var i = 0; i < contents.length; i++) contents[i].classList.remove('active');
+document.querySelector('.tab-btn').classList.add('active');
+document.getElementById('tab-eval').classList.add('active');
+document.getElementById('modal-candidat').classList.add('open');
+updateEmailOptions(c.poste);
+}
+function renderAnalyseResume(c) {
+var container = document.getElementById('analyse-resume');
+var content = document.getElementById('analyse-content');
+if (!c.score_breakdown_parsed) { container.style.display = 'none'; return; }
+container.style.display = 'block';
+var sb = c.score_breakdown_parsed;
+var details = c.analyse_details_parsed || {};
+var flags = c.flags_eliminatoires_parsed || [];
+var html = '';
+var maxMap = {
+'experience_corporate': 3,
+'management': 3,
+'risque_credit': 2,
+'cross_selling': 2,
+'coherence_parcours': 2,
+'qualite_cv': 1,
+'certification': 1
+};
+var labelMap = {
+'experience_corporate': 'Experience SME/Local Corporate',
+'management': 'Capacité managériale',
+'risque_credit': 'Risque de crédit',
+'cross_selling': 'Cross-selling / Cash Management / TSG',
+'coherence_parcours': 'Cohérence du parcours',
+'qualite_cv': 'Qualité du CV',
+'certification': 'Certification'
+};
+var sousScores = {};
+if (details.analyse_raw && details.analyse_raw.sous_scores) {
+sousScores = details.analyse_raw.sous_scores;
+} else {
+sousScores = sb.sous_scores || {};
+}
+var totalCalculated = 0;
+for (var key in maxMap) {
+var val = sousScores[key] !== undefined ? sousScores[key] : 0;
+if (val > maxMap[key]) val = maxMap[key];
+totalCalculated += val;
+}
+var finalScore = Math.min(14, totalCalculated);
+var displayScore = finalScore;
+if (sousScores && Object.keys(sousScores).length > 0) {
+html += '<div class="score-breakdown">';
+var displayKeys = Object.keys(maxMap);
+for (var i = 0; i < displayKeys.length; i++) {
+var key = displayKeys[i];
+var label = labelMap[key] || key;
+var maxVal = maxMap[key] || 0;
+var val = sousScores[key] !== undefined ? sousScores[key] : 0;
+if (val > maxVal) val = maxVal;
+html += '<div class="sb-row">';
+html += '<span class="sb-label">' + label + '</span>';
+html += '<span class="sb-val ok">' + val + '/' + maxVal + '</span>';
+html += '</div>';
+}
+html += '<div class="sb-row" style="border-top:2px solid var(--primary);margin-top:0.5rem;padding-top:0.5rem;">';
+html += '<span class="sb-label">Score total</span>';
+html += '<span class="sb-val ok">' + displayScore + ' / 14</span>';
+html += '</div>';
+html += '</div>';
+}
+if (flags && flags.length > 0) {
+html += '<div class="bloc-alert elim"><strong>🚫 CRITERES ELIMINATOIRES NON SATISFAITS</strong><div style="margin-top:.4rem">';
+for (var i = 0; i < flags.length; i++) {
+html += '• ' + escHtml(flags[i]) + '<br>';
+}
+html += '</div></div>';
+}
+if (sb && typeof sb === 'object' && sb.decision) {
+var color = sb.decision.indexOf('prioritaire') !== -1 ? '#166534' : (sb.decision.indexOf('Rejet') !== -1 ? '#991b1b' : '#3B6D11');
+html += '<div style="text-align:center;margin:.5rem 0"><span style="font-weight:700;color:' + color + '">' + sb.decision + '</span></div>';
+}
+if (details && typeof details === 'object' && details.points_forts && details.points_forts.length) {
+html += '<div class="bloc-alert signal"><strong>✅ Points forts</strong><div style="margin-top:.4rem">';
+for (var i = 0; i < details.points_forts.length; i++) { html += '• ' + escHtml(details.points_forts[i]) + '<br>'; }
+html += '</div></div>';
+}
+if (details && typeof details === 'object' && details.points_vigilance && details.points_vigilance.length) {
+html += '<div class="bloc-alert attn"><strong>⚠️ Points de vigilance</strong><div style="margin-top:.4rem">';
+for (var i = 0; i < details.points_vigilance.length; i++) { html += '• ' + escHtml(details.points_vigilance[i]) + '<br>'; }
+html += '</div></div>';
+}
+if (details && typeof details === 'object' && details.synthese_recruteur) {
+html += '<div class="bloc-alert signal"><strong>📝 Synthèse</strong><div style="margin-top:.4rem;font-style:italic">' + escHtml(details.synthese_recruteur) + '</div></div>';
+}
+if (sb && typeof sb === 'object' && sb.moteur) {
+html += '<p style="font-size:.7rem;color:var(--text-muted);text-align:right;margin-top:.5rem">Analyse: ' + sb.moteur + '</p>';
+}
+content.innerHTML = html || '<p style="color:var(--text-muted);font-style:italic">Aucun détail disponible.</p>';
+}
+function renderStars(score, scoreMax) {
+var row = document.getElementById('stars-row');
+row.innerHTML = '';
+var starUnit = scoreMax / 5;
+var starCount = Math.floor(score / starUnit);
+for (var i = 1; i <= 5; i++) { var btn = document.createElement('button'); btn.className = 'star-btn'; btn.textContent = i <= starCount ? '★' : '☆'; btn.disabled = true; row.appendChild(btn); }
+var scoreText = document.createElement('span');
+scoreText.style.cssText = 'margin-left:1rem;font-weight:700;color:var(--primary);font-size:1.1rem';
+scoreText.textContent = score + '/' + scoreMax;
+row.appendChild(scoreText);
+}
+function renderGrille(poste, checklistJson, scoreBreakdown) {
+var g = (window.GRILLE && window.GRILLE[poste]) ? window.GRILLE[poste] : { eliminatoire: [], a_verifier: [], signaux_forts: [], points_attention: [] };
+var el = document.getElementById('grille-content');
+var checked = {};
+try { checked = JSON.parse(checklistJson || '{}'); } catch (e) {}
+function mkSection(title, color, items, pfx, isAttention) {
+if (!items || !items.length) return '';
+var html = '<div class="grille-section">' + '<div class="grille-header" style="color:' + color + ';background:' + color + '18;border-left-color:' + color + '">' + title + ' (' + items.length + ' critères)' + '</div>';
+for (var i = 0; i < items.length; i++) {
+var key = pfx + '_' + i;
+var isValidated = checked[key] === true;
+var isOk = isAttention ? !isValidated : isValidated;
+var icon = isOk ? '✅' : '❌';
+var statusClass = isOk ? 'checked' : 'not-checked';
+var label = isAttention ? (isOk ? '⚠️ Non détecté' : '⚠️ Détecté') : '';
+html += '<label class="grille-item ' + statusClass + '" title="' + escHtml(items[i]) + '">' + '<input type="checkbox" ' + (isOk ? 'checked' : '') + ' disabled>' + '<span>' + escHtml(items[i]) + '</span>' + '<span class="status-icon" style="' + (isOk ? 'color:#16a34a' : 'color:#dc2626') + '">' + icon + '</span>' + '<span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;">' + label + '</span>' + '</label>';
+}
+html += '</div>';
+return html;
+}
+el.innerHTML = mkSection('🔴 Critères éliminatoires', '#dc2626', g.eliminatoire, 'elim', false) + mkSection('🟠 Points à vérifier', '#d97706', g.a_verifier, 'verif', false) + mkSection('🟡 Signaux forts', '#16a34a', g.signaux_forts, 'signal', false) + mkSection('⚠️ Points d\'attention', '#64748b', g.points_attention, 'attn', true);
+}
+async function updateStatut(statut) {
+if (!currentC) { showToast('Aucun candidat sélectionné', 'error'); return; }
+var note = document.getElementById('modal-note').value;
+if (statut === 'rejete' && !note) {
+note = 'Candidat rejeté manuellement par le recruteur';
+}
+try {
+var res = await fetch(API + '/recruteur/candidats/' + currentC.id + '/statut', {
+method: 'PUT',
+headers: authH(),
+body: JSON.stringify({ statut: statut, note: note })
+});
+if (res.ok) {
+var idx = -1;
+for (var i = 0; i < allCandidats.length; i++) {
+if (allCandidats[i].id === currentC.id) { idx = i; break; }
+}
+if (idx !== -1) {
+allCandidats[idx].statut = statut;
+allCandidats[idx].note = note;
+if (statut === 'rejete') {
+allCandidats[idx].decision = 'Rejet - Décision du recruteur';
+} else if (statut === 'retenu') {
+allCandidats[idx].decision = 'Retenu - Décision du recruteur';
+} else if (statut === 'entretien') {
+allCandidats[idx].decision = 'Entretien - Décision du recruteur';
+}
+}
+showToast('✅ Statut mis à jour : ' + statut, 'success');
+closeModal();
+applyFilters();
+renderRecent(allCandidats);
+fetchStats();
+renderTable(allCandidats);
+} else {
+var d = await res.json().catch(function() { return {}; });
+showToast(d.error || 'Erreur', 'error');
+}
+} catch (e) { showToast('Erreur de connexion', 'error'); }
+}
+async function deleteCandidat() {
+if (!currentC) { showToast('Aucun candidat sélectionné', 'error'); return; }
+var nom = currentC.prenom + ' ' + currentC.nom;
+if (!confirm('⚠️ Êtes-vous sûr de vouloir supprimer définitivement le candidat ' + nom + ' ?\n\nCette action supprimera également tous ses fichiers (CV, lettre, attestations) et est irréversible.')) return;
+try {
+var res = await fetch(API + '/recruteur/candidats/' + currentC.id, {
+method: 'DELETE',
+headers: authH()
+});
+if (res.ok) {
+var data = await res.json();
+showToast('🗑️ Candidat supprimé : ' + nom, 'success');
+closeModal();
+fetchCandidats();
+fetchStats();
+} else {
+var err = await res.json().catch(function() { return {}; });
+showToast('❌ Erreur: ' + (err.error || 'Erreur inconnue'), 'error');
+}
+} catch (e) {
+showToast('❌ Erreur de connexion', 'error');
+}
+}
+function getExportParams() {
+var poste = document.getElementById('export-poste-select').value;
+var statut = document.getElementById('export-statut-select').value;
+var dateStart = document.getElementById('export-date-start').value;
+var dateEnd = document.getElementById('export-date-end').value;
+var minScore = document.getElementById('export-min-score').value;
+var params = new URLSearchParams();
+if (poste) params.append('poste', poste);
+if (statut) params.append('statut', statut);
+if (dateStart) params.append('date_start', dateStart);
+if (dateEnd) params.append('date_end', dateEnd);
+if (minScore) params.append('min_score', minScore);
+return params;
+}
+async function exportReport(format) {
+try {
+var params = getExportParams();
+var url = API + '/recruteur/export/' + format + '?' + params.toString();
+showToast('📊 Génération du rapport en cours...', 'info');
+var response = await fetch(url, { method: 'GET', headers: authH() });
+if (!response.ok) { var error = await response.json().catch(function() { return {}; }); throw new Error(error.error || 'Erreur export'); }
+var blob = await response.blob();
+var urlBlob = window.URL.createObjectURL(blob);
+var a = document.createElement('a');
+a.href = urlBlob;
+var extensions = { excel: 'xlsx', csv: 'csv', pdf: 'pdf', word: 'docx' };
+var timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+a.download = 'rapport_candidats_' + timestamp + '.' + (extensions[format] || 'xlsx');
+document.body.appendChild(a);
+a.click();
+setTimeout(function() { window.URL.revokeObjectURL(urlBlob); document.body.removeChild(a); }, 100);
+showToast('✅ Rapport téléchargé', 'success');
+} catch (error) {
+console.error('Erreur export:', error);
+showToast('❌ Erreur: ' + error.message, 'error');
+if (error.message.includes('timeout')) {
+showToast('💡 Essayez de réduire les filtres (dates, postes)', 'info');
+}
+}
+}
+async function downloadAllDossiers() {
+try {
+var poste = document.getElementById('dossier-poste-select').value;
+var dateStart = document.getElementById('dossier-date-start').value;
+var dateEnd = document.getElementById('dossier-date-end').value;
+var params = new URLSearchParams();
+if (poste) params.append('poste', poste);
+if (dateStart) params.append('date_start', dateStart);
+if (dateEnd) params.append('date_end', dateEnd);
+showToast('📦 Démarrage de la génération du ZIP...', 'info');
+var startUrl = API + '/recruteur/dossiers/zip/start?' + params.toString();
+var startResponse = await fetch(startUrl, { method: 'GET', headers: authH() });
+if (!startResponse.ok) { var error = await startResponse.json().catch(function() { return {}; }); throw new Error(error.error || 'Erreur démarrage'); }
+var startData = await startResponse.json();
+zipJobId = startData.job_id;
+showToast('🔄 Génération du ZIP en arrière-plan...', 'info');
+var progressElement = document.getElementById('floating-progress');
+progressElement.classList.add('active');
+progressElement.classList.remove('completed');
+if (zipPollingInterval) clearInterval(zipPollingInterval);
+var totalFiles = 0;
+var progressFiles = 0;
+zipPollingInterval = setInterval(async function() {
+try {
+var statusRes = await fetch(API + '/recruteur/dossiers/zip/status/' + zipJobId, { headers: authH() });
+if (!statusRes.ok) {
+if (statusRes.status === 404) {
+clearInterval(zipPollingInterval);
+zipPollingInterval = null;
+progressElement.classList.remove('active');
+showToast('⚠️ Job expiré, veuillez réessayer', 'warning');
+return;
+}
+return;
+}
+var statusData = await statusRes.json();
+totalFiles = statusData.total || 0;
+progressFiles = statusData.progress || 0;
+var progress = totalFiles > 0 ? Math.round((progressFiles / totalFiles) * 100) : 0;
+var bar = document.getElementById('floating-progress-bar');
+bar.style.width = progress + '%';
+document.getElementById('floating-progress-title').textContent = '📦 Génération du ZIP...';
+document.getElementById('floating-progress-count').textContent = progressFiles + '/' + totalFiles + ' (' + progress + '%)';
+document.getElementById('floating-progress-detail').textContent = 'Téléchargement des fichiers...';
+if (statusData.status === 'done') {
+clearInterval(zipPollingInterval);
+zipPollingInterval = null;
+progressElement.classList.add('completed');
+document.getElementById('floating-progress-title').textContent = '✅ ZIP prêt !';
+document.getElementById('floating-progress-detail').textContent = 'Téléchargement automatique dans quelques secondes...';
+setTimeout(function() { progressElement.classList.remove('active'); }, 3000);
+var downloadRes = await fetch(API + '/recruteur/dossiers/zip/download/' + zipJobId, { headers: authH() });
+if (!downloadRes.ok) {
+var err = await downloadRes.json().catch(function() { return {}; });
+throw new Error(err.error || 'Erreur téléchargement');
+}
+var blob = await downloadRes.blob();
+var urlBlob = window.URL.createObjectURL(blob);
+var a = document.createElement('a');
+a.href = urlBlob;
+var timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+var filename = 'dossiers_candidats_' + timestamp + '.zip';
+a.download = filename;
+document.body.appendChild(a);
+a.click();
+setTimeout(function() { window.URL.revokeObjectURL(urlBlob); document.body.removeChild(a); }, 100);
+showToast('✅ ZIP téléchargé (' + totalFiles + ' fichiers)', 'success');
+} else if (statusData.status === 'error') {
+clearInterval(zipPollingInterval);
+zipPollingInterval = null;
+progressElement.classList.remove('active');
+showToast('❌ Erreur: ' + (statusData.error || 'Inconnue'), 'error');
+}
+} catch (e) {
+console.error('Polling ZIP error:', e);
+}
+}, 2000);
+setTimeout(function() {
+if (zipPollingInterval) {
+clearInterval(zipPollingInterval);
+zipPollingInterval = null;
+var progressElement = document.getElementById('floating-progress');
+progressElement.classList.remove('active');
+showToast('⏱️ Le téléchargement a pris trop de temps, veuillez réessayer', 'warning');
+}
+}, 600000);
+} catch (error) {
+console.error('Erreur ZIP:', error);
+showToast('❌ Erreur: ' + error.message, 'error');
+}
+}
+function triggerManualReanalyze() {
+var poste = document.getElementById('reanalyze-poste-select').value;
+var message = poste ? '⚠️ Réanalyser TOUS les candidats du poste "' + poste + '" ?' : '⚠️ Réanalyser TOUS les candidats des postes actifs ? Cette opération peut prendre du temps.';
+if (!confirm(message)) return;
+var url;
+if (poste) { url = API + '/recruteur/reanalyze-poste/' + encodeURIComponent(poste); } else { url = API + '/recruteur/reanalyze-all'; }
+showToast('🔄 Lancement de la réanalyse...', 'info');
+fetch(url, { method: 'POST', headers: authH() }).then(function(r) { return r.json(); }).then(function(data) {
+if (data.reanalyzed_count !== undefined && data.reanalyzed_count > 0) { showToast('🔄 Réanalyse lancée : ' + data.reanalyzed_count + ' candidats', 'success'); startReanalyzePolling(); } else if (data.message && data.message.indexOf('Aucun') !== -1) { showToast('📭 ' + data.message, 'info'); } else { showToast('⚠️ ' + (data.message || 'Erreur lors de la réanalyse'), 'warning'); }
+fetchCandidats(); fetchStats();
+}).catch(function(e) { showToast('❌ Erreur: ' + e.message, 'error'); });
+}
+function startReanalyzePolling() {
+if (reanalyzePollingInterval) clearInterval(reanalyzePollingInterval);
+checkReanalyzeStatus();
+reanalyzePollingInterval = setInterval(checkReanalyzeStatus, 3000);
+setTimeout(function() { if (reanalyzePollingInterval) { clearInterval(reanalyzePollingInterval); reanalyzePollingInterval = null; } }, 300000);
+}
+async function checkReanalyzeStatus() {
+try {
+var response = await fetch(API + '/recruteur/reanalyze-status', { headers: authH() });
+if (!response.ok) { if (response.status === 404) { updateProgressWidget(0, 1, 0, "Analyse en cours..."); } return; }
+var data = await response.json();
+updateProgressWidget(data.processed || 0, data.total || 0, 0, data.in_progress ? "Analyse en cours..." : "Terminé");
+updateReanalyzeBadge(data);
+if (!data.in_progress && data.total > 0 && data.processed >= data.total) { if (reanalyzePollingInterval) { clearInterval(reanalyzePollingInterval); reanalyzePollingInterval = null; } showToast('✅ Réanalyse terminée: ' + data.processed + '/' + data.total + ' dossiers mis à jour', 'success'); fetchCandidats(); fetchStats(); }
+var statusEl = document.getElementById('reanalyze-status');
+if (statusEl) {
+if (data.in_progress) { statusEl.style.display = 'inline-block'; statusEl.textContent = '🔄 ' + data.processed + '/' + data.total; statusEl.style.background = 'rgba(255,255,255,0.3)'; } else if (data.total > 0) { statusEl.style.display = 'inline-block'; statusEl.textContent = '✅ ' + data.processed + '/' + data.total; statusEl.style.background = 'rgba(255,255,255,0.2)'; setTimeout(function() { statusEl.style.display = 'none'; }, 5000); } else { statusEl.style.display = 'none'; } }
+} catch (error) { console.error('Check reanalyze status error:', error); }
+}
+function updateProgressWidget(processed, total, errors, statusText) {
+var widget = document.getElementById('floating-progress');
+if (!widget) return;
+if (total > 0 && processed < total) {
+widget.classList.add('active');
+widget.classList.remove('completed');
+var progress = total > 0 ? Math.round((processed / total) * 100) : 0;
+var bar = document.getElementById('floating-progress-bar');
+bar.style.width = progress + '%';
+document.getElementById('floating-progress-title').textContent = '🔄 Réanalyse des postes actifs...';
+document.getElementById('floating-progress-count').textContent = processed + '/' + total + ' (' + progress + '%)';
+var detailText = 'Traitement: ' + processed + '/' + total;
+if (errors > 0) detailText += ' · ❌ ' + errors + ' erreur(s)';
+if (statusText) detailText += ' · ' + statusText;
+document.getElementById('floating-progress-detail').textContent = detailText;
+} else if (total > 0 && processed >= total) {
+widget.classList.add('completed');
+document.getElementById('floating-progress-title').textContent = '✅ Réanalyse terminée';
+document.getElementById('floating-progress-count').textContent = processed + '/' + total;
+document.getElementById('floating-progress-detail').textContent = 'Tous les dossiers des postes actifs sont à jour.';
+setTimeout(function() { widget.classList.remove('active'); }, 8000);
+} else if (total === 0) { widget.classList.remove('active'); }
+}
+function updateReanalyzeBadge(data) {
+var badge = document.getElementById('reanalyze-status-badge');
+if (!badge) return;
+if (data.in_progress) {
+badge.style.display = 'inline-block';
+var progress = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
+badge.textContent = '🔄 ' + progress + '%';
+badge.style.background = '#fef3cd';
+badge.style.color = '#856404';
+} else if (data.total > 0 && data.processed >= data.total) {
+badge.style.display = 'inline-block';
+badge.textContent = '✅ À jour';
+badge.style.background = '#d4edda';
+badge.style.color = '#155724';
+setTimeout(function() { badge.style.display = 'none'; }, 10000);
+} else { badge.style.display = 'none'; }
+}
+async function quickReanalyze(id) {
+var c = null;
+for (var i = 0; i < allCandidats.length; i++) { if (allCandidats[i].id === id) { c = allCandidats[i]; break; } }
+if (!c) return;
+if (!confirm('Relancer l\'analyse de ' + c.prenom + ' ' + c.nom + ' ?')) return;
+try {
+var res = await fetch(API + '/recruteur/reanalyze-one/' + id, { method: 'POST', headers: authH() });
+if (res.ok) { showToast('🔄 Analyse relancée', 'success'); setTimeout(fetchCandidats, 3000); } else { var data = await res.json().catch(function() { return {}; }); showToast(data.error || 'Erreur', 'error'); }
+} catch (e) { showToast('❌ Erreur: ' + e.message, 'error'); }
+}
+async function reanalyzeOne() {
+if (!currentC) return;
+if (!confirm('Relancer l\'analyse de cette candidature ?')) return;
+try {
+var res = await fetch(API + '/recruteur/reanalyze-one/' + currentC.id, { method: 'POST', headers: authH() });
+if (res.ok) { showToast('🔄 Analyse relancée', 'success'); setTimeout(function() { fetchCandidats(); var updated = null; for (var i = 0; i < allCandidats.length; i++) { if (allCandidats[i].id === currentC.id) { updated = allCandidats[i]; break; } } if (updated) { currentC = updated; renderAnalyseResume(updated); renderGrille(updated.poste, updated.checklist || '', updated.score_breakdown_parsed); } }, 3000); } else { var data = await res.json().catch(function() { return {}; }); showToast(data.error || 'Erreur', 'error'); }
+} catch (e) { showToast('❌ Erreur: ' + e.message, 'error'); }
+}
+function openEmailModal() { if (!currentC) { showToast('Aucun candidat sélectionné', 'error'); return; } buildEmail(); document.getElementById('modal-email').classList.add('open'); }
+function quickEmail(id) {
+var c = null;
+for (var i = 0; i < allCandidats.length; i++) { if (allCandidats[i].id === id) { c = allCandidats[i]; break; } }
+if (!c) return;
+currentC = c;
+buildEmail();
+document.getElementById('modal-email').classList.add('open');
+}
+function buildEmail() {
+if (!currentC) return;
+var type = document.getElementById('email-type').value;
+var nom = currentC.prenom + ' ' + currentC.nom;
+var pos = currentC.poste;
+document.getElementById('ep-to').textContent = nom + ' <' + currentC.email + '>';
+document.getElementById('ep-subject').textContent = emailSubject(type, pos);
+document.getElementById('ep-body').value = emailBody(type, nom, pos);
+}
+function emailSubject(type, poste) {
+var subjects = { 'retenu': 'Candidature retenue – ' + poste, 'entretien': 'Invitation à un entretien – ' + poste, 'rejete': 'Réponse à votre candidature – ' + poste, 'Shortlist': 'Présélection prioritaire – ' + poste, 'À considérer': 'Votre candidature – ' + poste, 'Faible': 'Réponse à votre candidature – ' + poste, 'Rejet': 'Réponse à votre candidature – ' + poste, '🥇 Entretien prioritaire': 'Entretien prioritaire – ' + poste, '🥈 Entretien si besoin (vivier)': 'Vivier de réserve – ' + poste, '🥈 Potentiel': 'Potentiel à évaluer – ' + poste, '❌ Rejet': 'Réponse à votre candidature – ' + poste };
+return subjects[type] || 'Réponse à votre candidature – ' + poste;
+}
+function emailBody(type, nom, poste) {
+var sign = '\n\nCordialement,\nL\'équipe Ressources Humaines\nRecrutBank';
+if (type === '🥇 Entretien prioritaire' || type === 'retenu' || type === 'Shortlist') { return 'Madame, Monsieur ' + nom + ',\n\nFélicitations ! Votre candidature pour le poste de ' + poste + ' a été retenue en priorité.\n\nVotre profil correspond parfaitement aux exigences du poste.\n\nNous vous contacterons dans les plus brefs délais pour convenir d\'un entretien.\n\nCordialement,' + sign; }
+if (type === '🥈 Entretien si besoin (vivier)' || type === '🥈 Potentiel' || type === 'entretien' || type === 'À considérer') { return 'Madame, Monsieur ' + nom + ',\n\nVotre candidature pour le poste de ' + poste + ' a retenu notre attention.\n\nVotre profil présente des atouts intéressants et nous souhaitons vous rencontrer.\n\nNous prendrons contact avec vous prochainement pour convenir d\'un entretien.\n\nCordialement,' + sign; }
+if (type === '❌ Rejet' || type === 'rejete' || type === 'Rejet' || type === 'Faible') { return 'Madame, Monsieur ' + nom + ',\n\nNous vous remercions de l\'intérêt que vous portez à notre institution pour le poste de ' + poste + '.\n\nAprès examen attentif de votre dossier, nous avons le regret de vous informer que votre candidature n\'a pas été retenue pour cette sélection.\n\nNous vous encourageons à postuler à nouveau pour toute opportunité future correspondant à votre profil.\n\nCordialement,' + sign; }
+return 'Madame, Monsieur ' + nom + ',\n\nNous vous remercions de votre candidature pour le poste de ' + poste + '.\n\nNous reviendrons vers vous prochainement.\n\nCordialement,' + sign;
+}
+function copyEmail() {
+var to = currentC ? currentC.email : '';
+var sub = document.getElementById('ep-subject').textContent;
+var bdy = document.getElementById('ep-body').value;
+navigator.clipboard.writeText('À: ' + to + '\nObjet: ' + sub + '\n\n' + bdy).then(function() { showToast('📋 Email copié', 'success'); }).catch(function() { document.getElementById('ep-body').select(); showToast('Sélectionnez le texte et Ctrl+C', 'info'); });
+}
+function openMailClient() {
+if (!currentC) return;
+var to = encodeURIComponent(currentC.email);
+var sub = encodeURIComponent(document.getElementById('ep-subject').textContent);
+var bdy = encodeURIComponent(document.getElementById('ep-body').value);
+window.open('mailto:' + to + '?subject=' + sub + '&body=' + bdy);
+}
+window.GRILLE = {};
+async function loadGrilles() {
+try {
+var res = await fetch(API + '/postes');
+var data = await res.json();
+var postes = Array.isArray(data) ? data : (data.postes || []);
+for (var i = 0; i < postes.length; i++) {
+try { var g = await fetch(API + '/grille/' + encodeURIComponent(postes[i]), { headers: authH() }); var grille = await g.json(); if (!grille.error) window.GRILLE[postes[i]] = grille; } catch (e) { console.warn('Grille non chargée pour', postes[i]); }
+}
+} catch (e) { console.warn('Erreur chargement grilles:', e); }
+}
+async function triggerAutoReanalyze() {
+try {
+var actifs = await fetchPostesActifs();
+if (actifs.length === 0) { console.log('📭 Aucun poste actif - réanalyse automatique ignorée'); return; }
+try {
+var statusRes = await fetch(API + '/recruteur/reanalyze-status', { headers: authH() });
+if (statusRes.ok) {
+var statusData = await statusRes.json();
+if (statusData.total === 0) { console.log('📭 Aucun candidat sur poste actif'); return; }
+var pending = statusData.status_counts && statusData.status_counts.pending ? statusData.status_counts.pending : 0;
+var total = statusData.total || 0;
+if (pending / total < 0.3) { console.log('✅ Déjà à jour - pas de réanalyse nécessaire'); return; }
+}
+} catch (e) { console.warn('Impossible de vérifier le statut, lancement de la réanalyse par précaution'); }
+var response = await fetch(API + '/recruteur/reanalyze-all', { method: 'POST', headers: authH() });
+var data = await response.json();
+if (data.reanalyzed_count !== undefined && data.reanalyzed_count > 0) { showToast('🔄 Réanalyse automatique lancée (' + data.reanalyzed_count + ' candidats)', 'info'); startReanalyzePolling(); }
+} catch (error) { console.error('Auto-reanalyse error:', error); }
+}
+async function init() {
+await loadGrilles();
+await fetchPostesActifs();
+await triggerAutoReanalyze();
+fetchStats();
+fetchCandidats();
+setInterval(function() { if (document.getElementById('floating-progress').classList.contains('active')) { checkReanalyzeStatus(); } }, 10000);
+}
+init();
+</script>
+</body>
+</html>
