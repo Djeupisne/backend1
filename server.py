@@ -2488,6 +2488,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         statut = get_statut_from_decision(decision, flags_elim)
         if score > score_max:
             score = score_max
+        sous_scores = result.get('sous_scores', {})
         details = result.get('details', {})
         details['points_forts'] = result.get('points_forts', [])
         details['points_vigilance'] = result.get('points_vigilance', [])
