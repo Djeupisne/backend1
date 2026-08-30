@@ -501,7 +501,8 @@ def extract_json_fallback(text):
     if re_json.search(r'\d+\s*(?:ans|annees).*?(?:progression|evolution|promotion|carriere|responsabilites.*?croissantes|trajectoire|ascension)', text, re_json.IGNORECASE):
         coherence = 2
     elif re_json.search(r'\d+\s*(?:ans|annees).*?experience|poste.*?responsable|poste.*?chef|séniorité|ancienneté', text, re_json.IGNORECASE):
-        coherence = 1    else:
+        coherence = 1   
+    else:
         blocks = split_into_jobs(text)
         short_jobs = 0
         for block in blocks:
