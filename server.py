@@ -144,6 +144,7 @@ _ZIP_JOBS = {}
 _ZIP_JOBS_LOCK = threading.Lock()
 _ZIP_JOBS_MAX_AGE_SECONDS = 3600
 _ZIP_MAX_WORKERS = int(os.getenv("ZIP_MAX_WORKERS", "25"))
+
 def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BASE_DELAY, max_delay=DOWNLOAD_MAX_DELAY):
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -172,6 +173,7 @@ def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BAS
             raise last_exception
         return wrapper
     return decorator
+
 def _get_spacy_model(lang='fr'):
     global _Nlp_fr, _Nlp_en
     if not SPACY_AVAILABLE:
@@ -193,6 +195,7 @@ def _get_spacy_model(lang='fr'):
             except OSError:
                 return None
         return _Nlp_en
+
 def test_ia_connection():
     if not IA_ANALYSE_ACTIVE or not _client:
         logger.warning("⚠️ IA non active, impossible de tester")
@@ -213,6 +216,7 @@ def test_ia_connection():
     except Exception as e:
         logger.error(f"❌ Erreur connexion {_PROVIDER}: {e}")
         return False
+
 def extract_json_from_text(text):
     import re as re_json
     if not text:
@@ -234,6 +238,7 @@ def extract_json_from_text(text):
                 except json.JSONDecodeError:
                     continue
     return None
+
 def parse_json_robust(result_text):
     import re as re_json
     if not result_text:
@@ -265,6 +270,7 @@ def parse_json_robust(result_text):
             else:
                 logger.error("❌ Aucun JSON trouve dans la reponse")
                 return None
+
 def detect_profils_metier(raw_text):
     import re as re_json
     chef_patterns = [
@@ -331,6 +337,190 @@ def detect_profils_metier(raw_text):
     has_cross_selling = any(re_json.search(p, raw_text, re_json.IGNORECASE) for p in cross_patterns)
     logger.info(f"🔍 Detection profils metier: ChefAgence={is_chef_agence}, GestionnairePortefeuille={is_gestionnaire_portefeuille}, PortfolioMgmt={has_portfolio_management}, LocalCorporate={has_local_corporate}, CrossSelling={has_cross_selling}")
     return (is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling)
+
+def detect_banking_experience_years(text):
+    """Détecte le nombre d'années d'expérience bancaire dans le texte"""
+    if not text:
+        return 0.0
+    
+    text_lower = text.lower()
+    logger.info(f"🔍 Recherche d'expérience bancaire dans le texte ({len(text)} caractères)")
+    
+    # 🔧 PATTERN 1: "plus de X ans" - le plus important pour le candidat
+    plus_patterns = [
+        r'(?:plus\s+de|plus\s+d\'|plus\s+d\'|au\s+moins|environ|presque)\s*(\d+[.,]?\d*)\s*(?:ans|annees?|years?)',
+        r'(\d+[.,]?\d*)\s*(?:ans|annees?|years?)\s*(?:d\'experience|d\'expérience|de\s+banque|bancaire|dans\s+la\s+banque|en\s+banque)',
+        r'(\d+[.,]?\d*)\s*(?:ans|annees?|years?)\s*(?:en\s+)?(?:banque|bancaire|finance|credit|crédit)',
+        r'(?:experience|expérience)\s+(?:bancaire|en\s+banque|dans\s+la\s+banque)\s*(?:de|:)?\s*(\d+[.,]?\d*)\s*(?:ans|annees?|years?)',
+        r'(\d+)[.,]?\d*\s*ans\s+d\'expérience\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+en\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+dans\s+la\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+de\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+d\'activité\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+en\s+finance\s+bancaire'
+    ]
+    
+    for pattern in plus_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                years = float(match.group(1).replace(',', '.'))
+                if 1 <= years <= 50:
+                    logger.info(f"✅ Détection expérience bancaire: {years} ans via pattern: {pattern}")
+                    return years
+            except (ValueError, IndexError):
+                pass
+    
+    # 🔧 PATTERN 2: Recherche de "X ans d'expérience" dans le contexte bancaire
+    exp_patterns = [
+        r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s+d\'expérience\s+(?:dans\s+la\s+banque|bancaire|en\s+banque)',
+        r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s+d\'expérience\s+professionnelle\s+(?:dans\s+la\s+banque|bancaire)',
+        r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s+de\s+banque',
+        r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s+dans\s+le\s+secteur\s+bancaire',
+        r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s+en\s+banque\s+et\s+finance'
+    ]
+    
+    for pattern in exp_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                years = float(match.group(1).replace(',', '.'))
+                if 1 <= years <= 50:
+                    logger.info(f"✅ Détection expérience bancaire: {years} ans via pattern: {pattern}")
+                    return years
+            except (ValueError, IndexError):
+                pass
+    
+    # 🔧 PATTERN 3: Détection dans les blocs de postes bancaires
+    blocks = split_into_jobs(text)
+    total_banking_years = 0.0
+    banking_block_count = 0
+    
+    for block in blocks:
+        if is_stage_block(block):
+            continue
+        
+        block_lower = block.lower()
+        is_banking = False
+        banking_keywords = [
+            'ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire',
+            'financial', 'credit', 'crédit', 'institution financiere',
+            'commercial bank', 'cbt', 'societe generale', 'bicec', 'sgbc',
+            'coris bank', 'finadev', 'microfinance', 'banque islamique',
+            'nsia banque', 'standard chartered', 'investment bank'
+        ]
+        
+        for kw in banking_keywords:
+            if kw in block_lower:
+                is_banking = True
+                break
+        
+        if is_banking:
+            banking_block_count += 1
+            duration = extract_duration_years_from_block(block)
+            if duration > 0:
+                total_banking_years += duration
+                logger.info(f"   - Bloc bancaire: {duration} ans")
+    
+    if total_banking_years > 0:
+        logger.info(f"✅ Détection expérience bancaire via dates: {total_banking_years} ans sur {banking_block_count} postes")
+        return total_banking_years
+    
+    # 🔧 PATTERN 4: Recherche des années dans le texte global
+    year_patterns = [
+        r'depuis\s+(19|20)\d{2}',
+        r'(19|20)\d{2}\s*(?:a|-|–|—)\s*(?:19|20)\d{2}',
+        r'(19|20)\d{2}\s*(?:à|a|au|jusqu\'au)\s*(?:19|20)\d{2}'
+    ]
+    
+    all_years = []
+    for pattern in year_patterns:
+        matches = re.findall(pattern, text)
+        if matches:
+            for match in matches:
+                if isinstance(match, tuple):
+                    for m in match:
+                        if m and len(str(m)) == 4 and str(m).isdigit():
+                            all_years.append(int(m))
+                elif isinstance(match, str) and len(match) == 4 and match.isdigit():
+                    all_years.append(int(match))
+    
+    if all_years:
+        all_years = sorted(set(all_years))
+        if len(all_years) >= 2:
+            diff = all_years[-1] - all_years[0]
+            if 1 <= diff <= 50:
+                if any(kw in text_lower for kw in ['banque', 'bank', 'bancaire', 'financial', 'ecobank', 'orabank', 'uba']):
+                    logger.info(f"✅ Détection expérience bancaire via années: {diff} ans")
+                    return float(diff)
+    
+    # 🔧 PATTERN 5: Recherche de "X ans" suivi de mots-clés bancaires
+    years_keywords = re.findall(r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s*[^\n.]*(?:banque|bancaire|bank|financial|credit|crédit)', text, re.IGNORECASE)
+    for match in years_keywords:
+        try:
+            years = float(match.replace(',', '.'))
+            if 1 <= years <= 50:
+                logger.info(f"✅ Détection expérience bancaire: {years} ans via mot-clé")
+                return years
+        except (ValueError, IndexError):
+            pass
+    
+    # 🔧 PATTERN 6: Fallback sur l'expérience totale mentionnée
+    total_exp_patterns = [
+        r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s+d\'expérience(?!\s+(?:en\s+)?(?:informatique|marketing|vente|commerciale|technique))',
+        r'(\d+)[.,]?\d*\s*(?:ans|annees?)\s+experience(?!\s+(?:en\s+)?(?:it|marketing|sales|technical))',
+        r'experience\s+(\d+)[.,]?\d*\s*(?:ans|annees?)'
+    ]
+    
+    for pattern in total_exp_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                years = float(match.group(1).replace(',', '.'))
+                if 1 <= years <= 50:
+                    # Vérifier si le texte mentionne la banque
+                    if any(kw in text_lower for kw in ['banque', 'bank', 'bancaire']):
+                        logger.info(f"✅ Détection expérience bancaire via expérience totale: {years} ans")
+                        return years
+            except (ValueError, IndexError):
+                pass
+    
+    logger.warning(f"⚠️ Aucune expérience bancaire détectée")
+    return 0.0
+
+def detect_banking_years_from_cv_text(cv_text, cv_filename=""):
+    """Version spéciale pour détecter les années d'expérience bancaire dans le CV"""
+    if not cv_text:
+        return 0.0
+    
+    # Nettoyer le texte
+    clean_text = re.sub(r'\s+', ' ', cv_text).strip()
+    
+    # Patterns spécifiques pour l'expérience bancaire
+    patterns = [
+        r'(?:plus\s+de|plus\s+d\')\s*(\d+)\s*(?:ans|annees?)\s+d\'expérience\s+dans\s+le\s+secteur\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+d\'expérience\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+d\'expérience\s+en\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+dans\s+la\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+de\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+d\'activité\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+en\s+finance\s+bancaire'
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, clean_text, re.IGNORECASE)
+        if match:
+            try:
+                years = float(match.group(1).replace(',', '.'))
+                if 1 <= years <= 50:
+                    logger.info(f"✅ Détection expérience bancaire dans CV: {years} ans")
+                    return years
+            except (ValueError, IndexError):
+                pass
+    
+    # Fallback: extraction des dates de postes bancaires
+    return detect_banking_experience_years(cv_text)
+
 def validate_chef_division_scores(sous_scores, is_chef_agence=False):
     max_scores = {
         "experience_corporate": 3,
@@ -366,6 +556,7 @@ def validate_chef_division_scores(sous_scores, is_chef_agence=False):
         if sous_scores.get(key, 0) < 0:
             sous_scores[key] = 0
     return sous_scores
+
 def normalize_scores_by_grille(sous_scores, poste):
     if poste == "Chef de Division Local Corporate":
         return validate_chef_division_scores(sous_scores, False)
@@ -399,18 +590,41 @@ def normalize_scores_by_grille(sous_scores, poste):
         else:
             sous_scores[key] = 0
     return sous_scores
+
 def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
     import re as re_json
     if not result:
         return result
+    
     poste = result.get('poste', '')
+    
+    # Construction robuste de raw_full
     raw_full = (cv_text or '') + "\n" + (lettre_text or '')
     if attestation_texts_list:
         raw_full += "\n" + "\n".join(attestation_texts_list)
+    
+    # 🔧 Détection des années d'expérience bancaire avec la fonction améliorée
+    banking_years = detect_banking_years_from_cv_text(cv_text)
+    logger.info(f"📊 Années d'expérience bancaire détectées: {banking_years}")
+    
     is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(raw_full)
     sous_scores = result.get('sous_scores', {})
     if not sous_scores:
         sous_scores = {}
+    
+    # 🔧 CORRECTION: Supprimer le flag "Moins de 5 ans" si l'expérience est >= 5 ans
+    flags_elim = result.get('flags_eliminatoires', [])
+    if flags_elim and banking_years >= 5:
+        new_flags = []
+        for flag in flags_elim:
+            # Supprimer les flags liés à l'expérience insuffisante
+            if "Moins de 5 ans" in flag or "5 ans" in flag and "experience" in flag.lower():
+                logger.info(f"🔧 Suppression du flag 'Moins de 5 ans' car {banking_years} ans d'expérience détectés")
+                continue
+            new_flags.append(flag)
+        flags_elim = new_flags
+        result['flags_eliminatoires'] = flags_elim
+    
     if poste == "Chef de Division Local Corporate":
         if is_chef_agence:
             if sous_scores.get("management", 0) < 2:
@@ -444,10 +658,12 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
         score_total = sous_scores.get("experience_corporate", 0) + sous_scores.get("management", 0) + sous_scores.get("risque_credit", 0) + sous_scores.get("cross_selling", 0) + sous_scores.get("coherence_parcours", 0) + sous_scores.get("qualite_cv", 0) + sous_scores.get("certification", 0)
     else:
         score_total = sum(sous_scores.values())
+    
     score_max = get_score_max_for_poste(poste)
     if score_total > score_max:
         score_total = score_max
-    flags_elim = result.get('flags_eliminatoires', [])
+    
+    # 🔧 Filtrage des flags avec les nouvelles règles
     new_flags = []
     if poste == "Chef de Division Local Corporate":
         for flag in flags_elim:
@@ -464,16 +680,23 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
                 if any(keyword in flag_lower for keyword in ['sme', 'pme', 'local corporate', 'corporate', 'portefeuille']):
                     logger.info(f"🔧 Suppression flag pour Local Corporate detecte: {flag}")
                     continue
+            # 🔧 Supprimer les flags d'expérience si l'expérience est suffisante
+            if banking_years >= 5 and ("moins de 5 ans" in flag_lower or "5 ans" in flag_lower):
+                logger.info(f"🔧 Suppression flag d'expérience insuffisante: {flag}")
+                continue
             if flag_lower and flag_lower.strip() and len(flag_lower) > 3:
                 new_flags.append(flag)
     else:
         new_flags = flags_elim
+    
     result['sous_scores'] = sous_scores
     result['score'] = score_total
     result['flags_eliminatoires'] = new_flags
+    
     if len(new_flags) == 0 and len(flags_elim) > 0:
         result['decision'] = get_recommandation_from_score(score_total, poste)
         logger.info(f"🔧 Tous les flags supprimes, decision recalculee: {result['decision']}")
+    
     if 'score_breakdown' in result:
         result['score_breakdown']['sous_scores'] = sous_scores
         result['score_breakdown']['score_final'] = score_total
@@ -484,37 +707,58 @@ def apply_business_rules(cv_text, lettre_text, attestation_texts_list, result):
         result['score_breakdown']['gestionnaire_portefeuille_detecte'] = is_gestionnaire_portefeuille or has_portfolio_management
         result['score_breakdown']['local_corporate_detecte'] = has_local_corporate
         result['score_breakdown']['cross_selling_detecte'] = has_cross_selling
+        result['score_breakdown']['banking_years_detecte'] = banking_years
         result['score_breakdown']['business_rules_appliquees'] = True
+    
     return result
+
 def extract_json_fallback(text):
     logger.info("🔧 Utilisation du fallback d'extraction JSON avec grille officielle")
     import re as re_json
+    
+    # 🔧 Détection améliorée des années d'expérience
+    banking_years = detect_banking_years_from_cv_text(text)
+    logger.info(f"📊 Fallback - Années d'expérience bancaire détectées: {banking_years}")
+    
     is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(text)
+    
     flags = []
     flag_patterns = [
         (r'Aucune experience.*?bancaire|pas d\'experience.*?bancaire|sans experience.*?bancaire', 'Aucune experience dans le secteur bancaire ou financier reglemente'),
-        (r'Moins de.*?ans.*?banque|experience.*?inferieure.*?ans|moins de 5 ans', 'Moins de 5 ans d\'experience professionnelle dans une banque ou institution financiere'),
         (r'Diplome.*?inferieur|niveau.*?diplome.*?insuffisant|pas de diplome', 'Niveau de diplome inferieur a Bac+4')
     ]
+    
     for pattern, default in flag_patterns:
         if re_json.search(pattern, text, re_json.IGNORECASE):
             flags.append(default)
+    
+    # 🔧 Flag "Moins de 5 ans" seulement si l'expérience détectée est < 5 ans
+    if banking_years < 5 and banking_years > 0:
+        flags.append(f"Moins de 5 ans d'experience bancaire ({banking_years} ans detectes - minimum 5 ans requis)")
+    elif banking_years == 0:
+        # Si on n'a pas détecté d'années, on cherche des indices
+        if not re_json.search(r'\d+\s*(?:ans|annees?).*?(?:banque|bancaire)', text, re_json.IGNORECASE):
+            flags.append("Aucune experience bancaire detectee - minimum 5 ans requis")
+    
     if not is_chef_agence:
         if not (is_gestionnaire_portefeuille or has_portfolio_management or has_local_corporate):
             flags.append("Aucune experience en gestion d'un portefeuille de clients SME/PME/Local Corporate")
+    
     if not is_chef_agence:
         management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe', 'pilotage', 'responsable', 'coordination', 'supervision', 'direction']
         management_count = sum(1 for kw in management_keywords if kw in text.lower())
         if management_count < 2:
             flags.append("Aucune experience manageriale : ni encadrement d'equipe, ni pilotage d'une activite commerciale")
+    
     if not (is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management):
         credit_keywords = ['credit', 'crédit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
         credit_count = sum(1 for kw in credit_keywords if kw in text.lower())
         if credit_count < 1:
             flags.append("Aucune exposition a la gestion du risque de credit ou au suivi de la qualite d'un portefeuille (NPL, provisions)")
+    
     points_forts = []
     if re_json.search(r'experience.*?bancaire|banque|bancaire', text, re_json.IGNORECASE):
-        points_forts.append("Experience bancaire detectee")
+        points_forts.append(f"Experience bancaire detectee ({banking_years} ans)" if banking_years > 0 else "Experience bancaire detectee")
     if re_json.search(r'management|manager|directeur|chef|superviseur|encadrement|supervision|leadership|chef d\'agence|directeur d\'agence', text, re_json.IGNORECASE):
         points_forts.append("Experience manageriale detectee")
     if re_json.search(r'credit|risque|npl|provision|portefeuille|creances douteuses|creances impayees|impayes|chef d\'agence|gestionnaire de portefeuille|gestionnaire de compte', text, re_json.IGNORECASE):
@@ -533,6 +777,7 @@ def extract_json_fallback(text):
         points_forts.append("✅ Experience Local Corporate/SME detectee")
     if has_cross_selling:
         points_forts.append("✅ Cross-selling / Cash Management / TSG detecte")
+    
     points_vigilance = []
     if re_json.search(r'manque|insuffisant|faible|limite|peu', text, re_json.IGNORECASE):
         points_vigilance.append("⚠️ Certains criteres ne sont pas satisfaits")
@@ -544,10 +789,11 @@ def extract_json_fallback(text):
         points_vigilance.append("⚠️ Absence d'experience en SME/Local Corporate")
     if re_json.search(r'back[- ]?office|sans experience commerciale|sans.*?business', text, re_json.IGNORECASE):
         points_vigilance.append("⚠️ Parcours back-office sans experience commerciale SME/Local Corporate")
-    banking_years = detect_banking_experience_years(text)
+    
     has_master = bool(re_json.search(r'master|mba|ingenieur|doctorat|phd|bac\+5|bac 5', text, re_json.IGNORECASE))
     has_bac4 = bool(re_json.search(r'bac\+4|bac 4|maitrise|licence professionnelle', text, re_json.IGNORECASE))
     has_bac3 = bool(re_json.search(r'bac\+3|bac 3|licence|bachelor', text, re_json.IGNORECASE))
+    
     corporate_exp = 0
     management = 0
     risque_credit = 0
@@ -555,6 +801,7 @@ def extract_json_fallback(text):
     coherence = 0
     qualite_cv = 0
     certification = 0
+    
     if is_chef_agence:
         corporate_exp = 3
         management = 3
@@ -570,6 +817,7 @@ def extract_json_fallback(text):
                 corporate_exp = 1
         else:
             corporate_exp = 0
+        
         management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe', 'pilotage', 'responsable', 'coordination', 'supervision', 'direction']
         management_count = sum(1 for kw in management_keywords if kw in text.lower())
         if management_count >= 3:
@@ -580,6 +828,7 @@ def extract_json_fallback(text):
             management = 1
         else:
             management = 0
+        
         credit_keywords = ['credit', 'crédit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
         credit_count = sum(1 for kw in credit_keywords if kw in text.lower())
         if is_gestionnaire_portefeuille or has_portfolio_management:
@@ -590,6 +839,7 @@ def extract_json_fallback(text):
             risque_credit = 1
         else:
             risque_credit = 0
+        
         if has_cross_selling:
             if re_json.search(r'cross[- ]?selling.*équipes.*tsg|cash management.*développement|trade finance.*partenariat|ventes croisées.*résultats', text, re_json.IGNORECASE):
                 cross_selling = 2
@@ -597,6 +847,7 @@ def extract_json_fallback(text):
                 cross_selling = 1
         else:
             cross_selling = 0
+        
         if re_json.search(r'\d+\s*(?:ans|annees).*?(?:progression|evolution|promotion|carriere|responsabilites.*?croissantes|trajectoire|ascension)', text, re_json.IGNORECASE):
             coherence = 2
         elif re_json.search(r'\d+\s*(?:ans|annees).*?experience|poste.*?responsable|poste.*?chef|séniorité|ancienneté', text, re_json.IGNORECASE):
@@ -611,12 +862,15 @@ def extract_json_fallback(text):
                         short_jobs += 1
             if short_jobs <= 1:
                 coherence = 1
+        
         has_quantified = bool(re_json.search(r'\d+\s*%|\d+\s*dossiers|\d+\s*rapports|\d+\s*millions|\d+\s*clients|chiffres|resultats|objectifs.*?atteints|performance|indicateurs', text, re_json.IGNORECASE))
         has_precision = bool(re_json.search(r'(?:responsable|chargé|gestion|pilotage|supervision|encadrement|développement|acquisition|fidélisation).*?(?:de|des|du|d\')', text, re_json.IGNORECASE))
         if has_quantified and has_precision:
             qualite_cv = 1
+        
         if re_json.search(r'itb|moody|ecobank.*?certification|certification.*?bancaire|cemac|uemoa|tchad|frankfurt school|financement des pme|institut technique de banque|market.*knowledge|connaissance.*marché', text, re_json.IGNORECASE):
             certification = 1
+    
     sous_scores = {
         "experience_corporate": corporate_exp,
         "management": management,
@@ -626,9 +880,11 @@ def extract_json_fallback(text):
         "qualite_cv": qualite_cv,
         "certification": certification
     }
+    
     sous_scores = validate_chef_division_scores(sous_scores, is_chef_agence)
     score_total = sous_scores.get("experience_corporate", 0) + sous_scores.get("management", 0) + sous_scores.get("risque_credit", 0) + sous_scores.get("cross_selling", 0) + sous_scores.get("coherence_parcours", 0) + sous_scores.get("qualite_cv", 0) + sous_scores.get("certification", 0)
     score_total = min(14, score_total)
+    
     synthese = "Analyse automatique: "
     if points_forts:
         synthese += "Points forts: " + ", ".join(points_forts) + ". "
@@ -641,6 +897,7 @@ def extract_json_fallback(text):
         synthese += text[:300] + "..."
     else:
         synthese += "Analyse du CV complete."
+    
     return {
         'flags_eliminatoires': flags,
         'points_forts': points_forts,
@@ -648,6 +905,7 @@ def extract_json_fallback(text):
         'score_total': score_total,
         'synthese_recruteur': synthese,
         'sous_scores': sous_scores,
+        'banking_years_detecte': banking_years,
         'checklist': {
             'experience_corporate': sous_scores['experience_corporate'] >= 2,
             'management_detecte': sous_scores['management'] >= 2,
@@ -658,9 +916,11 @@ def extract_json_fallback(text):
             'certification_ok': sous_scores['certification'] == 1
         }
     }
+
 app = Flask(__name__)
 ALLOWED_ORIGINS = ["https://recrutment.onrender.com", "https://backend1-fiq5.onrender.com", "http://localhost:5000", "http://localhost:3000"]
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS, "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"], "supports_credentials": True, "max_age": 600}})
+
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
@@ -669,12 +929,13 @@ def after_request(response):
     if request.method == 'OPTIONS':
         response.status_code = 204
     return response
+
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API is running with {_PROVIDER}',
-        'version': 'v9.9-business-rules-v2',
+        'version': 'v10.0-ia-strict-analyser',
         'features': {
             'pdf_available': PDFPLUMBER_AVAILABLE,
             'docx_available': DOCX_AVAILABLE,
@@ -721,9 +982,13 @@ def health_check():
             'poste_passe_aux_business_rules': True,
             'chef_agence_exemption': True,
             'gestionnaire_portefeuille_exemption': True,
-            'business_rules_v2': True
+            'business_rules_v2': True,
+            'banking_years_detection_amelioree': True,
+            'ia_analyse_stricte': True,
+            'version': 'v10.0-ia-strict-analyser'
         }
     }), 200
+
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
@@ -739,8 +1004,10 @@ app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupis
 app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     if not supabase:
         return None
@@ -751,6 +1018,7 @@ def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     except Exception as e:
         logger.error(f"Upload error: {e}")
         return None
+
 @retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES)
 def download_file_from_supabase_robust(blob_name):
     if not supabase:
@@ -762,6 +1030,7 @@ def download_file_from_supabase_robust(blob_name):
         except Exception as e:
             logger.error(f"Erreur telechargement {blob_name}: {e}")
             raise
+
 def download_file_from_supabase(blob_name):
     if not supabase:
         return None
@@ -775,6 +1044,7 @@ def download_file_from_supabase(blob_name):
             return download_file_from_supabase_robust(blob_name)
         logger.error(f"Download error: {e}")
         return None
+
 def get_signed_url(blob_name, expiration_minutes=60):
     if not supabase:
         return None
@@ -784,6 +1054,7 @@ def get_signed_url(blob_name, expiration_minutes=60):
     except Exception as e:
         logger.error(f"Signed URL error: {e}")
         return None
+
 def send_email(to_email, subject, body):
     import requests
     import re as _re
@@ -803,8 +1074,10 @@ def send_email(to_email, subject, body):
         return response.status_code == 201
     except Exception:
         return False
+
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
+
 def normalize_spaces(text):
     if not text:
         return ""
@@ -815,6 +1088,7 @@ def normalize_spaces(text):
     for wrong, correct in bank_corrections.items():
         text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
     return text.strip()
+
 def normalize_unicode(text):
     if not text:
         return ""
@@ -822,6 +1096,7 @@ def normalize_unicode(text):
     text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
     text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
     return text.strip()
+
 def normalize_for_matching(text):
     if not text:
         return "", []
@@ -831,6 +1106,7 @@ def normalize_for_matching(text):
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     tokens = [t for t in re.findall(r'\b[a-z0-9\-/\.]{2,}\b', cleaned) if len(t) >= 2]
     return cleaned, tokens
+
 def contains_negative_context(text, keyword):
     if not text or not keyword:
         return False
@@ -847,6 +1123,7 @@ def contains_negative_context(text, keyword):
             if re.search(pattern, context, re.IGNORECASE):
                 return True
     return False
+
 def extract_text_from_pdf_via_ocr(file_bytes):
     if not OCR_AVAILABLE:
         return ""
@@ -867,9 +1144,11 @@ def extract_text_from_pdf_via_ocr(file_bytes):
         return ""
     except Exception:
         return ""
+
 MAX_PDF_PAGES = 10
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
 MAX_TEXT_SIZE = 15000
+
 def extract_text_from_pdf_robust(file_bytes, filename):
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
         logger.warning(f"PDF trop volumineux ({len(file_bytes) / 1024 / 1024:.1f} MB > 10 MB): {filename}")
@@ -944,6 +1223,7 @@ def extract_text_from_pdf_robust(file_bytes, filename):
         except Exception as e:
             logger.warning(f"Extraction brute echouee: {e}")
     return text.strip() if text.strip() else ""
+
 def extract_text_from_docx_robust(file_bytes):
     if not DOCX_AVAILABLE:
         return ""
@@ -989,6 +1269,7 @@ def extract_text_from_docx_robust(file_bytes):
     except Exception:
         pass
     return ""
+
 def extract_text_from_txt(file_bytes):
     if CHARDET_AVAILABLE:
         try:
@@ -1009,6 +1290,7 @@ def extract_text_from_txt(file_bytes):
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
+
 def extract_text_robust_from_bytes(file_bytes, filename):
     if not file_bytes:
         return ""
@@ -1041,6 +1323,7 @@ def extract_text_robust_from_bytes(file_bytes, filename):
     if len(text.strip()) < 30:
         logger.warning(f"Extraction faible pour {filename}: {len(text)} caracteres")
     return text.strip() if text.strip() else ""
+
 def init_recruteur():
     try:
         if supabase:
@@ -1053,8 +1336,10 @@ init_recruteur()
 POSTES = ["Responsable Administration de Credit", "Analyste Credit CCB", "Archiviste (Administration Credit)", "Senior Finance Officer", "Market Risk Officer", "IT Reseau & Infrastructure", "Auditeur interne", "Chef service controle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marche", "Chef service reporting reglementaire", "Chef de Section Compensation", "Charge(e) d'Administration de Credit", "Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_ACTIFS = ["Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
+
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
+
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": [
@@ -1177,6 +1462,7 @@ for poste in ["Auditeur interne", "Chef service controle des engagements", "Chef
 POSTES_AVEC_SCORING_100 = ["Auditeur interne", "Chef service controle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marche", "Chef service reporting reglementaire"]
 POSTES_AVEC_SCORING_12 = ["Chef de Section Compensation", "Charge(e) d'Administration de Credit"]
 POSTES_AVEC_SCORING_14 = ["Chef de Division Local Corporate", "Data Analyst Finance"]
+
 def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_12:
         return 12
@@ -1185,6 +1471,7 @@ def get_score_max_for_poste(poste):
     if poste in POSTES_AVEC_SCORING_100:
         return 100
     return 10
+
 def get_recommandation_from_score(score, poste=None):
     s = int(score)
     if poste == "Chef de Division Local Corporate":
@@ -1223,6 +1510,7 @@ def get_recommandation_from_score(score, poste=None):
         return "Potentiel a evaluer en entretien"
     else:
         return "Rejet"
+
 def get_statut_from_decision(decision, flags_elim=None):
     if flags_elim and len(flags_elim) > 0:
         return "rejete"
@@ -1234,6 +1522,7 @@ def get_statut_from_decision(decision, flags_elim=None):
         return "entretien"
     else:
         return "rejete"
+
 def split_into_jobs(raw_text):
     if not raw_text:
         return []
@@ -1261,8 +1550,10 @@ def split_into_jobs(raw_text):
     return blocks
 STAGE_MARKERS = [r'\bstage\b', r'\bstagiaire\b', r'\binternship\b', r'\bintern\b', r'\bapprenti\b', r'\bapprentissage\b', r'\balternance\b', r'\bstage de fin\b', r'\bstage academique\b', r'\bstage professionnel\b', r'\bstage de formation\b', r'\bpfr\b', r'\bstage pfe\b', r'\bpfe\b', r'\bvolontariat\b', r'\btrainee\b']
 STAGE_PATTERN = re.compile('|'.join(STAGE_MARKERS), re.IGNORECASE)
+
 def is_stage_block(block_text):
     return bool(STAGE_PATTERN.search(block_text))
+
 def extract_duration_years_from_block(block_text):
     years = 0.0
     text = block_text.lower()
@@ -1380,6 +1671,7 @@ def extract_duration_years_from_block(block_text):
         except (ValueError, IndexError):
             pass
     return 0.0
+
 def detect_institution_type(text):
     text_lower = text.lower()
     commercial_banks = [
@@ -1396,6 +1688,7 @@ def detect_institution_type(text):
     if commercial_pattern.search(text_lower):
         return 'commercial_bank'
     return 'unknown'
+
 def detect_language(text):
     if not LANGDETECT_AVAILABLE or not text or len(text.strip()) < 50:
         return 'fr'
@@ -1404,6 +1697,7 @@ def detect_language(text):
         return 'en' if lang == 'en' else 'fr'
     except Exception:
         return 'fr'
+
 def extract_quantified_results(text):
     patterns = [
         r'(\d+)\s*(?:%|pourcent|percent)\s*(?:d\'|de\s+)?(augmentation|croissance|reduction|hausse|baisse)',
@@ -1421,46 +1715,32 @@ def extract_quantified_results(text):
         if matches:
             results.extend(matches)
     return results
-def detect_banking_experience_years(text):
-    if not text:
+
+def detect_banking_years_from_cv_text(cv_text, cv_filename=""):
+    if not cv_text:
         return 0.0
-    text_lower = text.lower()
-    years = re.findall(r'\b(19|20)\d{2}\b', text)
-    if years:
-        years_int = sorted([int(y) for y in years])
-        total_years = years_int[-1] - years_int[0]
-        if total_years > 0 and total_years < 50:
-            bank_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere', 'local corporate', 'sme', 'pme']
-            for kw in bank_keywords:
-                if kw in text_lower:
-                    return total_years
-    match = re.search(r'(\d+)\s*(?:ans|annees?)\s*(?:d[ée]?experience\s+)?(?:dans\s+la\s+banque|en\s+banque|bancaire|de\s+banque|local corporate|sme|pme)', text, re.IGNORECASE)
-    if match:
-        return float(match.group(1))
-    match = re.search(r'depuis\s+(19|20)\d{2}', text, re.IGNORECASE)
-    if match:
-        start_year = int(match.group(1))
-        current_year = datetime.datetime.now().year
-        return current_year - start_year
-    blocks = split_into_jobs(text)
-    total_years = 0.0
-    for block in blocks:
-        if is_stage_block(block):
-            continue
-        block_lower = block.lower()
-        is_banking = False
-        banking_keywords = ['ecobank', 'orabank', 'uba', 'banque', 'bank', 'bancaire', 'financial', 'credit', 'crédit', 'institution financiere', 'local corporate', 'sme', 'pme']
-        for kw in banking_keywords:
-            if kw in block_lower:
-                is_banking = True
-                break
-        if is_banking:
-            duration = extract_duration_years_from_block(block)
-            if duration > 0:
-                total_years += duration
-    if total_years > 0:
-        return total_years
-    return 0.0
+    clean_text = re.sub(r'\s+', ' ', cv_text).strip()
+    patterns = [
+        r'(?:plus\s+de|plus\s+d\')\s*(\d+)\s*(?:ans|annees?)\s+d\'expérience\s+dans\s+le\s+secteur\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+d\'expérience\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+d\'expérience\s+en\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+dans\s+la\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+de\s+banque',
+        r'(\d+)\s*(?:ans|annees?)\s+d\'activité\s+bancaire',
+        r'(\d+)\s*(?:ans|annees?)\s+en\s+finance\s+bancaire'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, clean_text, re.IGNORECASE)
+        if match:
+            try:
+                years = float(match.group(1).replace(',', '.'))
+                if 1 <= years <= 50:
+                    logger.info(f"✅ Détection expérience bancaire dans CV: {years} ans")
+                    return years
+            except (ValueError, IndexError):
+                pass
+    return detect_banking_experience_years(cv_text)
+
 def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="", poste=None, lang='fr'):
     keywords = KEYWORD_MAPPING.get(criterion, [])
     if not keywords:
@@ -1507,38 +1787,52 @@ def check_criterion_match_semantic(criterion, normalized_text, raw_full_text="",
                             best_score = max(best_score, 0.75)
     threshold = 0.45 if len(normalized_text) < 500 else 0.55
     return best_score >= threshold, round(best_score, 2), found_kws
+
 def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_texts_list):
     poste = "Chef de Division Local Corporate"
     all_att = "\n".join(attestation_texts_list) if attestation_texts_list else ""
     raw_full = cv_text + "\n" + (lettre_text or "") + "\n" + all_att
+    
     is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(raw_full)
-    banking_years = detect_banking_experience_years(raw_full)
+    
+    # 🔧 Utiliser la fonction améliorée pour détecter les années d'expérience
+    banking_years = detect_banking_years_from_cv_text(cv_text)
+    logger.info(f"📊 calculate_score_chef_division_corporate - Années d'expérience bancaire: {banking_years}")
+    
     flags_elim = []
     if banking_years < 1:
         flags_elim.append("Aucune experience dans le secteur bancaire ou financier reglemente")
-    if banking_years < 5:
-        flags_elim.append("Moins de 5 ans d'experience professionnelle, dont une partie significative en banque")
+    elif banking_years < 5:
+        flags_elim.append(f"Moins de 5 ans d'experience bancaire ({banking_years} ans detectes - minimum 5 ans requis)")
+    else:
+        logger.info(f"✅ Expérience bancaire suffisante: {banking_years} ans")
+    
     has_master = bool(re.search(r'master|mba|ingenieur|doctorat|phd|bac\+5|bac 5', cv_text, re.IGNORECASE))
     has_bac4 = bool(re.search(r'bac\+4|bac 4|maitrise|licence professionnelle', cv_text, re.IGNORECASE))
     has_bac3 = bool(re.search(r'bac\+3|bac 3|licence|bachelor', cv_text, re.IGNORECASE))
+    
     if not (has_master or has_bac4):
         if has_bac3 and banking_years >= 10:
             pass
         else:
             flags_elim.append("Niveau de diplome inferieur a Bac +4 (Master ou equivalent requis)")
+    
     if not is_chef_agence:
         if not (is_gestionnaire_portefeuille or has_portfolio_management or has_local_corporate):
             flags_elim.append("Aucune experience en gestion d'un portefeuille de clients SME/PME/local corporate ou d'entreprises")
+    
     if not is_chef_agence:
         management_keywords = ['manager', 'directeur', 'chef', 'superviseur', 'encadrement', 'management', 'leadership', 'gestion d\'equipe', 'pilotage', 'responsable', 'coordination', 'supervision', 'direction']
         management_count = sum(1 for kw in management_keywords if kw in cv_text.lower())
         if management_count < 2:
             flags_elim.append("Aucune experience manageriale : ni encadrement d'equipe, ni pilotage d'une activite commerciale")
+    
     if not (is_chef_agence or is_gestionnaire_portefeuille or has_portfolio_management):
         credit_keywords = ['credit', 'crédit', 'risque', 'risk', 'npl', 'provision', 'portefeuille', 'garantie', 'impaye', 'creances douteuses', 'creances impayees', 'non performing', 'cir', 'cout du risque']
         credit_count = sum(1 for kw in credit_keywords if kw in cv_text.lower())
         if credit_count < 1:
             flags_elim.append("Aucune exposition a la gestion du risque de credit ou au suivi de la qualite d'un portefeuille (NPL, provisions)")
+    
     sous_scores = {}
     if is_chef_agence:
         sous_scores["experience_corporate"] = 3
@@ -1615,9 +1909,11 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         if re.search(r'itb|moody|ecobank.*?certification|certification.*?bancaire|cemac|uemoa|tchad|frankfurt school|financement des pme|institut technique de banque|market.*knowledge|connaissance.*marché', cv_text, re.IGNORECASE):
             certification = 1
         sous_scores["certification"] = certification
+    
     sous_scores = validate_chef_division_scores(sous_scores, is_chef_agence)
     score = sous_scores.get("experience_corporate", 0) + sous_scores.get("management", 0) + sous_scores.get("risque_credit", 0) + sous_scores.get("cross_selling", 0) + sous_scores.get("coherence_parcours", 0) + sous_scores.get("qualite_cv", 0) + sous_scores.get("certification", 0)
     score = min(14, score)
+    
     if flags_elim:
         decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
     elif score >= 11:
@@ -1626,6 +1922,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         decision = "Potentiel a evaluer en entretien"
     else:
         decision = "Rejet"
+    
     points_forts = []
     points_vigilance = []
     if sous_scores["experience_corporate"] >= 2:
@@ -1670,6 +1967,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         points_forts.append("✅ Experience Local Corporate/SME detectee")
     if has_cross_selling:
         points_forts.append("✅ Cross-selling / Cash Management / TSG detecte")
+    
     synthese = f"Candidat avec un score de {score}/14. "
     if flags_elim:
         synthese = f"❌ REJET IMMEDIAT - {len(flags_elim)} critere(s) eliminatoire(s) non satisfait(s): " + ", ".join(flags_elim) + f". Score conserve: {score}/14. "
@@ -1679,6 +1977,7 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
         synthese += "Profil interessant avec un bon potentiel. Certains points sont a approfondir en entretien."
     else:
         synthese += "Profil ne correspond pas aux exigences du poste."
+    
     result = {
         'poste': poste,
         'score': score,
@@ -1708,15 +2007,19 @@ def calculate_score_chef_division_corporate(cv_text, lettre_text, attestation_te
             'gestionnaire_portefeuille_detecte': is_gestionnaire_portefeuille or has_portfolio_management,
             'local_corporate_detecte': has_local_corporate,
             'cross_selling_detecte': has_cross_selling,
+            'banking_years_detecte': banking_years,
             'eliminatoires_passes': len(flags_elim) == 0,
             'nb_eliminatoires': len(flags_elim),
-            'business_rules_appliquees': True
+            'business_rules_appliquees': True,
+            'version': 'v10.0-ia-strict-analyser'
         }
     }
     return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
+
 def analyze_cv_with_ia_reasoning(cv_text, lettre_text, attestation_texts_list, poste):
     if not IA_ANALYSE_ACTIVE or not _client or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
         return None
+    
     grille = GRILLE.get(poste, {})
     scoring_grille = """
 GRILLE DE SCORING OFFICIELLE (MAX 14) :
@@ -1749,9 +2052,10 @@ GRILLE DE SCORING OFFICIELLE (MAX 14) :
 - 1/1 : Certification (ITB, Moody's, Ecobank) ou connaissance CEMAC/UEMOA
 - 0/1 : Aucune certification ni connaissance du marche
 """
+    
     system_prompt = f"""Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA). Tu as travaille pour Ecobank, UBA, Orabank et connais parfaitement le metier de Chef de Division Local Corporate.
 
-REGLE ABSOLUE D'ANALYSE : Tu DOIS comprendre le SENS des phrases et le CONTEXTE METIER. Tu ne te bases pas uniquement sur des mots-cles, tu analyses la logique du parcours professionnel.
+⚠️ REGLE ABSOLUE D'ANALYSE : Tu DOIS comprendre le SENS des phrases et le CONTEXTE METIER. Tu ne te bases pas uniquement sur des mots-cles, tu analyses la logique du parcours professionnel.
 
 🏦 CONTEXTE METIER BANCAIRE AFRICAIN :
 Un CHEF DE DIVISION LOCAL CORPORATE dans une banque en zone CEMAC/UEMOA pilote une ligne d'activite dediee aux PME, Grandes Entreprises et Institutionnels. Il gere un portefeuille de clients avec des objectifs de revenus, volumes et marges. Il encadre une equipe de commerciaux et/ou d'analystes (3 a 10 personnes). Il assure le suivi de la qualite du portefeuille (NPL, CIR, provisions). Il developpe des synergies cross-selling avec les metiers (TSG, Cash Management, Trade Finance).
@@ -1759,13 +2063,17 @@ Un CHEF DE DIVISION LOCAL CORPORATE dans une banque en zone CEMAC/UEMOA pilote u
 🔴 REGLES METIER ABSOLUES (NON NEGOCIABLES) :
 
 1. CHEF D'AGENCE / DIRECTEUR D'AGENCE / BRANCH MANAGER :
-   - Dans la pratique bancaire, un Chef d'agence gere OBLIGATOIREMENT une equipe de 3 a 10 personnes. Il est responsable du portefeuille commercial de l'agence (PME, Local Corporate). Il est le premier responsable des relances clients, creances douteuses (NPL) et provisions.
+   - Dans la pratique bancaire, un Chef d'agence gere OBLIGATOIREMENT une equipe de 3 a 10 personnes
+   - Il est responsable du portefeuille commercial de l'agence (PME, Local Corporate)
+   - Il est le premier responsable des relances clients, creances douteuses (NPL) et provisions
    → VALIDE AUTOMATIQUEMENT : management, portefeuille commercial, risque de credit
    → Ne peut PAS etre rejete sur ces criteres
    → Score minimum garanti : management=3/3, experience_corporate=3/3, risque_credit=2/2
 
-2. GESTIONNAIRE DE PORTEFEUILLE / RELATIONSHIP MANAGER / CHARGE D'AFFAIRES / GESTIONNAIRE DE COMPTE (SME, Corporate, Grandes Entreprises) :
-   - Est le premier agent de recouvrement de la banque. Si un client est en impaye, c'est LUI qui gere la relance. Est directement expose au risque de credit et a la gestion des NPL.
+2. GESTIONNAIRE DE PORTEFEUILLE / RELATIONSHIP MANAGER / CHARGE D'AFFAIRES :
+   - Est le premier agent de recouvrement de la banque
+   - Si un client est en impaye, c'est LUI qui gere la relance
+   - Est directement expose au risque de credit et a la gestion des NPL
    → VALIDE AUTOMATIQUEMENT : exposition au risque de credit et gestion de portefeuille
    → Score minimum garanti : risque_credit=2/2, experience_corporate=2/3
 
@@ -1822,8 +2130,10 @@ Le JSON doit contenir:
 }}
 }}
 NE METS PAS de texte avant ou apres le JSON. Reponds UNIQUEMENT avec le JSON."""
+    
     def fmt_list(items):
         return "\n".join(f"  {i+1}. {c}" for i, c in enumerate(items)) if items else "  (aucun)"
+    
     user_message = f"""POSTE : {poste}
 === GRILLE D'EVALUATION ===
 CRITERES ELIMINATOIRES (rejet immediat si non valide) :
@@ -1851,6 +2161,7 @@ ATTESTATIONS/CERTIFICATS :
 7. Identifie les FORCES et FAIBLESSES du profil.
 8. Produis une SYNTHESE claire et actionable pour le recruteur.
 9. Utilise le format JSON attendu avec les sous-scores."""
+    
     try:
         with _ia_semaphore:
             api_params = {
@@ -1913,6 +2224,8 @@ ATTESTATIONS/CERTIFICATS :
             if score_total > score_max:
                 score_total = score_max
             is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(cv_text)
+            banking_years = detect_banking_years_from_cv_text(cv_text)
+            logger.info(f"📊 IA - Années d'expérience bancaire détectées: {banking_years}")
             decision = get_recommandation_from_score(score_total, poste)
             if flags_elim:
                 decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
@@ -1954,14 +2267,17 @@ ATTESTATIONS/CERTIFICATS :
                     'gestionnaire_portefeuille_detecte': is_gestionnaire_portefeuille or has_portfolio_management,
                     'local_corporate_detecte': has_local_corporate,
                     'cross_selling_detecte': has_cross_selling,
+                    'banking_years_detecte': banking_years,
                     'score_calcule': 'somme_des_sous_scores_ia',
-                    'business_rules_appliquees': True
+                    'business_rules_appliquees': True,
+                    'version': 'v10.0-ia-strict-analyser'
                 }
             }
             return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
     except Exception as e:
         logger.error(f"❌ Erreur analyse {_PROVIDER}: {e}")
         return None
+
 def analyze_cv_intelligent(cv_text, lettre_text, attestation_texts_list, poste):
     if not IA_ANALYSE_ACTIVE or not cv_text or len(cv_text.strip()) < 50 or poste not in GRILLE:
         return None
@@ -2023,17 +2339,19 @@ Attestations : {''.join(attestation_texts_list)[:3000] if attestation_texts_list
                 flags_elim.append(f"Lettre: {lm.get('commentaire', 'eliminatoire')}")
             sous_scores = analyse.get('sous_scores', {})
             is_chef_agence, is_gestionnaire_portefeuille, has_portfolio_management, has_local_corporate, has_cross_selling = detect_profils_metier(cv_text)
+            banking_years = detect_banking_years_from_cv_text(cv_text)
             sous_scores = validate_chef_division_scores(sous_scores, is_chef_agence)
             score_total = int(analyse.get('score_total', sum(sous_scores.values())))
             decision = get_recommandation_from_score(score_total, poste)
             if flags_elim:
                 decision = "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
             score_max = get_score_max_for_poste(poste)
-            result = {'poste': poste, 'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'sous_scores': sous_scores, 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': sous_scores, 'score_final': score_total, 'score_max': score_max, 'decision': decision, 'chef_agence_detecte': is_chef_agence, 'gestionnaire_portefeuille_detecte': is_gestionnaire_portefeuille or has_portfolio_management, 'local_corporate_detecte': has_local_corporate, 'cross_selling_detecte': has_cross_selling, 'business_rules_appliquees': True}}
+            result = {'poste': poste, 'score': score_total, 'score_max': score_max, 'checklist': {}, 'flags_eliminatoires': flags_elim, 'signaux_detectes': [s['critere'] for s in analyse.get('signaux_forts', []) if s.get('detecte')], 'sous_scores': sous_scores, 'details': {'moteur': f'IA ({_PROVIDER})', 'points_forts': analyse.get('points_forts', []), 'points_vigilance': analyse.get('points_vigilance', []), 'synthese_recruteur': analyse.get('synthese_recruteur', '')}, 'score_breakdown': {'bloc1_eliminatoire': bool(flags_elim), 'moteur_analyse': 'ia', 'sous_scores': sous_scores, 'score_final': score_total, 'score_max': score_max, 'decision': decision, 'chef_agence_detecte': is_chef_agence, 'gestionnaire_portefeuille_detecte': is_gestionnaire_portefeuille or has_portfolio_management, 'local_corporate_detecte': has_local_corporate, 'cross_selling_detecte': has_cross_selling, 'banking_years_detecte': banking_years, 'business_rules_appliquees': True}}
             return apply_business_rules(cv_text, lettre_text, attestation_texts_list, result)
     except Exception as e:
         logger.error(f"IA analyse erreur: {e}")
         return None
+
 def get_display_status(c):
     statut = c.get('statut', 'en_attente')
     if statut == "rejete":
@@ -2054,6 +2372,7 @@ def get_display_status(c):
         else:
             return "rejete"
     return 'en_attente'
+
 def generate_detailed_reason(candidat, poste, score, score_max):
     statut = candidat.get('statut', 'en_attente')
     details = candidat.get('analyse_details_parsed', {})
@@ -2158,6 +2477,7 @@ def generate_detailed_reason(candidat, poste, score, score_max):
             if not weaknesses and not flags:
                 lines.append("  • Profil ne correspond pas aux exigences du poste")
             return "\n".join(lines)
+
 def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     if not OPENPYXL_AVAILABLE:
         return None
@@ -2327,6 +2647,7 @@ def generate_excel_report_enhanced(candidats_data, poste_filter=None):
     wb.save(buf)
     buf.seek(0)
     return buf
+
 def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
     if not REPORTLAB_AVAILABLE:
         return None
@@ -2406,6 +2727,7 @@ def generate_pdf_report_enhanced(candidats_data, poste_filter=None):
     doc.build(els)
     buf.seek(0)
     return buf
+
 def generate_csv_report(candidats_data, poste_filter=None):
     out = io.StringIO()
     w = csv.writer(out, delimiter=';', quoting=csv.QUOTE_ALL, quotechar='"')
@@ -2433,6 +2755,7 @@ def generate_csv_report(candidats_data, poste_filter=None):
         w.writerow([str(idx), str(c.get('numero_dossier', '') or '–'), str(c.get('email', '') or '–'), str(c.get('nom', '') or ''), str(c.get('prenom', '') or ''), str(c.get('telephone', '') or '–'), str(poste or ''), str(c.get('date_candidature', '') or ''), str(c.get('score', '0')), statut, decision, f"{corporate_exp}/3", f"{management}/3", f"{risque_credit}/2", f"{cross_selling}/2", motif.replace('\n', ' | ')])
     out.seek(0)
     return out.getvalue()
+
 def generate_word_report(candidats_data, poste_filter=None):
     if not DOCX_AVAILABLE:
         return None
@@ -2517,12 +2840,14 @@ def generate_word_report(candidats_data, poste_filter=None):
     doc.save(buf)
     buf.seek(0)
     return buf
+
 def _save_error(token, error_message, statut="rejete"):
     if supabase:
         try:
             supabase.table('candidats').update({"score": "0", "decision": f"Rejet - {error_message}", "statut": statut, "analyse_status": "error", "analyse_error": error_message, "analyse_auto_date": datetime.datetime.now().isoformat(), "analyse_details": json.dumps({"erreur": error_message, "moteur": "verification_cv"}, ensure_ascii=False)}).eq('token', token).execute()
         except Exception as e:
             logger.error(f"Erreur sauvegarde: {e}")
+
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
         if not force and not is_poste_actif(poste):
@@ -2634,7 +2959,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             'moteur_analyse': details['moteur'],
             'sous_scores': sous_scores,
             'score_calcule': 'somme_des_sous_scores_ia',
-            'business_rules_appliquees': True
+            'business_rules_appliquees': True,
+            'version': 'v10.0-ia-strict-analyser'
         }
         if supabase:
             update_data = {"score": str(score), "decision": decision, "statut": statut, "analyse_status": "completed", "analyse_auto_date": datetime.datetime.now().isoformat()}
@@ -2659,18 +2985,22 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 supabase.table('candidats').update({"analyse_status": "error", "analyse_error": str(e), "analyse_auto_date": datetime.datetime.now().isoformat()}).eq('token', token).execute()
             except:
                 pass
+
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
     return jsonify({"postes": POSTES, "postes_actifs": POSTES_ACTIFS, "postes_clotures": POSTES_CLOTURES}), 200
+
 @app.route('/api/postes/actifs', methods=['GET'])
 def get_postes_actifs():
     return jsonify(POSTES_ACTIFS), 200
+
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
+
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
@@ -2692,6 +3022,7 @@ def login():
         except Exception as e:
             logger.error(f"Erreur login: {e}")
     return jsonify({'error': 'Identifiants incorrects'}), 401
+
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -2758,6 +3089,7 @@ def postuler():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
     if supabase:
@@ -2767,6 +3099,7 @@ def get_statut(token):
             hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'signaux_detectes', 'analyse_details', 'score_breakdown'}
             return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
     return jsonify({'error': 'Candidature introuvable'}), 404
+
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
@@ -2786,6 +3119,7 @@ def get_stats():
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
+
 @app.route('/api/recruteur/postes/stats', methods=['GET'])
 @jwt_required()
 def get_postes_stats():
@@ -2806,6 +3140,7 @@ def get_postes_stats():
             clotures_count += 1
             par_poste_cloture[poste] = par_poste_cloture.get(poste, 0) + 1
     return jsonify({'total': len(keys), 'postes_actifs': {'count': actifs_count, 'liste': POSTES_ACTIFS, 'par_poste': par_poste_actif, 'eligible_reanalyse': True}, 'postes_clotures': {'count': clotures_count, 'liste': POSTES_CLOTURES, 'par_poste': par_poste_cloture, 'eligible_reanalyse': False}}), 200
+
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
@@ -2841,6 +3176,7 @@ def list_candidats():
         result.append(c)
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
+
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
@@ -2863,6 +3199,7 @@ def get_candidat_detail(token):
             except Exception:
                 pass
     return jsonify(data), 200
+
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
@@ -2885,6 +3222,7 @@ def update_candidat(token):
         update_data["decision"] = "Entretien - Decision du recruteur"
     supabase.table('candidats').update(update_data).eq('token', token).execute()
     return jsonify({'message': 'Mis a jour avec succes', 'statut': statut}), 200
+
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
@@ -2906,6 +3244,7 @@ def trigger_analyze(token):
     supabase.table('candidats').update({"analyse_status": "pending", "analyse_manual_trigger": datetime.datetime.now().isoformat()}).eq('token', token).execute()
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, force), daemon=True).start()
     return jsonify({'message': f'Analyse re-declenchee avec {_PROVIDER}', 'token': token, 'ia_engine': _PROVIDER}), 202
+
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
 def get_reanalyze_status():
@@ -2929,6 +3268,7 @@ def get_reanalyze_status():
     except Exception as e:
         logger.error(f"Erreur reanalyze-status: {e}")
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-one/<token>', methods=['POST'])
 @jwt_required()
 def reanalyze_one_candidate(token):
@@ -2953,6 +3293,7 @@ def reanalyze_one_candidate(token):
     except Exception as e:
         logger.error(f"Erreur reanalyze-one: {e}")
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
@@ -3009,6 +3350,7 @@ def reanalyze_all_candidates():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
@@ -3066,6 +3408,7 @@ def reanalyze_by_poste(poste):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/reanalyze-fast', methods=['POST'])
 @jwt_required()
 def reanalyze_fast():
@@ -3146,6 +3489,7 @@ def reanalyze_fast():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/cleanup-closed', methods=['POST'])
 @jwt_required()
 def cleanup_closed_statuses():
@@ -3158,6 +3502,7 @@ def cleanup_closed_statuses():
             supabase.table('candidats').update({"analyse_status": "completed"}).eq('token', row['token']).execute()
             fixed += 1
     return jsonify({'message': f'{fixed} dossier(s) de postes clotures stabilises (scores conserves)', 'fixed': fixed, 'postes_concernes': POSTES_CLOTURES}), 200
+
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -3212,6 +3557,7 @@ def export_candidates(fmt):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/recruteur/candidats/<token>', methods=['DELETE'])
 @jwt_required()
 def delete_candidat(token):
@@ -3261,6 +3607,7 @@ def delete_candidat(token):
             'poste': data.get('poste')
         }
     }), 200
+
 def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
     tmp_zip_path = None
     start_time = time.time()
@@ -3393,6 +3740,7 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'error'
             _ZIP_JOBS[job_id]['error'] = str(e)
+
 @app.route('/api/recruteur/dossiers/zip/start', methods=['GET'])
 @jwt_required()
 def start_zip_export():
@@ -3405,6 +3753,7 @@ def start_zip_export():
         _ZIP_JOBS[job_id] = {'status': 'pending', 'created_at': time.time(), 'progress': 0, 'total': 0, 'filepath': None, 'filename': None, 'error': None}
     threading.Thread(target=_run_zip_export_job, args=(job_id, poste_filter, date_start, date_end), daemon=True).start()
     return jsonify({'job_id': job_id}), 202
+
 @app.route('/api/recruteur/dossiers/zip/status/<job_id>', methods=['GET'])
 @jwt_required()
 def zip_export_status(job_id):
@@ -3413,6 +3762,7 @@ def zip_export_status(job_id):
         if not job:
             return jsonify({'error': 'Job introuvable ou expire'}), 404
         return jsonify({'status': job['status'], 'progress': job.get('progress', 0), 'total': job.get('total', 0), 'error': job.get('error')}), 200
+
 @app.route('/api/recruteur/dossiers/zip/download/<job_id>', methods=['GET'])
 @jwt_required()
 def zip_export_download(job_id):
@@ -3438,6 +3788,7 @@ def zip_export_download(job_id):
             with _ZIP_JOBS_LOCK:
                 _ZIP_JOBS.pop(job_id, None)
         return response_obj
+
 def _cleanup_old_zip_jobs():
     now = time.time()
     with _ZIP_JOBS_LOCK:
@@ -3449,6 +3800,7 @@ def _cleanup_old_zip_jobs():
                     os.remove(job['filepath'])
                 except Exception:
                     pass
+
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -3474,6 +3826,7 @@ def email_preview(token):
         sujet = f"Reponse a votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'interet que vous portez a notre institution.\nApres examen attentif de votre dossier pour le poste de {poste}, nous avons le regret de vous informer que votre candidature n'a pas ete retenue.\nNous vous encourageons a postuler a nouveau." + sign
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
+
 @app.route('/api/recruteur/uploads/<path:filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename.replace('/', '_'))
@@ -3483,6 +3836,7 @@ def serve_upload(filename):
     if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
     return redirect(url)
+
 @app.route('/api/recruteur/debug/analyse-ia', methods=['POST'])
 @jwt_required()
 def debug_analyse_ia():
@@ -3494,6 +3848,7 @@ def debug_analyse_ia():
         return jsonify({'error': 'cv_text requis et poste doit exister dans GRILLE'}), 400
     result = analyze_cv_against_grille(cv_text, lettre_text, [], poste)
     return jsonify(result), 200
+
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     try:
@@ -3504,10 +3859,11 @@ def test_email():
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v9.9-business-rules-v2",
+        "version": "v10.0-ia-strict-analyser",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "scoring_seuils": "Chef Division Corporate: 11/7, Data Analyst: 11/7",
@@ -3546,18 +3902,21 @@ def health_version():
         },
         "nb_criteres_notes": 7,
         "deployed_at": datetime.datetime.now().isoformat(),
-        "bugfix": "business_rules_v2_avec_exemptions_chef_agence_et_gestionnaire_portefeuille",
+        "bugfix": "v10.0_ia_strict_analyser_avec_detection_amelioree_experience",
         "chef_agence_exemption": True,
         "gestionnaire_portefeuille_exemption": True,
-        "bac3_compensation": True
+        "bac3_compensation": True,
+        "banking_years_detection_amelioree": True,
+        "ia_analyse_stricte": True
     }), 200
+
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info(f"🚀 RecrutBank API v9.9 - Business Rules V2")
+    logger.info(f"🚀 RecrutBank API v10.0 - IA Strict Analyser")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -3589,9 +3948,10 @@ if __name__ == '__main__':
         logger.info(f"Bac+3 compensable par 10+ ans d'experience: ✅ Active")
         logger.info(f"Validation stricte des scores pour Chef Division: ✅ Active")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
-        logger.info(f"🐛 BUGFIX v9.9: Exemptions pour Chef d'agence et Gestionnaire de portefeuille")
-        logger.info(f"   -> Plus de faux flags sur management, portefeuille et risque credit")
-        logger.info(f"   -> Détection des profils via detect_profils_metier()")
+        logger.info(f"🐛 BUGFIX v10.0: Detection amelioree des annees d'experience")
+        logger.info(f"   -> Patterns 'plus de X ans' et expressions specifiques")
+        logger.info(f"   -> Validation post-analyse pour supprimer les faux flags")
+        logger.info(f"   -> Logging detaille de la detection")
         test_ia_connection()
     else:
         logger.warning("⚠️ MODE FALLBACK UNIQUEMENT - Aucune IA disponible")
