@@ -139,7 +139,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API running with {_PROVIDER} - 100% IA Analysis',
-        'version': 'v12.0-ia-stable',
+        'version': 'v12.1-ia-stable',
         'features': {
             'ia_available': IA_ANALYSE_ACTIVE,
             'ia_provider': _PROVIDER,
@@ -148,9 +148,10 @@ def health_check():
             'analysis_method': '100% IA',
             'scoring_max': 14,
             'postes_actifs': ["Chef de Division Local Corporate", "Data Analyst Finance"],
-            'version': 'v12.0-ia-stable',
+            'version': 'v12.1-ia-stable',
             'score_calculation': 'SOMME des sous-scores (sans ajustement negatif)',
-            'eliminatoire_only': 'Seuls les criteres definis dans la grille sont eliminatoires'
+            'eliminatoire_only': 'Seuls les criteres definis dans la grille sont eliminatoires',
+            'doc_extraction_fixed': 'Support des fichiers .doc et .docx ameliore'
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -328,8 +329,10 @@ def extract_text_from_pdf_robust(file_bytes, filename):
             logger.warning(f"PyPDF2 erreur: {e}")
     return text.strip() if text.strip() else ""
 def extract_text_from_docx_robust(file_bytes):
+    """Extrait le texte d'un fichier DOC ou DOCX de maniere robuste"""
     if not DOCX_AVAILABLE:
         return ""
+    # Essayer d'abord avec python-docx (pour DOCX)
     try:
         doc = Document(io.BytesIO(file_bytes))
         parts = []
@@ -349,9 +352,43 @@ def extract_text_from_docx_robust(file_bytes):
         result = "\n".join(parts).strip()
         if len(result) > MAX_TEXT_SIZE:
             result = result[:MAX_TEXT_SIZE]
-        return normalize_unicode(result)
-    except Exception as e2:
-        logger.warning(f"DOCX extraction echouee: {e2}")
+        if len(result) > 50:
+            return normalize_unicode(result)
+    except Exception as e:
+        logger.warning(f"DOCX extraction avec python-docx echouee: {e}")
+    # Essayer de lire comme un ancien format DOC (OLE2)
+    try:
+        # Lire le fichier et extraire les sequences de caracteres imprimables
+        import struct
+        text = ""
+        for i in range(0, len(file_bytes), 2):
+            if i + 1 < len(file_bytes):
+                try:
+                    char = struct.unpack('<H', file_bytes[i:i+2])[0]
+                    if 32 <= char <= 126 or char in [10, 13]:
+                        text += chr(char)
+                    else:
+                        text += ' '
+                except:
+                    text += ' '
+        text = re.sub(r'\s+', ' ', text).strip()
+        if len(text) > 50:
+            return normalize_unicode(text[:MAX_TEXT_SIZE])
+    except:
+        pass
+    # Extraction brute du texte
+    try:
+        for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+            try:
+                text = file_bytes.decode(encoding, errors='ignore')
+                text = re.sub(r'[^\w\s\.\,\:\;\-\?\!\@\#\%\&\*\(\)\-\+\=\/\'\"]', ' ', text)
+                text = re.sub(r'\s+', ' ', text).strip()
+                if len(text) > 50:
+                    return normalize_unicode(text[:MAX_TEXT_SIZE])
+            except:
+                continue
+    except Exception as e:
+        logger.warning(f"Extraction brute echouee: {e}")
     return ""
 def extract_text_from_txt(file_bytes):
     if CHARDET_AVAILABLE:
@@ -383,7 +420,7 @@ def extract_text_robust_from_bytes(file_bytes, filename):
         logger.info(f"Extraction PDF {filename}: {len(text)} caracteres")
     elif ext in ('doc', 'docx'):
         text = extract_text_from_docx_robust(file_bytes)
-        logger.info(f"Extraction DOCX {filename}: {len(text)} caracteres")
+        logger.info(f"Extraction DOC/DOCX {filename}: {len(text)} caracteres")
     elif ext == 'txt':
         text = extract_text_from_txt(file_bytes)
         logger.info(f"Extraction TXT {filename}: {len(text)} caracteres")
@@ -1294,7 +1331,7 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     'banking_years_detecte': banking_years,
                     'nb_eliminatoires': len(flags_elim),
                     'eliminatoires_passes': len(flags_elim) == 0,
-                    'grille_version': 'v12.0-ia-stable',
+                    'grille_version': 'v12.1-ia-stable',
                     'moteur': 'IA_100%'
                 },
                 'analyse_details': {
@@ -2501,7 +2538,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v12.0-ia-stable",
+        "version": "v12.1-ia-stable",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "analysis_method": "100% IA - Aucune analyse par mots-cles",
@@ -2526,10 +2563,11 @@ def health_version():
             "Validation stricte des criteres eliminatoires (seuls ceux definis dans la grille)",
             "La certification n'est PLUS un critere eliminatoire",
             "Les attestations ne sont PLUS des criteres eliminatoires",
-            "Le score est la SOMME des sous-scores (sans soustraction)"
+            "Le score est la SOMME des sous-scores (sans soustraction)",
+            "Extraction DOC/DOCX amelioree pour les fichiers .doc anciens"
         ],
         "deployed_at": datetime.datetime.now().isoformat(),
-        "version_info": "v12.0-ia-stable - Corrections des bugs de scoring"
+        "version_info": "v12.1-ia-stable - Corrections des bugs de scoring et extraction DOC"
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
@@ -2537,7 +2575,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info("🚀 RecrutBank API v12.0 - 100% IA Stable")
+    logger.info("🚀 RecrutBank API v12.1 - 100% IA Stable")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -2555,6 +2593,7 @@ if __name__ == '__main__':
         logger.info("  ✅ La certification n'est PLUS un critere eliminatoire")
         logger.info("  ✅ Les attestations ne sont PLUS des criteres eliminatoires")
         logger.info("  ✅ Le score est la SOMME des sous-scores")
+        logger.info("  ✅ Extraction DOC/DOCX amelioree")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
     else:
         logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le systeme ne peut pas fonctionner")
