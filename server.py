@@ -139,7 +139,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API running with {_PROVIDER} - 100% IA Analysis',
-        'version': 'v12.1-ia-stable',
+        'version': 'v12.2-ia-stable',
         'features': {
             'ia_available': IA_ANALYSE_ACTIVE,
             'ia_provider': _PROVIDER,
@@ -148,10 +148,11 @@ def health_check():
             'analysis_method': '100% IA',
             'scoring_max': 14,
             'postes_actifs': ["Chef de Division Local Corporate", "Data Analyst Finance"],
-            'version': 'v12.1-ia-stable',
+            'version': 'v12.2-ia-stable',
             'score_calculation': 'SOMME des sous-scores (sans ajustement negatif)',
             'eliminatoire_only': 'Seuls les criteres definis dans la grille sont eliminatoires',
-            'doc_extraction_fixed': 'Support des fichiers .doc et .docx ameliore'
+            'doc_extraction_fixed': 'Support des fichiers .doc et .docx ameliore',
+            'api_error_handling': 'Gestion des erreurs API OpenRouter'
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -332,7 +333,6 @@ def extract_text_from_docx_robust(file_bytes):
     """Extrait le texte d'un fichier DOC ou DOCX de maniere robuste"""
     if not DOCX_AVAILABLE:
         return ""
-    # Essayer d'abord avec python-docx (pour DOCX)
     try:
         doc = Document(io.BytesIO(file_bytes))
         parts = []
@@ -356,9 +356,7 @@ def extract_text_from_docx_robust(file_bytes):
             return normalize_unicode(result)
     except Exception as e:
         logger.warning(f"DOCX extraction avec python-docx echouee: {e}")
-    # Essayer de lire comme un ancien format DOC (OLE2)
     try:
-        # Lire le fichier et extraire les sequences de caracteres imprimables
         import struct
         text = ""
         for i in range(0, len(file_bytes), 2):
@@ -376,7 +374,6 @@ def extract_text_from_docx_robust(file_bytes):
             return normalize_unicode(text[:MAX_TEXT_SIZE])
     except:
         pass
-    # Extraction brute du texte
     try:
         for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
             try:
@@ -1255,7 +1252,19 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
             if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
                 api_params["extra_body"] = {"reasoning": {"enabled": True}}
             response = _client.chat.completions.create(**api_params)
+            if response is None:
+                logger.error("❌ La reponse de l'API est None")
+                return None
+            if not hasattr(response, 'choices') or response.choices is None or len(response.choices) == 0:
+                logger.error("❌ La reponse n'a pas de 'choices' ou est vide")
+                return None
+            if response.choices[0].message is None:
+                logger.error("❌ Le message dans la reponse est None")
+                return None
             result_text = response.choices[0].message.content
+            if not result_text or len(result_text.strip()) < 10:
+                logger.error(f"❌ Contenu de la reponse vide ou trop court")
+                return None
             logger.info(f"✅ Analyse IA terminee: {len(result_text)} caracteres")
             analyse = parse_json_robust(result_text)
             if analyse is None:
@@ -1331,7 +1340,7 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     'banking_years_detecte': banking_years,
                     'nb_eliminatoires': len(flags_elim),
                     'eliminatoires_passes': len(flags_elim) == 0,
-                    'grille_version': 'v12.1-ia-stable',
+                    'grille_version': 'v12.2-ia-stable',
                     'moteur': 'IA_100%'
                 },
                 'analyse_details': {
@@ -2538,7 +2547,7 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v12.1-ia-stable",
+        "version": "v12.2-ia-stable",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
         "analysis_method": "100% IA - Aucune analyse par mots-cles",
@@ -2564,10 +2573,11 @@ def health_version():
             "La certification n'est PLUS un critere eliminatoire",
             "Les attestations ne sont PLUS des criteres eliminatoires",
             "Le score est la SOMME des sous-scores (sans soustraction)",
-            "Extraction DOC/DOCX amelioree pour les fichiers .doc anciens"
+            "Extraction DOC/DOCX amelioree pour les fichiers .doc anciens",
+            "Gestion des erreurs API OpenRouter (response.choices None)"
         ],
         "deployed_at": datetime.datetime.now().isoformat(),
-        "version_info": "v12.1-ia-stable - Corrections des bugs de scoring et extraction DOC"
+        "version_info": "v12.2-ia-stable - Corrections des bugs de scoring, extraction DOC et API"
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
@@ -2575,7 +2585,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info("🚀 RecrutBank API v12.1 - 100% IA Stable")
+    logger.info("🚀 RecrutBank API v12.2 - 100% IA Stable")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -2594,6 +2604,7 @@ if __name__ == '__main__':
         logger.info("  ✅ Les attestations ne sont PLUS des criteres eliminatoires")
         logger.info("  ✅ Le score est la SOMME des sous-scores")
         logger.info("  ✅ Extraction DOC/DOCX amelioree")
+        logger.info("  ✅ Gestion des erreurs API OpenRouter")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
     else:
         logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le systeme ne peut pas fonctionner")
