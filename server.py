@@ -139,7 +139,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API running with {_PROVIDER} - 100% IA Analysis',
-        'version': 'v12.2-ia-stable',
+        'version': 'v13.0-ia-reasonable',
         'features': {
             'ia_available': IA_ANALYSE_ACTIVE,
             'ia_provider': _PROVIDER,
@@ -148,11 +148,12 @@ def health_check():
             'analysis_method': '100% IA',
             'scoring_max': 14,
             'postes_actifs': ["Chef de Division Local Corporate", "Data Analyst Finance"],
-            'version': 'v12.2-ia-stable',
+            'version': 'v13.0-ia-reasonable',
             'score_calculation': 'SOMME des sous-scores (sans ajustement negatif)',
             'eliminatoire_only': 'Seuls les criteres definis dans la grille sont eliminatoires',
-            'doc_extraction_fixed': 'Support des fichiers .doc et .docx ameliore',
-            'api_error_handling': 'Gestion des erreurs API OpenRouter'
+            'management_recognition': 'Acting Branch Manager, Profit Center Manager, Chef de service = management valide',
+            'certification_recognition': 'Frankfurt School, Moody\'s, ITB = certifications valides',
+            'reasonable_interpretation': 'Interpretation raisonnable des profils'
         }
     }), 200
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
@@ -330,7 +331,6 @@ def extract_text_from_pdf_robust(file_bytes, filename):
             logger.warning(f"PyPDF2 erreur: {e}")
     return text.strip() if text.strip() else ""
 def extract_text_from_docx_robust(file_bytes):
-    """Extrait le texte d'un fichier DOC ou DOCX de maniere robuste"""
     if not DOCX_AVAILABLE:
         return ""
     try:
@@ -1152,10 +1152,38 @@ def build_ia_prompt(poste, cv_text, lettre_text, attestation_texts_list):
     grille = GRILLE.get(poste, {})
     if not grille:
         return None, None
+    regles_interpretation = """
+🔴 REGLES D'INTERPRETATION DES POSTES (A RESPECTER ABSOLUMENT) :
+
+1. "Acting Branch Manager" ou "Chef d'Agence" = CHEF D'AGENCE → MANAGEMENT VALIDE (3/3)
+2. "Profit Center Manager" = MANAGEMENT D'EQUIPE AVEC P&L → MANAGEMENT VALIDE (3/3)
+3. "Chef de service" + "Supervision de l'equipe" = MANAGEMENT D'EQUIPE VALIDE (2-3/3)
+4. "Supervision des activites commerciales" = MANAGEMENT VALIDE
+5. "Encadrer, diriger et motiver les gestionnaires" = MANAGEMENT D'EQUIPE VALIDE
+
+🔴 REGLES D'INTERPRETATION DES CERTIFICATIONS :
+1. "Frankfurt School" = CERTIFICATION BANCAIRE VALABLE (+1)
+2. "Moody's" = CERTIFICATION RISQUE VALABLE (+1)
+3. "ITB" = CERTIFICATION BANCAIRE VALABLE (+1)
+4. "Certificat d'Expert en Financement des PME" = CERTIFICATION VALABLE (+1)
+
+🔴 CAS PARTICULIERS :
+1. Chef d'agence (meme interimaire) = EXEMPTE des criteres eliminatoires 4, 5, 6
+2. Bac+3 + 10+ ans d'experience = DIPLOME VALIDE (compensation)
+3. Les postes de management avec supervision d'equipe sont VALIDES meme sans chiffres
+4. Un profil avec 17 ans d'experience bancaire est CONSIDERE comme senior
+5. La gestion de portefeuille Local Corporate valide le critere d'experience corporate
+6. L'analyse et montage de dossiers de credit valide le critere risque de credit
+"""
     system_prompt = f"""Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
+
 POSTE ANALYSE : {poste}
 DESCRIPTION : {grille.get('description', 'Poste bancaire')}
+
 Tu dois analyser STRICTEMENT selon la grille officielle fournie. Tu es le SEUL moteur d'analyse.
+
+{regles_interpretation}
+
 REGLES ABSOLUES D'ANALYSE :
 1. Tu DOIS comprendre le SENS des phrases et le CONTEXTE METIER.
 2. Tu ne JAMAIS inventer des faits qui ne sont PAS dans les documents.
@@ -1163,18 +1191,27 @@ REGLES ABSOLUES D'ANALYSE :
 4. Les STAGES, BENEVOLATS et FORMATIONS ne comptent PAS comme experience pro.
 5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
 6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
+7. Une interpretation RAISONNABLE est attendue : un profil avec 17 ans d'experience bancaire est senior.
+8. Les postes de management (Acting Branch Manager, Profit Center Manager, Chef de service) sont consideres comme de l'experience manageriale VALIDE.
+
 🔴 CRITERES ELIMINATOIRES (rejet immediat si non satisfaits) :
 {chr(10).join(f"- {c}" for c in grille.get('eliminatoire', []))}
+
 🟠 POINTS A VERIFIER dans le CV :
 {chr(10).join(f"- {c}" for c in grille.get('a_verifier', []))}
+
 🟡 SIGNAUX FORTS - candidat prioritaire :
 {chr(10).join(f"- {c}" for c in grille.get('signaux_forts', []))}
+
 ⚠️ POINTS D'ATTENTION :
 {chr(10).join(f"- {c}" for c in grille.get('points_attention', []))}
+
 📊 GRILLE DE SCORING (MAX {grille.get('score_max_total', 14)}) :
 {chr(10).join(f"- {k}: {v}/max" for k, v in grille.get('scores_max', {}).items())}
+
 REGLES METIER SPECIFIQUES :
 {chr(10).join(f"- {r}" for r in grille.get('regles_metier', []))}
+
 FORMAT DE SORTIE : UNIQUEMENT du JSON valide.
 {{
   "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
@@ -1220,7 +1257,8 @@ ATTESTATIONS :
 Analyse strictement selon la grille. Verifie chaque critere eliminatoire.
 Le score_total est la SOMME des sous-scores.
 Fournis une checklist complete avec true/false pour chaque critere.
-Sois rigoureux et professionnel."""
+Sois rigoureux et professionnel.
+INTERPRETE RAISONNABLEMENT les postes de management et les certifications."""
     return system_prompt, user_message
 def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste):
     if not IA_ANALYSE_ACTIVE or not _client or not cv_text or len(cv_text.strip()) < 50:
@@ -1340,7 +1378,7 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     'banking_years_detecte': banking_years,
                     'nb_eliminatoires': len(flags_elim),
                     'eliminatoires_passes': len(flags_elim) == 0,
-                    'grille_version': 'v12.2-ia-stable',
+                    'grille_version': 'v13.0-ia-reasonable',
                     'moteur': 'IA_100%'
                 },
                 'analyse_details': {
@@ -2547,10 +2585,10 @@ def test_email():
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v12.2-ia-stable",
+        "version": "v13.0-ia-reasonable",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
-        "analysis_method": "100% IA - Aucune analyse par mots-cles",
+        "analysis_method": "100% IA - Interpretation raisonnable",
         "max_concurrent_downloads": DOWNLOAD_MAX_CONCURRENT,
         "zip_max_workers": _ZIP_MAX_WORKERS,
         "ia_provider": _PROVIDER,
@@ -2567,17 +2605,18 @@ def health_version():
         "scoring_max_chef_division": 14,
         "scoring_max_data_analyst": 14,
         "seuils": {"prioritaire": 11, "potentiel_min": 7, "rejet_max": 6},
-        "corrections_apportees": [
-            "Suppression de l'ajustement negatif (-12) dans le calcul du score",
-            "Validation stricte des criteres eliminatoires (seuls ceux definis dans la grille)",
-            "La certification n'est PLUS un critere eliminatoire",
-            "Les attestations ne sont PLUS des criteres eliminatoires",
-            "Le score est la SOMME des sous-scores (sans soustraction)",
-            "Extraction DOC/DOCX amelioree pour les fichiers .doc anciens",
-            "Gestion des erreurs API OpenRouter (response.choices None)"
+        "regles_interpretation": [
+            "Acting Branch Manager = CHEF D'AGENCE (management valide)",
+            "Profit Center Manager = MANAGEMENT D'EQUIPE (valide)",
+            "Chef de service + Supervision = MANAGEMENT D'EQUIPE (valide)",
+            "Frankfurt School = CERTIFICATION VALABLE",
+            "Moody's = CERTIFICATION VALABLE",
+            "Chef d'agence (meme interimaire) = EXEMPTE des criteres 4, 5, 6",
+            "Bac+3 + 10+ ans d'experience = DIPLOME VALIDE",
+            "Interpretation raisonnable des profils seniors"
         ],
         "deployed_at": datetime.datetime.now().isoformat(),
-        "version_info": "v12.2-ia-stable - Corrections des bugs de scoring, extraction DOC et API"
+        "version_info": "v13.0-ia-reasonable - Interpretation raisonnable des profils"
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
@@ -2585,7 +2624,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info("🚀 RecrutBank API v12.2 - 100% IA Stable")
+    logger.info("🚀 RecrutBank API v13.0 - 100% IA Reasonable")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
@@ -2594,17 +2633,18 @@ if __name__ == '__main__':
         logger.info(f"Modele: {_MODEL}")
         logger.info(f"Gratuit: {'✅ Oui' if 'OpenRouter' in _PROVIDER else '❌ Non (payant)'}")
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
-        logger.info(f"Analyse: 100% IA - AUCUNE analyse par mots-cles")
+        logger.info(f"Analyse: 100% IA - Interpretation raisonnable")
         logger.info(f"POSTES ACTIFS: {POSTES_ACTIFS}")
         logger.info(f"GRILLES DISPONIBLES: {len(GRILLE)} postes")
-        logger.info("CORRECTIONS APPLIQUEES:")
-        logger.info("  ✅ Suppression de l'ajustement negatif (-12) dans le calcul du score")
-        logger.info("  ✅ Validation stricte des criteres eliminatoires")
-        logger.info("  ✅ La certification n'est PLUS un critere eliminatoire")
-        logger.info("  ✅ Les attestations ne sont PLUS des criteres eliminatoires")
-        logger.info("  ✅ Le score est la SOMME des sous-scores")
-        logger.info("  ✅ Extraction DOC/DOCX amelioree")
-        logger.info("  ✅ Gestion des erreurs API OpenRouter")
+        logger.info("REGLES D'INTERPRETATION:")
+        logger.info("  ✅ Acting Branch Manager = CHEF D'AGENCE (management valide)")
+        logger.info("  ✅ Profit Center Manager = MANAGEMENT D'EQUIPE (valide)")
+        logger.info("  ✅ Chef de service + Supervision = MANAGEMENT D'EQUIPE (valide)")
+        logger.info("  ✅ Frankfurt School = CERTIFICATION VALABLE")
+        logger.info("  ✅ Moody's = CERTIFICATION VALABLE")
+        logger.info("  ✅ Chef d'agence (meme interimaire) = EXEMPTE des criteres 4, 5, 6")
+        logger.info("  ✅ Bac+3 + 10+ ans d'experience = DIPLOME VALIDE")
+        logger.info("  ✅ Interpretation raisonnable des profils seniors")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
     else:
         logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le systeme ne peut pas fonctionner")
