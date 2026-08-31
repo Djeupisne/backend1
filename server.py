@@ -75,7 +75,8 @@ IA_ANALYSE_ACTIVE = False
 ACTIVE_MODELS = []
 OPENROUTER_MODELS = [
     {"name": "Nemotron 3 Ultra", "model": os.getenv("IA_MODEL_1", "nvidia/nemotron-3-ultra-550b-a55b:free"), "priority": 1, "supports_reasoning": True},
-    {"name": "MiniMax M3", "model": os.getenv("IA_MODEL_2", "minimax/minimax-m3:free"), "priority": 2, "supports_reasoning": False}
+    {"name": "MiniMax M3", "model": os.getenv("IA_MODEL_2", "minimax/minimax-m3:free"), "priority": 2, "supports_reasoning": False},
+    {"name": "MiniMax M2.7", "model": os.getenv("IA_MODEL_3", "minimax/minimax-m2.7:free"), "priority": 3, "supports_reasoning": False}
 ]
 IA_FALLBACK_ENABLED = os.getenv("IA_FALLBACK_ENABLED", "true").lower() == "true"
 IA_MAX_RETRIES = int(os.getenv("IA_MAX_RETRIES", "3"))
@@ -103,7 +104,7 @@ def initialize_ia_clients():
                         "priority": model_config.get("priority", 10),
                         "supports_reasoning": model_config.get("supports_reasoning", False)
                     })
-                    logger.info(f"✅ {model_config['name']} initialise avec succes")
+                    logger.info(f"✅ {model_config['name']} ({model_config['model']}) initialise avec succes")
             except Exception as e:
                 logger.warning(f"⚠️ {model_config['name']} indisponible: {e}")
     if DEEPSEEK_API_KEY:
@@ -1413,7 +1414,8 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
             "verif_3": sous_scores.get(keys_list[3], 0) >= 1 if len(keys_list) > 3 else False,
             "verif_4": sous_scores.get(keys_list[4], 0) >= 1 if len(keys_list) > 4 else False,
             "verif_5": sous_scores.get(keys_list[5], 0) >= 1 if len(keys_list) > 5 else False,
-            "verif_6": sous_scores.get(keys_list[6], 0) >= 1 if len(keys_list) > 6 else False        }
+            "verif_6": sous_scores.get(keys_list[6], 0) >= 1 if len(keys_list) > 6 else False
+        }
     decision = get_recommandation_from_score(score_total, flags_elim, score_max_total)
     statut = get_statut_from_decision(decision, flags_elim)
     profils = analyse.get('profils_detectes', {})
