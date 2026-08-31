@@ -1843,7 +1843,7 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
             doc.add_paragraph("Aucun candidat trouve.")
         else:
             doc.add_heading("Liste des candidats", level=1)
-            table = doc.add_table(rows=1, cols=9)
+            table = doc.add_table(rows=1, cols=10)
             table.style = 'Table Grid'
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
             header_cells = table.rows[0].cells
