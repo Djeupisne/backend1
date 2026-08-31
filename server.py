@@ -1623,9 +1623,9 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
         headers = [
             "Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone",
             "Poste", "Statut", "Score", "Décision",
-            "Points Forts", "Points de Vigilance", "Synthèse", "Motifs"
+            "Points Forts IA", "Points de Vigilance IA", "Synthèse IA", "Motifs IA"
         ]
-        col_widths = [5, 12, 18, 18, 25, 15, 30, 14, 8, 22, 35, 35, 40, 30]
+        col_widths = [5, 12, 18, 18, 25, 15, 30, 14, 8, 22, 35, 35, 40, 35]
         
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col, value=header)
@@ -1648,19 +1648,18 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             decision = c.get('decision', '')
             flags_elim = analyse_details.get('flags_eliminatoires', []) or score_breakdown.get('flags_eliminatoires', [])
             
-            # Construction du motif
-            motif = ""
-            if statut == 'rejete':
-                if flags_elim:
-                    motif = f"Rejet - Critères éliminatoires: {', '.join(flags_elim[:2])}"
-                else:
-                    motif = "Rejet - Score insuffisant"
-            elif statut == 'retenu':
-                motif = "Retenu - Score élevé, profil correspondant"
-            elif statut == 'entretien':
-                motif = "Potentiel à évaluer en entretien"
-            else:
-                motif = "En attente d'évaluation"
+            # Construction du motif IA avec les vrais motifs
+            motif_parts = []
+            if flags_elim:
+                motif_parts.append(f"CRITÈRES ÉLIMINATOIRES: {', '.join(flags_elim[:3])}")
+            if points_vigilance:
+                motif_parts.append(f"POINTS DE VIGILANCE: {', '.join(points_vigilance[:2])}")
+            if points_forts:
+                motif_parts.append(f"POINTS FORTS: {', '.join(points_forts[:2])}")
+            if synthese:
+                motif_parts.append(f"SYNTHÈSE: {synthese[:150]}")
+            
+            motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
             
             try:
                 score = float(c.get('score', 0))
@@ -1795,6 +1794,7 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
         traceback.print_exc()
         return None
 
+
 def generate_pdf_report_enhanced(candidats, poste_filter=""):
     if not REPORTLAB_AVAILABLE:
         return None
@@ -1865,7 +1865,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
         if not sorted_candidats:
             story.append(Paragraph("Aucun candidat trouve.", styles['Normal']))
         else:
-            # Tableau avec Rang, N° Dossier, Nom, Prénom, Poste, Statut, Score, Motifs
+            # Tableau avec Rang, N° Dossier, Nom, Prénom, Poste, Statut, Score, Motifs IA
             data = [
                 [
                     Paragraph("<b>Rang</b>", header_style),
@@ -1875,7 +1875,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                     Paragraph("<b>Poste</b>", header_style),
                     Paragraph("<b>Statut</b>", header_style),
                     Paragraph("<b>Score</b>", header_style),
-                    Paragraph("<b>Motifs</b>", header_style)
+                    Paragraph("<b>Motifs IA</b>", header_style)
                 ]
             ]
             
@@ -1887,21 +1887,25 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 except (ValueError, TypeError):
                     score = 0.0
                 
-                # Détermination du motif
+                # Récupération des motifs IA
                 analyse_details = c.get('analyse_details_parsed', {})
                 flags_elim = analyse_details.get('flags_eliminatoires', [])
-                motif = ""
-                if statut == 'rejete':
-                    if flags_elim:
-                        motif = f"Rejet - {', '.join(flags_elim[:2])}"
-                    else:
-                        motif = "Rejet - Score insuffisant"
-                elif statut == 'retenu':
-                    motif = "Retenu - Score élevé"
-                elif statut == 'entretien':
-                    motif = "Potentiel à évaluer"
-                else:
-                    motif = "En attente d'évaluation"
+                points_vigilance = analyse_details.get('points_vigilance', [])
+                points_forts = analyse_details.get('points_forts', [])
+                synthese = analyse_details.get('synthese_recruteur', '')
+                
+                # Construction du motif IA
+                motif_parts = []
+                if flags_elim:
+                    motif_parts.append(f"❌ Éliminatoire: {', '.join(flags_elim[:2])}")
+                if points_vigilance:
+                    motif_parts.append(f"⚠️ Vigilance: {', '.join(points_vigilance[:2])}")
+                if points_forts:
+                    motif_parts.append(f"✅ Forces: {', '.join(points_forts[:2])}")
+                if synthese:
+                    motif_parts.append(f"📝 Synthèse: {synthese[:80]}")
+                
+                motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
                 
                 # Statut avec couleur
                 if statut == 'retenu':
@@ -1913,7 +1917,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 else:
                     statut_text = f'<font color="#d97706">⏳ En attente</font>'
                 
-                # Couleur du score - CORRECTION : utiliser des chaînes hexadécimales directement
+                # Couleur du score
                 if score >= 11:
                     score_color = "#16a34a"
                 elif score >= 7:
@@ -1929,11 +1933,11 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                     Paragraph(c.get('poste', '')[:25], cell_style),
                     Paragraph(statut_text, cell_center),
                     Paragraph(f'<font color="{score_color}"><b>{score}</b></font>', cell_center),
-                    Paragraph(motif[:50], cell_style)
+                    Paragraph(motif[:70], cell_style)
                 ])
                 rank += 1
             
-            col_widths = [1.0*cm, 2.0*cm, 3.0*cm, 3.0*cm, 4.0*cm, 2.5*cm, 1.5*cm, 4.5*cm]
+            col_widths = [1.0*cm, 2.0*cm, 3.0*cm, 3.0*cm, 4.0*cm, 2.5*cm, 1.5*cm, 5.5*cm]
             table = Table(data, colWidths=col_widths, repeatRows=1)
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d47a1')),
@@ -1966,29 +1970,34 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
         traceback.print_exc()
         return None
 
+
 def generate_csv_report_enhanced(candidats, poste_filter=""):
     sorted_candidats = sort_candidats(candidats)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
-    headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Statut", "Score", "Décision", "Motifs"]
+    headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Statut", "Score", "Décision", "Motifs IA"]
     writer.writerow(headers)
     rank = 1
     for c in sorted_candidats:
         analyse_details = c.get('analyse_details_parsed', {})
         flags_elim = analyse_details.get('flags_eliminatoires', [])
+        points_vigilance = analyse_details.get('points_vigilance', [])
+        points_forts = analyse_details.get('points_forts', [])
+        synthese = analyse_details.get('synthese_recruteur', '')
         statut = c.get('statut', 'en_attente')
         
-        if statut == 'rejete':
-            if flags_elim:
-                motif = f"Rejet - {', '.join(flags_elim[:2])}"
-            else:
-                motif = "Rejet - Score insuffisant"
-        elif statut == 'retenu':
-            motif = "Retenu - Score élevé"
-        elif statut == 'entretien':
-            motif = "Potentiel à évaluer en entretien"
-        else:
-            motif = "En attente d'évaluation"
+        # Construction du motif IA
+        motif_parts = []
+        if flags_elim:
+            motif_parts.append(f"Eliminatoire: {', '.join(flags_elim[:2])}")
+        if points_vigilance:
+            motif_parts.append(f"Vigilance: {', '.join(points_vigilance[:2])}")
+        if points_forts:
+            motif_parts.append(f"Forces: {', '.join(points_forts[:2])}")
+        if synthese:
+            motif_parts.append(f"Synthèse: {synthese[:100]}")
+        
+        motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
         
         writer.writerow([
             rank,
@@ -2005,6 +2014,7 @@ def generate_csv_report_enhanced(candidats, poste_filter=""):
         ])
         rank += 1
     return output.getvalue()
+
 
 def generate_word_report_enhanced(candidats, poste_filter=""):
     if not DOCX_AVAILABLE:
@@ -2055,12 +2065,12 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
             doc.add_paragraph("Aucun candidat trouve.")
         else:
             doc.add_heading("Liste des candidats", level=1)
-            # Tableau avec Rang, N° Dossier, Nom, Prénom, Email, Poste, Statut, Score, Motifs
+            # Tableau avec Rang, N° Dossier, Nom, Prénom, Email, Poste, Statut, Score, Motifs IA
             table = doc.add_table(rows=1, cols=9)
             table.style = 'Table Grid'
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
             header_cells = table.rows[0].cells
-            headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Poste", "Statut", "Score", "Décision", "Motifs"]
+            headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Poste", "Statut", "Score", "Décision", "Motifs IA"]
             for i, header in enumerate(headers):
                 header_cells[i].text = header
                 header_cells[i].paragraphs[0].runs[0].font.bold = True
@@ -2077,20 +2087,23 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 row_cells = table.add_row().cells
                 analyse_details = c.get('analyse_details_parsed', {})
                 flags_elim = analyse_details.get('flags_eliminatoires', [])
+                points_vigilance = analyse_details.get('points_vigilance', [])
+                points_forts = analyse_details.get('points_forts', [])
+                synthese = analyse_details.get('synthese_recruteur', '')
                 statut = c.get('statut', 'en_attente')
                 
-                # Détermination du motif
-                if statut == 'rejete':
-                    if flags_elim:
-                        motif = f"Rejet - {', '.join(flags_elim[:2])}"
-                    else:
-                        motif = "Rejet - Score insuffisant"
-                elif statut == 'retenu':
-                    motif = "Retenu - Score élevé"
-                elif statut == 'entretien':
-                    motif = "Potentiel à évaluer"
-                else:
-                    motif = "En attente"
+                # Construction du motif IA
+                motif_parts = []
+                if flags_elim:
+                    motif_parts.append(f"Eliminatoire: {', '.join(flags_elim[:2])}")
+                if points_vigilance:
+                    motif_parts.append(f"Vigilance: {', '.join(points_vigilance[:2])}")
+                if points_forts:
+                    motif_parts.append(f"Forces: {', '.join(points_forts[:2])}")
+                if synthese:
+                    motif_parts.append(f"Synthèse: {synthese[:100]}")
+                
+                motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
                 
                 row_cells[0].text = str(rank)
                 row_cells[1].text = c.get('numero_dossier', '')
@@ -2100,7 +2113,7 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 row_cells[5].text = statut.upper()
                 row_cells[6].text = str(c.get('score', 0))
                 row_cells[7].text = c.get('decision', '')[:30]
-                row_cells[8].text = motif[:50]
+                row_cells[8].text = motif[:70]
                 
                 # Alignements
                 for idx in [0, 1, 5, 6]:
@@ -2125,7 +2138,7 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 
                 rank += 1
             
-            for i, width in enumerate([1.0, 2.2, 3.2, 3.2, 4.0, 2.5, 1.5, 3.0, 4.0]):
+            for i, width in enumerate([1.0, 2.2, 3.2, 3.2, 4.0, 2.5, 1.5, 3.0, 4.5]):
                 table.columns[i].width = Cm(width)
             
             doc.add_paragraph()
@@ -2138,6 +2151,7 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
     except Exception as e:
         logger.error(f"Erreur generation Word: {e}")
         return None
+
 
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
