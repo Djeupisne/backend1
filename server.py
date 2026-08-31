@@ -1906,24 +1906,20 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 # Statut avec couleur
                 if statut == 'retenu':
                     statut_text = f'<font color="#16a34a"><b>✅ Retenu</b></font>'
-                    bg_color = colors.HexColor('#e8f5e9')
                 elif statut == 'entretien':
                     statut_text = f'<font color="#d97706"><b>📅 Entretien</b></font>'
-                    bg_color = colors.HexColor('#fff3e0')
                 elif statut == 'rejete':
                     statut_text = f'<font color="#dc2626"><b>❌ Rejeté</b></font>'
-                    bg_color = colors.HexColor('#ffebee')
                 else:
                     statut_text = f'<font color="#d97706">⏳ En attente</font>'
-                    bg_color = colors.HexColor('#f5f5f5')
                 
-                # Couleur du score
+                # Couleur du score - CORRECTION : utiliser des chaînes hexadécimales directement
                 if score >= 11:
-                    score_color = colors.HexColor('#16a34a')
+                    score_color = "#16a34a"
                 elif score >= 7:
-                    score_color = colors.HexColor('#d97706')
+                    score_color = "#d97706"
                 else:
-                    score_color = colors.HexColor('#dc2626')
+                    score_color = "#dc2626"
                 
                 data.append([
                     Paragraph(str(rank), cell_center),
@@ -1932,7 +1928,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                     Paragraph(c.get('prenom', '')[:20], cell_style),
                     Paragraph(c.get('poste', '')[:25], cell_style),
                     Paragraph(statut_text, cell_center),
-                    Paragraph(f'<font color="#{score_color.hexstr()[2:]}"><b>{score}</b></font>', cell_center),
+                    Paragraph(f'<font color="{score_color}"><b>{score}</b></font>', cell_center),
                     Paragraph(motif[:50], cell_style)
                 ])
                 rank += 1
