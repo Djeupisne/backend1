@@ -10,37 +10,31 @@ logging.basicConfig(level=logging.INFO)
 logging.getLogger('pdfminer').setLevel(logging.WARNING)
 logging.getLogger('pdfplumber').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
-
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
-
 try:
     import pdfplumber
     PDFPLUMBER_AVAILABLE = True
 except ImportError:
     PDFPLUMBER_AVAILABLE = False
-
 try:
     import PyPDF2
     PYPDF2_AVAILABLE = True
 except ImportError:
     PYPDF2_AVAILABLE = False
-
 try:
     from docx import Document
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 try:
     import chardet
     CHARDET_AVAILABLE = True
 except ImportError:
     CHARDET_AVAILABLE = False
-
 try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
@@ -51,7 +45,6 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
-
 try:
     import openpyxl
     from openpyxl import Workbook
@@ -60,86 +53,70 @@ try:
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
-
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
-    logger.info("✅ OpenAI importé avec succès")
+    logger.info("✅ OpenAI importe avec succes")
 except ImportError as e:
     OPENAI_AVAILABLE = False
     logger.error(f"❌ Erreur import OpenAI: {e}")
-
-# Configuration IA
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "minimax/minimax-m3:free")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_REASONING_ENABLED = os.getenv("OPENROUTER_REASONING_ENABLED", "false").lower() == "true"
-
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
-
 logger.info(f"🔑 OPENROUTER_API_KEY: {'✅ Presente' if OPENROUTER_API_KEY else '❌ Manquante'}")
 logger.info(f"📦 OPENROUTER_MODEL: {OPENROUTER_MODEL}")
 logger.info(f"🧠 OPENROUTER_REASONING: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
 logger.info(f"🔑 DEEPSEEK_API_KEY: {'✅ Presente' if DEEPSEEK_API_KEY else '❌ Manquante'}")
-
 _client = None
 _PROVIDER = "None"
 _MODEL = None
 IA_ANALYSE_ACTIVE = False
-
 if OPENAI_AVAILABLE and OPENROUTER_API_KEY:
     try:
         _client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
         _MODEL = OPENROUTER_MODEL
         _PROVIDER = "OpenRouter (MiniMax M3)"
         IA_ANALYSE_ACTIVE = True
-        logger.info("✅ Client OpenRouter initialisé avec succès")
-        logger.info(f"   Modèle: {_MODEL}")
+        logger.info("✅ Client OpenRouter initialise avec succes")
+        logger.info(f"   Modele: {_MODEL}")
     except Exception as e:
         logger.error(f"❌ Erreur initialisation OpenRouter: {e}")
         _client = None
         IA_ANALYSE_ACTIVE = False
-
 if not IA_ANALYSE_ACTIVE and OPENAI_AVAILABLE and DEEPSEEK_API_KEY:
     try:
         _client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
         _MODEL = DEEPSEEK_MODEL
         _PROVIDER = "DeepSeek"
         IA_ANALYSE_ACTIVE = True
-        logger.info("✅ Client DeepSeek initialisé avec succès")
+        logger.info("✅ Client DeepSeek initialise avec succes")
     except Exception as e:
         logger.error(f"❌ Erreur initialisation DeepSeek: {e}")
         _client = None
         IA_ANALYSE_ACTIVE = False
-
 if not IA_ANALYSE_ACTIVE:
-    logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le système ne peut pas fonctionner sans IA")
+    logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le systeme ne peut pas fonctionner sans IA")
     logger.warning("   Veuillez configurer OPENROUTER_API_KEY")
-
 _ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "5")))
-
-# Configuration des téléchargements
 DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "3"))
 DOWNLOAD_BASE_DELAY = float(os.getenv("DOWNLOAD_BASE_DELAY", "0.5"))
 DOWNLOAD_MAX_DELAY = int(os.getenv("DOWNLOAD_MAX_DELAY", "10"))
 DOWNLOAD_MAX_CONCURRENT = int(os.getenv("DOWNLOAD_MAX_CONCURRENT", "15"))
 _DOWNLOAD_SEMAPHORE = threading.Semaphore(DOWNLOAD_MAX_CONCURRENT)
-
 _ZIP_JOBS = {}
 _ZIP_JOBS_LOCK = threading.Lock()
 _ZIP_JOBS_MAX_AGE_SECONDS = 3600
 _ZIP_MAX_WORKERS = int(os.getenv("ZIP_MAX_WORKERS", "25"))
-
 app = Flask(__name__)
-
 ALLOWED_ORIGINS = [
     "https://recrutment.onrender.com",
     "https://backend1-fiq5.onrender.com",
     "http://localhost:5000",
     "http://localhost:3000"
 ]
-
 CORS(app, resources={
     r"/api/*": {
         "origins": ALLOWED_ORIGINS,
@@ -149,7 +126,6 @@ CORS(app, resources={
         "max_age": 600
     }
 })
-
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
@@ -158,13 +134,12 @@ def after_request(response):
     if request.method == 'OPTIONS':
         response.status_code = 204
     return response
-
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API running with {_PROVIDER} - 100% IA Analysis',
-        'version': 'v11.1-ia-only',
+        'version': 'v12.0-ia-stable',
         'features': {
             'ia_available': IA_ANALYSE_ACTIVE,
             'ia_provider': _PROVIDER,
@@ -173,47 +148,42 @@ def health_check():
             'analysis_method': '100% IA',
             'scoring_max': 14,
             'postes_actifs': ["Chef de Division Local Corporate", "Data Analyst Finance"],
-            'version': 'v11.1-ia-only'
+            'version': 'v12.0-ia-stable',
+            'score_calculation': 'SOMME des sous-scores (sans ajustement negatif)',
+            'eliminatoire_only': 'Seuls les criteres definis dans la grille sont eliminatoires'
         }
     }), 200
-
 app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "gestion-candidatures-secret-2024")
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=8)
 jwt = JWTManager(app)
-
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "candidatures")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-
 app.config['SMTP_HOST'] = os.getenv('SMTP_HOST', 'smtp.gmail.com')
 app.config['SMTP_PORT'] = int(os.getenv('SMTP_PORT', 587))
 app.config['SMTP_USER'] = os.getenv('SMTP_USER', '')
 app.config['SMTP_PASSWORD'] = os.getenv('SMTP_PASSWORD', '')
 app.config['SMTP_FROM'] = os.getenv('SMTP_FROM', 'RecrutBank RH <oualoumidjeupisne@gmail.com>')
 app.config['SMTP_USE_TLS'] = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
-
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
 app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 def upload_file_to_supabase(file_obj, blob_name, content_type=None):
     if not supabase:
         return None
     try:
         file_bytes = file_obj.read()
         supabase.storage.from_(SUPABASE_STORAGE_BUCKET).upload(
-            blob_name, 
-            file_bytes, 
+            blob_name,
+            file_bytes,
             {"content-type": content_type or "application/octet-stream", "upsert": "true"}
         )
         return blob_name
     except Exception as e:
         logger.error(f"Upload error: {e}")
         return None
-
 def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BASE_DELAY, max_delay=DOWNLOAD_MAX_DELAY):
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -238,7 +208,6 @@ def retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES, base_delay=DOWNLOAD_BAS
             raise last_exception
         return wrapper
     return decorator
-
 @retry_with_backoff(max_retries=DOWNLOAD_MAX_RETRIES)
 def download_file_from_supabase_robust(blob_name):
     if not supabase:
@@ -250,7 +219,6 @@ def download_file_from_supabase_robust(blob_name):
         except Exception as e:
             logger.error(f"Erreur telechargement {blob_name}: {e}")
             raise
-
 def download_file_from_supabase(blob_name):
     if not supabase:
         return None
@@ -263,7 +231,6 @@ def download_file_from_supabase(blob_name):
             return download_file_from_supabase_robust(blob_name)
         logger.error(f"Download error: {e}")
         return None
-
 def get_signed_url(blob_name, expiration_minutes=60):
     if not supabase:
         return None
@@ -273,7 +240,6 @@ def get_signed_url(blob_name, expiration_minutes=60):
     except Exception as e:
         logger.error(f"Signed URL error: {e}")
         return None
-
 def send_email(to_email, subject, body):
     import requests
     import re as _re
@@ -299,16 +265,13 @@ def send_email(to_email, subject, body):
         return response.status_code == 201
     except Exception:
         return False
-
 def hash_pwd(pwd):
     return hashlib.sha256(pwd.encode()).hexdigest()
-
 def normalize_spaces(text):
     if not text:
         return ""
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
-
 def normalize_unicode(text):
     if not text:
         return ""
@@ -316,11 +279,9 @@ def normalize_unicode(text):
     text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
     text = re.sub(r'[\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000]', ' ', text)
     return text.strip()
-
 MAX_PDF_PAGES = 10
 MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024
 MAX_TEXT_SIZE = 15000
-
 def extract_text_from_pdf_robust(file_bytes, filename):
     if len(file_bytes) > MAX_PDF_SIZE_BYTES:
         logger.warning(f"PDF trop volumineux: {filename}")
@@ -366,7 +327,6 @@ def extract_text_from_pdf_robust(file_bytes, filename):
         except Exception as e:
             logger.warning(f"PyPDF2 erreur: {e}")
     return text.strip() if text.strip() else ""
-
 def extract_text_from_docx_robust(file_bytes):
     if not DOCX_AVAILABLE:
         return ""
@@ -393,7 +353,6 @@ def extract_text_from_docx_robust(file_bytes):
     except Exception as e2:
         logger.warning(f"DOCX extraction echouee: {e2}")
     return ""
-
 def extract_text_from_txt(file_bytes):
     if CHARDET_AVAILABLE:
         try:
@@ -414,7 +373,6 @@ def extract_text_from_txt(file_bytes):
         except (UnicodeDecodeError, UnicodeError):
             continue
     return ""
-
 def extract_text_robust_from_bytes(file_bytes, filename):
     if not file_bytes:
         return ""
@@ -430,7 +388,6 @@ def extract_text_robust_from_bytes(file_bytes, filename):
         text = extract_text_from_txt(file_bytes)
         logger.info(f"Extraction TXT {filename}: {len(text)} caracteres")
     return text.strip() if text.strip() else ""
-
 def init_recruteur():
     try:
         if supabase:
@@ -443,10 +400,7 @@ def init_recruteur():
                 }).execute()
     except Exception as e:
         logger.warning(f"Erreur initialisation recruteur : {e}")
-
 init_recruteur()
-
-# ===== LISTE DES POSTES =====
 POSTES = [
     "Chef de Division Local Corporate",
     "Data Analyst Finance",
@@ -465,14 +419,10 @@ POSTES = [
     "Chef de Section Compensation",
     "Charge(e) d'Administration de Credit"
 ]
-
 POSTES_ACTIFS = ["Chef de Division Local Corporate", "Data Analyst Finance"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
-
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
-
-# ===== GRILLES OFFICIELLES COMPLETES =====
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": [
@@ -526,9 +476,8 @@ GRILLE = {
             "Bac+3 compensable par 10+ annees d'experience averee en SME/Local Corporate."
         ],
         "score_max_total": 14,
-        "description": "Chef de Division Local Corporate - Pilotage d'une activité commerciale SME/Corporate"
+        "description": "Chef de Division Local Corporate - Pilotage d'une activite commerciale SME/Corporate"
     },
-    
     "Data Analyst Finance": {
         "eliminatoire": [
             "Aucune formation en Finance, Comptabilite, Controle de gestion, Statistiques, Data Analytics ou Informatique decisionnelle",
@@ -579,13 +528,9 @@ GRILLE = {
             "La maitrise d'Excel (TCD, Power Query) est un pre-requis absolu et non negociable."
         ],
         "score_max_total": 14,
-        "description": "Data Analyst Finance - Analyse de données financières et reporting"
+        "description": "Data Analyst Finance - Analyse de donnees financieres et reporting"
     }
 }
-
-# ===== GRILLES POUR LES 14 AUTRES POSTES =====
-
-# 1. Responsable Administration de Credit
 GRILLE["Responsable Administration de Credit"] = {
     "eliminatoire": [
         "Aucune experience en administration de credit ou dans un service credit",
@@ -624,8 +569,6 @@ GRILLE["Responsable Administration de Credit"] = {
     "score_max_total": 11,
     "description": "Responsable Administration de Credit - Gestion des dossiers de credit"
 }
-
-# 2. Analyste Credit CCB
 GRILLE["Analyste Credit CCB"] = {
     "eliminatoire": [
         "Aucune experience en analyse de credit ou dans une banque",
@@ -662,8 +605,6 @@ GRILLE["Analyste Credit CCB"] = {
     "score_max_total": 10,
     "description": "Analyste Credit CCB - Analyse de risque de credit"
 }
-
-# 3. Archiviste (Administration Credit)
 GRILLE["Archiviste (Administration Credit)"] = {
     "eliminatoire": [
         "Aucune experience en archivage ou gestion documentaire",
@@ -699,8 +640,6 @@ GRILLE["Archiviste (Administration Credit)"] = {
     "score_max_total": 7,
     "description": "Archiviste - Gestion documentaire"
 }
-
-# 4. Senior Finance Officer
 GRILLE["Senior Finance Officer"] = {
     "eliminatoire": [
         "Aucune experience en finance d'entreprise ou reporting financier",
@@ -738,8 +677,6 @@ GRILLE["Senior Finance Officer"] = {
     "score_max_total": 9,
     "description": "Senior Finance Officer - Gestion financiere et reporting"
 }
-
-# 5. Market Risk Officer
 GRILLE["Market Risk Officer"] = {
     "eliminatoire": [
         "Aucune experience en gestion des risques de marche",
@@ -776,8 +713,6 @@ GRILLE["Market Risk Officer"] = {
     "score_max_total": 8,
     "description": "Market Risk Officer - Gestion des risques de marche"
 }
-
-# 6. IT Reseau & Infrastructure
 GRILLE["IT Reseau & Infrastructure"] = {
     "eliminatoire": [
         "Aucune experience en administration reseau ou infrastructure IT",
@@ -815,8 +750,6 @@ GRILLE["IT Reseau & Infrastructure"] = {
     "score_max_total": 9,
     "description": "IT Reseau & Infrastructure - Gestion des infrastructures IT"
 }
-
-# 7. Auditeur interne
 GRILLE["Auditeur interne"] = {
     "eliminatoire": [
         "Aucune experience en audit interne ou externe",
@@ -854,8 +787,6 @@ GRILLE["Auditeur interne"] = {
     "score_max_total": 9,
     "description": "Auditeur interne - Audit et controle des risques"
 }
-
-# 8. Chef service controle des engagements
 GRILLE["Chef service controle des engagements"] = {
     "eliminatoire": [
         "Aucune experience en controle des engagements ou risque de credit",
@@ -893,8 +824,6 @@ GRILLE["Chef service controle des engagements"] = {
     "score_max_total": 13,
     "description": "Chef service controle des engagements - Supervision du controle credit"
 }
-
-# 9. Chef service IT (maintenance/support)
 GRILLE["Chef service IT (maintenance/support)"] = {
     "eliminatoire": [
         "Aucune experience en maintenance IT ou support",
@@ -932,8 +861,6 @@ GRILLE["Chef service IT (maintenance/support)"] = {
     "score_max_total": 10,
     "description": "Chef service IT - Supervision des activites IT"
 }
-
-# 10. Chef service finance
 GRILLE["Chef service finance"] = {
     "eliminatoire": [
         "Aucune experience en finance ou comptabilite",
@@ -973,8 +900,6 @@ GRILLE["Chef service finance"] = {
     "score_max_total": 10,
     "description": "Chef service finance - Supervision des activites financieres"
 }
-
-# 11. Chef service risques de marche
 GRILLE["Chef service risques de marche"] = {
     "eliminatoire": [
         "Aucune experience en gestion des risques de marche",
@@ -1014,8 +939,6 @@ GRILLE["Chef service risques de marche"] = {
     "score_max_total": 10,
     "description": "Chef service risques de marche - Supervision des risques de marche"
 }
-
-# 12. Chef service reporting reglementaire
 GRILLE["Chef service reporting reglementaire"] = {
     "eliminatoire": [
         "Aucune experience en reporting reglementaire bancaire",
@@ -1055,8 +978,6 @@ GRILLE["Chef service reporting reglementaire"] = {
     "score_max_total": 10,
     "description": "Chef service reporting reglementaire - Supervision du reporting reglementaire"
 }
-
-# 13. Chef de Section Compensation
 GRILLE["Chef de Section Compensation"] = {
     "eliminatoire": [
         "Aucune experience en compensation ou operations bancaires",
@@ -1094,8 +1015,6 @@ GRILLE["Chef de Section Compensation"] = {
     "score_max_total": 10,
     "description": "Chef de Section Compensation - Supervision des activites de compensation"
 }
-
-# 14. Charge(e) d'Administration de Credit
 GRILLE["Charge(e) d'Administration de Credit"] = {
     "eliminatoire": [
         "Aucune experience en administration de credit",
@@ -1132,9 +1051,6 @@ GRILLE["Charge(e) d'Administration de Credit"] = {
     "score_max_total": 9,
     "description": "Charge(e) d'Administration de Credit - Gestion des dossiers de credit"
 }
-
-# ===== FONCTIONS D'ANALYSE IA =====
-
 def parse_json_robust(result_text):
     import re as re_json
     if not result_text:
@@ -1177,7 +1093,6 @@ def parse_json_robust(result_text):
                             continue
             logger.error("❌ Aucun JSON trouve dans la reponse")
             return None
-
 def get_recommandation_from_score(score, flags_elim=None, score_max=14):
     s = int(score)
     if flags_elim and len(flags_elim) > 0:
@@ -1188,7 +1103,6 @@ def get_recommandation_from_score(score, flags_elim=None, score_max=14):
         return "Potentiel a evaluer en entretien"
     else:
         return "Rejet"
-
 def get_statut_from_decision(decision, flags_elim=None):
     if flags_elim and len(flags_elim) > 0:
         return "rejete"
@@ -1200,22 +1114,14 @@ def get_statut_from_decision(decision, flags_elim=None):
         return "entretien"
     else:
         return "rejete"
-
 def build_ia_prompt(poste, cv_text, lettre_text, attestation_texts_list):
-    """Construit le prompt pour l'IA en fonction du poste"""
     grille = GRILLE.get(poste, {})
-    
     if not grille:
         return None, None
-    
-    # Construction du prompt système
     system_prompt = f"""Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
-
 POSTE ANALYSE : {poste}
 DESCRIPTION : {grille.get('description', 'Poste bancaire')}
-
 Tu dois analyser STRICTEMENT selon la grille officielle fournie. Tu es le SEUL moteur d'analyse.
-
 REGLES ABSOLUES D'ANALYSE :
 1. Tu DOIS comprendre le SENS des phrases et le CONTEXTE METIER.
 2. Tu ne JAMAIS inventer des faits qui ne sont PAS dans les documents.
@@ -1223,27 +1129,19 @@ REGLES ABSOLUES D'ANALYSE :
 4. Les STAGES, BENEVOLATS et FORMATIONS ne comptent PAS comme experience pro.
 5. Tu JUSTIFIES chaque evaluation avec des CITATIONS du CV/lettre.
 6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
-
 🔴 CRITERES ELIMINATOIRES (rejet immediat si non satisfaits) :
 {chr(10).join(f"- {c}" for c in grille.get('eliminatoire', []))}
-
 🟠 POINTS A VERIFIER dans le CV :
 {chr(10).join(f"- {c}" for c in grille.get('a_verifier', []))}
-
 🟡 SIGNAUX FORTS - candidat prioritaire :
 {chr(10).join(f"- {c}" for c in grille.get('signaux_forts', []))}
-
 ⚠️ POINTS D'ATTENTION :
 {chr(10).join(f"- {c}" for c in grille.get('points_attention', []))}
-
 📊 GRILLE DE SCORING (MAX {grille.get('score_max_total', 14)}) :
 {chr(10).join(f"- {k}: {v}/max" for k, v in grille.get('scores_max', {}).items())}
-
 REGLES METIER SPECIFIQUES :
 {chr(10).join(f"- {r}" for r in grille.get('regles_metier', []))}
-
 FORMAT DE SORTIE : UNIQUEMENT du JSON valide.
-
 {{
   "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
   "points_forts": ["liste des points forts avec justifications"],
@@ -1276,47 +1174,31 @@ FORMAT DE SORTIE : UNIQUEMENT du JSON valide.
   "banking_years": 0,
   "diplome_niveau": "Bac+3/Bac+4/Bac+5/Doctorat/Autre"
 }}
-
 IMPORTANT : La somme des sous_scores donne le score total. Les flags_eliminatoires doivent etre remplis si des criteres eliminatoires ne sont pas satisfaits. Sois precis et professionnel."""
-
     user_message = f"""=== DOCUMENTS A ANALYSER ===
-
 CV DU CANDIDAT :
 {cv_text[:12000]}
-
 LETTRE DE MOTIVATION :
 {lettre_text[:3000] if lettre_text else '(Aucune)'}
-
 ATTESTATIONS :
 {''.join(attestation_texts_list)[:3000] if attestation_texts_list else '(Aucune)'}
-
 === INSTRUCTIONS ===
 Analyse strictement selon la grille. Verifie chaque critere eliminatoire.
 Le score_total est la SOMME des sous-scores.
 Fournis une checklist complete avec true/false pour chaque critere.
 Sois rigoureux et professionnel."""
-
     return system_prompt, user_message
-
 def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste):
-    """
-    Analyse UNIQUEMENT par IA - Aucune analyse par mots-clés
-    L'IA reçoit la grille complète et doit retourner une évaluation stricte
-    """
     if not IA_ANALYSE_ACTIVE or not _client or not cv_text or len(cv_text.strip()) < 50:
         logger.error("❌ IA non disponible ou CV trop court")
         return None
-
     if poste not in GRILLE:
-        logger.error(f"❌ Poste non trouvé dans la grille: {poste}")
+        logger.error(f"❌ Poste non trouve dans la grille: {poste}")
         return None
-
     grille = GRILLE.get(poste, {})
     system_prompt, user_message = build_ia_prompt(poste, cv_text, lettre_text, attestation_texts_list)
-    
     if not system_prompt or not user_message:
         return None
-
     try:
         with _ia_semaphore:
             api_params = {
@@ -1333,27 +1215,18 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     "X-Title": "RecrutBank CV Analyzer"
                 } if "OpenRouter" in _PROVIDER else {}
             }
-
             if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
                 api_params["extra_body"] = {"reasoning": {"enabled": True}}
-
             response = _client.chat.completions.create(**api_params)
             result_text = response.choices[0].message.content
-
             logger.info(f"✅ Analyse IA terminee: {len(result_text)} caracteres")
-
             analyse = parse_json_robust(result_text)
-
             if analyse is None:
                 logger.error("❌ Echec de l'extraction JSON")
                 return None
-
-            # Validation et correction des données
             sous_scores = analyse.get('sous_scores', {})
             max_scores = grille.get('scores_max', {})
             score_max_total = grille.get('score_max_total', 14)
-
-            # Ajuster les sous-scores aux max
             score_total = 0
             for key, max_val in max_scores.items():
                 val = sous_scores.get(key, 0)
@@ -1363,13 +1236,18 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     val = 0
                 sous_scores[key] = val
                 score_total += val
-
             score_total = min(score_max_total, max(0, score_total))
-
             flags_elim = analyse.get('flags_eliminatoires', [])
             if not isinstance(flags_elim, list):
                 flags_elim = []
-
+            veritable_eliminatoire = grille.get('eliminatoire', [])
+            flags_elim_corriges = []
+            for flag in flags_elim:
+                for critere in veritable_eliminatoire:
+                    if critere.lower() in flag.lower() or flag.lower() in critere.lower():
+                        flags_elim_corriges.append(flag)
+                        break
+            flags_elim = flags_elim_corriges
             checklist = analyse.get('checklist', {})
             if not checklist or len(checklist) == 0:
                 checklist = {
@@ -1387,13 +1265,10 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     "verif_5": sous_scores.get(list(max_scores.keys())[5], 0) >= 1 if len(max_scores) > 5 else False,
                     "verif_6": sous_scores.get(list(max_scores.keys())[6], 0) >= 1 if len(max_scores) > 6 else False
                 }
-
             decision = get_recommandation_from_score(score_total, flags_elim, score_max_total)
             statut = get_statut_from_decision(decision, flags_elim)
-
             profils = analyse.get('profils_detectes', {})
             banking_years = analyse.get('banking_years', 0)
-
             result = {
                 'poste': poste,
                 'score': score_total,
@@ -1419,7 +1294,7 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     'banking_years_detecte': banking_years,
                     'nb_eliminatoires': len(flags_elim),
                     'eliminatoires_passes': len(flags_elim) == 0,
-                    'grille_version': 'v11.1-ia-only',
+                    'grille_version': 'v12.0-ia-stable',
                     'moteur': 'IA_100%'
                 },
                 'analyse_details': {
@@ -1433,18 +1308,15 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
                     'synthese_recruteur': analyse.get('synthese_recruteur', ''),
                     'profils_detectes': profils,
                     'banking_years': banking_years,
-                    'diplome_niveau': analyse.get('diplome_niveau', 'Non specifié')
+                    'diplome_niveau': analyse.get('diplome_niveau', 'Non specifie')
                 }
             }
-
             return result
-
     except Exception as e:
         logger.error(f"❌ Erreur analyse IA: {e}")
         import traceback
         traceback.print_exc()
         return None
-
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
         if not force and not is_poste_actif(poste):
@@ -1455,13 +1327,11 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "analyse_auto_date": datetime.datetime.now().isoformat()
                 }).eq('token', token).execute()
             return
-
         if isinstance(attestation_filenames, str):
             try:
                 attestation_filenames = json.loads(attestation_filenames) if attestation_filenames else []
             except Exception:
                 attestation_filenames = [attestation_filenames] if attestation_filenames else []
-
         cv_text = ""
         if cv_filename:
             cv_bytes = download_file_from_supabase_robust(cv_filename)
@@ -1470,7 +1340,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 if len(cv_text) > MAX_TEXT_SIZE:
                     cv_text = cv_text[:MAX_TEXT_SIZE]
                 logger.info(f"CV extrait pour {token}: {len(cv_text)} caracteres")
-
         if not cv_text or len(cv_text.strip()) < 30:
             logger.warning(f"CV manquant ou vide pour {token}")
             if supabase:
@@ -1481,7 +1350,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "analyse_status": "error"
                 }).eq('token', token).execute()
             return
-
         lm_text = ""
         if lettre_filename:
             lm_bytes = download_file_from_supabase_robust(lettre_filename)
@@ -1490,7 +1358,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 if len(lm_text) > MAX_TEXT_SIZE:
                     lm_text = lm_text[:MAX_TEXT_SIZE]
                 logger.info(f"Lettre extraite pour {token}: {len(lm_text)} caracteres")
-
         att_texts = []
         for fn in (attestation_filenames or []):
             if fn:
@@ -1501,8 +1368,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         t = t[:MAX_TEXT_SIZE]
                     if t:
                         att_texts.append(t)
-
-        # UNIQUEMENT l'analyse IA
         if not IA_ANALYSE_ACTIVE:
             logger.error("❌ IA non disponible - impossible d'analyser")
             if supabase:
@@ -1513,18 +1378,15 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                     "analyse_status": "error"
                 }).eq('token', token).execute()
             return
-
         result = analyze_cv_with_ia_only(cv_text, lm_text, att_texts, poste)
-
         if not result:
             logger.error(f"❌ Analyse IA echouee pour {token}")
             if supabase:
                 supabase.table('candidats').update({
                     "analyse_status": "error",
-                    "analyse_error": "L'analyse IA a échoué"
+                    "analyse_error": "L'analyse IA a echoue"
                 }).eq('token', token).execute()
             return
-
         score = result.get('score', 0)
         score_max = result.get('score_max', 14)
         decision = result.get('decision', 'Rejet')
@@ -1537,7 +1399,6 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
         points_vigilance = result.get('points_vigilance', [])
         synthese = result.get('synthese', '')
         analyse_details = result.get('analyse_details', {})
-
         if supabase:
             update_data = {
                 "score": str(score),
@@ -1551,9 +1412,7 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "checklist": json.dumps(checklist, ensure_ascii=False)
             }
             supabase.table('candidats').update(update_data).eq('token', token).execute()
-
         logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut} (flags: {len(flags_elim)})")
-
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1566,24 +1425,18 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 }).eq('token', token).execute()
             except:
                 pass
-
-# ===== ROUTES API =====
-
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
     return jsonify({"postes": POSTES, "postes_actifs": POSTES_ACTIFS, "postes_clotures": POSTES_CLOTURES}), 200
-
 @app.route('/api/postes/actifs', methods=['GET'])
 def get_postes_actifs():
     return jsonify(POSTES_ACTIFS), 200
-
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
-
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
@@ -1609,7 +1462,6 @@ def login():
         except Exception as e:
             logger.error(f"Erreur login: {e}")
     return jsonify({'error': 'Identifiants incorrects'}), 401
-
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -1618,15 +1470,12 @@ def postuler():
         email = (request.form.get('email') or '').strip().lower()
         telephone = (request.form.get('telephone') or '').strip()
         poste = (request.form.get('poste') or '').strip()
-
         if not nom or not prenom or not email or poste not in POSTES:
             return jsonify({'error': 'Champs obligatoires manquants ou poste invalide'}), 400
-
         if supabase:
             existing = supabase.table('candidats').select('*').eq('email', email).eq('poste', poste).execute()
             if existing.data and len(existing.data) > 0:
                 return jsonify({'error': f'Vous avez deja soumis une candidature pour le poste "{poste}".'}), 409
-
             all_candidats = supabase.table('candidats').select('numero_dossier').eq('poste', poste).execute()
             max_num = 0
             for c in all_candidats.data:
@@ -1640,7 +1489,6 @@ def postuler():
                         pass
             new_num = max_num + 1
             numero_dossier = str(new_num)
-
         def save_file_to_supabase(field, suffix):
             f = request.files.get(field)
             if f and f.filename and allowed_file(f.filename):
@@ -1649,15 +1497,12 @@ def postuler():
                 result = upload_file_to_supabase(f, blob_name, f.content_type)
                 return result if result else ''
             return ''
-
         cv_filename = save_file_to_supabase('cv', 'cv')
         if request.files.get('cv') and not cv_filename:
             return jsonify({'error': "Echec de l'envoi du CV, merci de reessayer."}), 500
-
         lettre_filename = save_file_to_supabase('lettre', 'lettre')
         if request.files.get('lettre') and not lettre_filename:
             return jsonify({'error': "Echec de l'envoi de la lettre de motivation, merci de reessayer."}), 500
-
         att_filenames = []
         for f in request.files.getlist('attestation'):
             if f and f.filename and allowed_file(f.filename):
@@ -1666,7 +1511,6 @@ def postuler():
                 result = upload_file_to_supabase(f, blob_name, f.content_type)
                 if result:
                     att_filenames.append(blob_name)
-
         token = uuid.uuid4().hex
         supabase.table('candidats').insert({
             "token": token,
@@ -1688,7 +1532,6 @@ def postuler():
             "analyse_status": "pending",
             "date_candidature": datetime.datetime.now().isoformat()
         }).execute()
-
         if is_poste_actif(poste):
             threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste, False), daemon=True).start()
             analyse_msg = f'Analyse automatique en cours avec {_PROVIDER} (100% IA)'
@@ -1698,25 +1541,17 @@ def postuler():
                 "analyse_status": "closed_post_no_analysis",
                 "analyse_auto_date": datetime.datetime.now().isoformat()
             }).eq('token', token).execute()
-
         nom_complet = f"{prenom} {nom}".strip()
         sujet_confirmation = f"Confirmation de candidature – {poste}"
         corps_confirmation = f"""Bonjour {nom_complet},
-
 Nous accusons reception de votre candidature pour le poste de {poste}.
-
 Votre dossier sera analyse par notre systeme d'intelligence artificielle dans les plus brefs delais.
 Vous recevrez une notification lorsque l'analyse sera terminee.
-
 Sans reponse de notre part sous deux (2) semaines, veuillez considerer que votre candidature n'a pas ete retenue.
-
 Pour toute information : contact@cdotchad.com.
-
 Cordialement,
 L'equipe RecrutBank"""
-
         threading.Thread(target=send_email, args=(email, sujet_confirmation, corps_confirmation), daemon=True).start()
-
         return jsonify({
             'message': 'Candidature soumise avec succes',
             'token': token,
@@ -1725,12 +1560,10 @@ L'equipe RecrutBank"""
             'poste_statut': 'actif' if is_poste_actif(poste) else 'cloture',
             'ia_engine': _PROVIDER
         }), 201
-
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
     if supabase:
@@ -1740,7 +1573,6 @@ def get_statut(token):
             hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'analyse_details', 'score_breakdown'}
             return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
     return jsonify({'error': 'Candidature introuvable'}), 404
-
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
@@ -1760,7 +1592,6 @@ def get_stats():
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
-
 @app.route('/api/recruteur/postes/stats', methods=['GET'])
 @jwt_required()
 def get_postes_stats():
@@ -1795,7 +1626,6 @@ def get_postes_stats():
             'eligible_reanalyse': False
         }
     }), 200
-
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
@@ -1803,14 +1633,11 @@ def list_candidats():
     statut_filter = request.args.get('statut', '')
     search = request.args.get('search', '').lower()
     min_score = request.args.get('min_score', type=int)
-
     if not supabase:
         return jsonify({'error': 'Supabase non configure'}), 500
-
     response = supabase.table('candidats').select('*').execute()
     all_candidats = response.data if response.data else []
     result = []
-
     for c in all_candidats:
         c['id'] = c.get('token', '')
         if poste_filter and c.get('poste') != poste_filter:
@@ -1832,10 +1659,8 @@ def list_candidats():
                 except Exception:
                     pass
         result.append(c)
-
     result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
     return jsonify(result), 200
-
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
@@ -1858,7 +1683,6 @@ def get_candidat_detail(token):
             except Exception:
                 pass
     return jsonify(data), 200
-
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
@@ -1867,31 +1691,25 @@ def update_candidat(token):
     response = supabase.table('candidats').select('*').eq('token', token).execute()
     if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
-
     data = request.get_json(silent=True) or {}
     statut = data.get('statut', 'en_attente')
     note = data.get('note', '')
-
     if statut not in ('en_attente', 'retenu', 'rejete', 'entretien'):
         return jsonify({'error': 'Statut invalide'}), 400
-
     update_data = {
         "statut": statut,
         "note": note,
         "decision_date": datetime.datetime.now().isoformat(),
         "decided_by": get_jwt_identity()
     }
-
     if statut == "rejete":
         update_data["decision"] = "Rejet - Decision du recruteur"
     elif statut == "retenu":
         update_data["decision"] = "Retenu - Decision du recruteur"
     elif statut == "entretien":
         update_data["decision"] = "Entretien - Decision du recruteur"
-
     supabase.table('candidats').update(update_data).eq('token', token).execute()
     return jsonify({'message': 'Mis a jour avec succes', 'statut': statut}), 200
-
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
@@ -1900,16 +1718,13 @@ def trigger_analyze(token):
     response = supabase.table('candidats').select('*').eq('token', token).execute()
     if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
-
     data = response.data[0]
     cv_fn = data.get('cv_filename')
     lm_fn = data.get('lettre_filename')
     att_raw = data.get('attestation_filenames', '[]')
     poste = data.get('poste')
-
     if not cv_fn:
         return jsonify({'error': 'CV manquant pour analyse'}), 400
-
     force = request.args.get('force', '0') == '1'
     if not force and not is_poste_actif(poste):
         return jsonify({
@@ -1917,19 +1732,16 @@ def trigger_analyze(token):
             'poste': poste,
             'statut': 'cloture'
         }), 403
-
     supabase.table('candidats').update({
         "analyse_status": "pending",
         "analyse_manual_trigger": datetime.datetime.now().isoformat()
     }).eq('token', token).execute()
-
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, force), daemon=True).start()
     return jsonify({
         'message': f'Analyse relancee avec {_PROVIDER} (100% IA)',
         'token': token,
         'ia_engine': _PROVIDER
     }), 202
-
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
 def get_reanalyze_status():
@@ -1960,7 +1772,6 @@ def get_reanalyze_status():
     except Exception as e:
         logger.error(f"Erreur reanalyze-status: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-one/<token>', methods=['POST'])
 @jwt_required()
 def reanalyze_one_candidate(token):
@@ -1970,7 +1781,6 @@ def reanalyze_one_candidate(token):
         response = supabase.table('candidats').select('*').eq('token', token).execute()
         if not response.data or len(response.data) == 0:
             return jsonify({'error': 'Candidat introuvable'}), 404
-
         data = response.data[0]
         poste = data.get('poste')
         if not is_poste_actif(poste):
@@ -1979,27 +1789,21 @@ def reanalyze_one_candidate(token):
                 'poste': poste,
                 'statut': 'cloture'
             }), 403
-
         cv_fn = data.get('cv_filename')
         if not cv_fn:
             return jsonify({'error': 'CV manquant pour analyse'}), 400
-
         lm_fn = data.get('lettre_filename')
         att_raw = data.get('attestation_filenames', '[]')
-
         supabase.table('candidats').update({
             "analyse_status": "reanalyzing",
             "reanalyze_trigger": datetime.datetime.now().isoformat(),
             "reanalyze_reason": "Reanalyse manuelle (un seul candidat)"
         }).eq('token', token).execute()
-
         threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, True), daemon=True).start()
         return jsonify({'message': 'Reanalyse lancee (100% IA)', 'token': token, 'poste': poste}), 202
-
     except Exception as e:
         logger.error(f"Erreur reanalyze-one: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
@@ -2008,19 +1812,15 @@ def reanalyze_all_candidates():
             return jsonify({'error': 'Supabase non configure'}), 500
         response = supabase.table('candidats').select('*').execute()
         keys = response.data if response.data else []
-
         if not keys:
             return jsonify({'message': 'Aucune candidature a reanalyser'}), 200
-
         candidates_to_reanalyze = [data for data in keys if data.get('poste') in POSTES_ACTIFS and data.get('cv_filename')]
         candidates_skipped = len(keys) - len(candidates_to_reanalyze)
-
         if not candidates_to_reanalyze:
             return jsonify({
                 'message': 'Aucun candidat sur poste actif avec CV a reanalyser',
                 'skipped_closed_posts': candidates_skipped
             }), 200
-
         now_iso = datetime.datetime.now().isoformat()
         for c in candidates_to_reanalyze:
             try:
@@ -2031,7 +1831,6 @@ def reanalyze_all_candidates():
                 }).eq('token', c.get('token')).execute()
             except Exception:
                 pass
-
         def analyze_one(data):
             try:
                 token = data.get('token')
@@ -2045,13 +1844,11 @@ def reanalyze_all_candidates():
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-
         MAX_WORKERS = min(8, len(candidates_to_reanalyze))
         logger.info(f"Reanalyse parallele : {len(candidates_to_reanalyze)} candidats, {MAX_WORKERS} workers")
         start_time = time.time()
         reanalyzed_count = 0
         errors = []
-
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = {executor.submit(analyze_one, c): c for c in candidates_to_reanalyze}
             for future in as_completed(futures):
@@ -2063,10 +1860,8 @@ def reanalyze_all_candidates():
                         errors.append(f"Token {token}: {msg}")
                 except Exception as e:
                     errors.append(f"Timeout ou erreur: {str(e)}")
-
         elapsed = time.time() - start_time
         gc.collect()
-
         return jsonify({
             'message': f'Reanalyse terminee en {elapsed:.1f}s',
             'reanalyzed_count': reanalyzed_count,
@@ -2076,12 +1871,10 @@ def reanalyze_all_candidates():
             'elapsed_seconds': round(elapsed, 1),
             'errors': errors[:10]
         }), 202
-
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
@@ -2094,20 +1887,16 @@ def reanalyze_by_poste(poste):
             'statut': 'cloture',
             'postes_actifs': POSTES_ACTIFS
         }), 403
-
     try:
         if not supabase:
             return jsonify({'error': 'Supabase non configure'}), 500
         response = supabase.table('candidats').select('*').eq('poste', poste).execute()
         keys = response.data if response.data else []
-
         if not keys:
             return jsonify({'message': f'Aucune candidature pour le poste "{poste}"'}), 200
-
         candidates_with_cv = [k for k in keys if k.get('cv_filename')]
         if not candidates_with_cv:
             return jsonify({'message': f'Aucun CV trouve pour le poste "{poste}"'}), 200
-
         now_iso = datetime.datetime.now().isoformat()
         for data in candidates_with_cv:
             try:
@@ -2118,7 +1907,6 @@ def reanalyze_by_poste(poste):
                 }).eq('token', data.get('token')).execute()
             except Exception:
                 pass
-
         def analyze_one(data):
             try:
                 token = data.get('token')
@@ -2131,12 +1919,10 @@ def reanalyze_by_poste(poste):
                 return (token, True, "OK")
             except Exception as e:
                 return (data.get('token'), False, str(e))
-
         MAX_WORKERS = min(8, len(candidates_with_cv))
         start_time = time.time()
         reanalyzed_count = 0
         errors = []
-
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = [executor.submit(analyze_one, c) for c in candidates_with_cv]
             for future in as_completed(futures):
@@ -2148,10 +1934,8 @@ def reanalyze_by_poste(poste):
                         errors.append(f"Token {token}: {msg}")
                 except Exception as e:
                     errors.append(f"Erreur: {str(e)}")
-
         elapsed = time.time() - start_time
         gc.collect()
-
         return jsonify({
             'message': f'Reanalyse terminee pour le poste "{poste}"',
             'poste': poste,
@@ -2162,12 +1946,10 @@ def reanalyze_by_poste(poste):
             'elapsed_seconds': round(elapsed, 1),
             'errors': errors[:10]
         }), 202
-
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/cleanup-closed', methods=['POST'])
 @jwt_required()
 def cleanup_closed_statuses():
@@ -2184,9 +1966,6 @@ def cleanup_closed_statuses():
         'fixed': fixed,
         'postes_concernes': POSTES_CLOTURES
     }), 200
-
-# ===== FONCTIONS D'EXPORT =====
-
 def generate_excel_report_enhanced(candidats, poste_filter=""):
     if not OPENPYXL_AVAILABLE:
         return None
@@ -2194,7 +1973,6 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
         wb = Workbook()
         ws = wb.active
         ws.title = "Candidats"
-
         headers = ["N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Date Candidature", "Statut", "Score", "Décision", "Points Forts", "Points de Vigilance", "Synthèse"]
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col, value=header)
@@ -2202,7 +1980,6 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             cell.fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
             cell.font = Font(bold=True, size=11, color="FFFFFF")
             cell.alignment = Alignment(horizontal="center")
-
         row_idx = 2
         for c in candidats:
             score_breakdown = c.get('score_breakdown_parsed', {})
@@ -2210,7 +1987,6 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             points_forts = analyse_details.get('points_forts', []) or score_breakdown.get('points_forts', [])
             points_vigilance = analyse_details.get('points_vigilance', []) or score_breakdown.get('points_vigilance', [])
             synthese = analyse_details.get('synthese_recruteur', '') or c.get('synthese', '')
-
             ws.cell(row=row_idx, column=1, value=c.get('numero_dossier', ''))
             ws.cell(row=row_idx, column=2, value=c.get('nom', ''))
             ws.cell(row=row_idx, column=3, value=c.get('prenom', ''))
@@ -2225,11 +2001,9 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             ws.cell(row=row_idx, column=12, value=", ".join(points_vigilance[:3]) if points_vigilance else '')
             ws.cell(row=row_idx, column=13, value=synthese[:200] if synthese else '')
             row_idx += 1
-
         for col in range(1, len(headers) + 1):
             col_letter = get_column_letter(col)
             ws.column_dimensions[col_letter].width = 20
-
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
@@ -2237,7 +2011,6 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
     except Exception as e:
         logger.error(f"Erreur generation Excel: {e}")
         return None
-
 def generate_pdf_report_enhanced(candidats, poste_filter=""):
     if not REPORTLAB_AVAILABLE:
         return None
@@ -2248,11 +2021,9 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
         title_style = styles['Title']
         heading_style = styles['Heading2']
         normal_style = styles['Normal']
-
         story = []
         story.append(Paragraph(f"Rapport de candidature - {poste_filter if poste_filter else 'Tous les postes'}", title_style))
         story.append(Spacer(1, 0.5*cm))
-
         if not candidats:
             story.append(Paragraph("Aucun candidat trouve.", normal_style))
         else:
@@ -2266,7 +2037,6 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                     c.get('statut', 'en_attente'),
                     str(c.get('score', 0))
                 ])
-
             table = Table(data, colWidths=[2.5*cm, 3*cm, 3*cm, 4*cm, 3*cm, 2*cm])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
@@ -2283,20 +2053,17 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             story.append(table)
             story.append(Spacer(1, 0.5*cm))
             story.append(Paragraph(f"Total: {len(candidats)} candidats", normal_style))
-
         doc.build(story)
         buf.seek(0)
         return buf
     except Exception as e:
         logger.error(f"Erreur generation PDF: {e}")
         return None
-
 def generate_csv_report(candidats, poste_filter=""):
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
     headers = ["N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Date Candidature", "Statut", "Score", "Décision"]
     writer.writerow(headers)
-
     for c in candidats:
         writer.writerow([
             c.get('numero_dossier', ''),
@@ -2310,9 +2077,7 @@ def generate_csv_report(candidats, poste_filter=""):
             c.get('score', 0),
             c.get('decision', '')
         ])
-
     return output.getvalue()
-
 def generate_word_report(candidats, poste_filter=""):
     if not DOCX_AVAILABLE:
         return None
@@ -2320,15 +2085,12 @@ def generate_word_report(candidats, poste_filter=""):
         from docx import Document as DocxDocument
         from docx.shared import Inches, Pt
         doc = DocxDocument()
-
         title = doc.add_heading(f"Rapport de candidature - {poste_filter if poste_filter else 'Tous les postes'}", 0)
-        doc.add_paragraph(f"Généré le {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}")
-
+        doc.add_paragraph(f"Genere le {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}")
         if not candidats:
             doc.add_paragraph("Aucun candidat trouve.")
         else:
             doc.add_heading("Liste des candidats", level=1)
-
             table = doc.add_table(rows=1, cols=6)
             table.style = 'Table Grid'
             hdr_cells = table.rows[0].cells
@@ -2338,7 +2100,6 @@ def generate_word_report(candidats, poste_filter=""):
             hdr_cells[3].text = "Poste"
             hdr_cells[4].text = "Statut"
             hdr_cells[5].text = "Score"
-
             for c in candidats[:100]:
                 row_cells = table.add_row().cells
                 row_cells[0].text = c.get('numero_dossier', '')
@@ -2347,9 +2108,7 @@ def generate_word_report(candidats, poste_filter=""):
                 row_cells[3].text = c.get('poste', '')
                 row_cells[4].text = c.get('statut', 'en_attente')
                 row_cells[5].text = str(c.get('score', 0))
-
             doc.add_paragraph(f"Total: {len(candidats)} candidats")
-
         buf = io.BytesIO()
         doc.save(buf)
         buf.seek(0)
@@ -2357,7 +2116,6 @@ def generate_word_report(candidats, poste_filter=""):
     except Exception as e:
         logger.error(f"Erreur generation Word: {e}")
         return None
-
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -2367,14 +2125,11 @@ def export_candidates(fmt):
         date_start = request.args.get('date_start', '')
         date_end = request.args.get('date_end', '')
         min_score = request.args.get('min_score', type=int)
-
         if not supabase:
             return jsonify({'error': 'Supabase non configure'}), 500
-
         response = supabase.table('candidats').select('*').execute()
         all_candidats = response.data if response.data else []
         result = []
-
         for c in all_candidats:
             c['id'] = c.get('token', '')
             if poste_filter and c.get('poste') != poste_filter:
@@ -2400,51 +2155,41 @@ def export_candidates(fmt):
                     except Exception:
                         pass
             result.append(c)
-
         result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else "_global"
         filename_base = f"rapport{poste_suffix}_{ts}"
-
         if fmt.lower() == 'excel' or fmt.lower() == 'xlsx':
             buf = generate_excel_report_enhanced(result, poste_filter=poste_filter)
             if not buf:
                 return jsonify({'error': 'Erreur generation Excel'}), 500
             return send_file(buf, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', as_attachment=True, download_name=f'{filename_base}.xlsx')
-
         elif fmt.lower() == 'pdf':
             buf = generate_pdf_report_enhanced(result, poste_filter=poste_filter)
             if not buf:
                 return jsonify({'error': 'Erreur generation PDF'}), 500
             return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=f'{filename_base}.pdf')
-
         elif fmt.lower() == 'csv':
             csv_data = generate_csv_report(result, poste_filter=poste_filter)
             return send_file(io.BytesIO(csv_data.encode('utf-8-sig')), mimetype='text/csv', as_attachment=True, download_name=f'{filename_base}.csv')
-
         elif fmt.lower() in ('word', 'docx'):
             buf = generate_word_report(result, poste_filter=poste_filter)
             if not buf:
                 return jsonify({'error': 'Erreur generation Word'}), 500
             return send_file(buf, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document', as_attachment=True, download_name=f'{filename_base}.docx')
-
         return jsonify({'error': 'Format non supporte. Utilisez: csv, excel, pdf ou word'}), 400
-
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/candidats/<token>', methods=['DELETE'])
 @jwt_required()
 def delete_candidat(token):
     if not supabase:
         return jsonify({'error': 'Supabase non configure'}), 500
-
     response = supabase.table('candidats').select('*').eq('token', token).execute()
     if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
-
     data = response.data[0]
     files_to_delete = []
     if data.get('cv_filename'):
@@ -2458,7 +2203,6 @@ def delete_candidat(token):
                 files_to_delete.append(att)
     except:
         pass
-
     deleted_files = []
     failed_files = []
     for filename in files_to_delete:
@@ -2469,14 +2213,12 @@ def delete_candidat(token):
         except Exception as e:
             logger.error(f"Erreur suppression fichier {filename}: {e}")
             failed_files.append(filename)
-
     try:
         supabase.table('candidats').delete().eq('token', token).execute()
         logger.info(f"Candidat {token} supprime avec succes")
     except Exception as e:
         logger.error(f"Erreur suppression candidat {token}: {e}")
         return jsonify({'error': 'Erreur lors de la suppression du candidat', 'details': str(e)}), 500
-
     return jsonify({
         'message': 'Candidat supprime avec succes',
         'token': token,
@@ -2489,9 +2231,6 @@ def delete_candidat(token):
             'poste': data.get('poste')
         }
     }), 200
-
-# ===== FONCTIONS D'EXPORT ZIP =====
-
 def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
     tmp_zip_path = None
     start_time = time.time()
@@ -2499,16 +2238,13 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'processing'
             logger.info(f"[job {job_id}] Debut export ZIP optimise - {datetime.datetime.now()}")
-
         if not supabase:
             with _ZIP_JOBS_LOCK:
                 _ZIP_JOBS[job_id]['status'] = 'error'
                 _ZIP_JOBS[job_id]['error'] = 'Supabase non configure'
             return
-
         response = supabase.table('candidats').select('*').execute()
         all_candidats = response.data if response.data else []
-
         candidats = []
         for c in all_candidats:
             c['id'] = c.get('token', '')
@@ -2522,16 +2258,13 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
                 if date_end and date_only > date_end:
                     continue
             candidats.append(c)
-
         if not candidats:
             with _ZIP_JOBS_LOCK:
                 _ZIP_JOBS[job_id]['status'] = 'error'
                 _ZIP_JOBS[job_id]['error'] = 'Aucun dossier a exporter'
             return
-
         download_tasks = []
         candidats_meta = {}
-
         for cand in candidats:
             poste_nom = cand.get('poste', 'Poste_Inconnu')
             poste_nom_clean = re.sub(r'[<>:"/\\|?*]', '_', poste_nom)
@@ -2547,15 +2280,12 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
                 'cand': cand,
                 'files_written': 0
             }
-
             cv_file = cand.get('cv_filename', '')
             if cv_file:
                 download_tasks.append((cand['id'], cv_file, dossier_parent, 'CV'))
-
             lettre_file = cand.get('lettre_filename', '')
             if lettre_file:
                 download_tasks.append((cand['id'], lettre_file, dossier_parent, 'Lettre_de_motivation'))
-
             att_raw = cand.get('attestation_filenames', '[]')
             try:
                 att_files = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
@@ -2564,32 +2294,25 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
                         download_tasks.append((cand['id'], att_file, dossier_parent, f'Attestation_{idx}'))
             except Exception:
                 pass
-
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['total'] = len(download_tasks)
             logger.info(f"[job {job_id}] {len(download_tasks)} fichiers a telecharger")
-
         def _download_one(task):
             cand_id, blob_name, dossier_parent, prefix = task
             file_bytes = download_file_from_supabase_robust(blob_name)
             return (cand_id, blob_name, dossier_parent, prefix, file_bytes)
-
         tmp_fd = tempfile.NamedTemporaryFile(delete=False, suffix='.zip', dir='/tmp')
         tmp_zip_path = tmp_fd.name
         tmp_fd.close()
-
         files_added = 0
         max_workers = min(_ZIP_MAX_WORKERS, max(1, len(download_tasks)))
-
         with zipfile.ZipFile(tmp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             if download_tasks:
                 BATCH_SIZE = 50
                 total_batches = (len(download_tasks) + BATCH_SIZE - 1) // BATCH_SIZE
-
                 for batch_idx in range(0, len(download_tasks), BATCH_SIZE):
                     batch = download_tasks[batch_idx:batch_idx + BATCH_SIZE]
                     logger.info(f"[job {job_id}] Traitement du lot {batch_idx//BATCH_SIZE + 1}/{total_batches} ({len(batch)} fichiers)")
-
                     with ThreadPoolExecutor(max_workers=min(max_workers, len(batch))) as executor:
                         futures = [executor.submit(_download_one, t) for t in batch]
                         for future in as_completed(futures):
@@ -2598,7 +2321,6 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
                             except Exception as e:
                                 logger.error(f"[job {job_id}] Erreur telechargement: {e}")
                                 continue
-
                             if file_bytes:
                                 ext = blob_name.rsplit('.', 1)[-1].lower() if '.' in blob_name else ''
                                 archive_name = f"{dossier_parent}/{prefix}.{ext}" if ext else f"{dossier_parent}/{prefix}"
@@ -2611,11 +2333,9 @@ def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
                                     logger.error(f"[job {job_id}] Erreur ecriture ZIP: {e}")
                                 finally:
                                     del file_bytes
-
                             with _ZIP_JOBS_LOCK:
                                 _ZIP_JOBS[job_id]['progress'] = _ZIP_JOBS[job_id].get('progress', 0) + 1
                             gc.collect()
-
             for cand_id, meta in candidats_meta.items():
                 if meta['files_written'] > 0:
                     continue
@@ -2629,22 +2349,17 @@ Date candidature: {cand.get('date_candidature', 'N/A')}"""
                 archive_name = f"{meta['dossier_parent']}/INFOS_CANDIDAT.txt"
                 zip_file.writestr(archive_name, info_content.encode('utf-8'))
                 files_added += 1
-
         elapsed = time.time() - start_time
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else ""
         filename = f"dossiers_candidats{poste_suffix}_{ts}.zip"
-
         logger.info(f"[job {job_id}] Export ZIP termine en {elapsed:.2f}s pour {len(candidats)} candidats ({files_added} fichiers)")
-
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'done'
             _ZIP_JOBS[job_id]['filepath'] = tmp_zip_path
             _ZIP_JOBS[job_id]['filename'] = filename
-
         del candidats_meta, download_tasks
         gc.collect()
-
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2657,7 +2372,6 @@ Date candidature: {cand.get('date_candidature', 'N/A')}"""
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'error'
             _ZIP_JOBS[job_id]['error'] = str(e)
-
 @app.route('/api/recruteur/dossiers/zip/start', methods=['GET'])
 @jwt_required()
 def start_zip_export():
@@ -2665,7 +2379,6 @@ def start_zip_export():
     poste_filter = request.args.get('poste', '')
     date_start = request.args.get('date_start', '')
     date_end = request.args.get('date_end', '')
-
     job_id = uuid.uuid4().hex
     with _ZIP_JOBS_LOCK:
         _ZIP_JOBS[job_id] = {
@@ -2677,10 +2390,8 @@ def start_zip_export():
             'filename': None,
             'error': None
         }
-
     threading.Thread(target=_run_zip_export_job, args=(job_id, poste_filter, date_start, date_end), daemon=True).start()
     return jsonify({'job_id': job_id}), 202
-
 @app.route('/api/recruteur/dossiers/zip/status/<job_id>', methods=['GET'])
 @jwt_required()
 def zip_export_status(job_id):
@@ -2694,7 +2405,6 @@ def zip_export_status(job_id):
             'total': job.get('total', 0),
             'error': job.get('error')
         }), 200
-
 @app.route('/api/recruteur/dossiers/zip/download/<job_id>', methods=['GET'])
 @jwt_required()
 def zip_export_download(job_id):
@@ -2709,9 +2419,7 @@ def zip_export_download(job_id):
         filepath = job.get('filepath')
         if not filepath or not os.path.exists(filepath):
             return jsonify({'error': 'Fichier expire ou deja supprime'}), 410
-
         response_obj = send_file(filepath, mimetype='application/zip', as_attachment=True, download_name=job['filename'])
-
         @response_obj.call_on_close
         def _cleanup_after_send():
             try:
@@ -2721,9 +2429,7 @@ def zip_export_download(job_id):
                 logger.warning(f"Nettoyage fichier temporaire ZIP (job {job_id}) echoue: {e}")
             with _ZIP_JOBS_LOCK:
                 _ZIP_JOBS.pop(job_id, None)
-
         return response_obj
-
 def _cleanup_old_zip_jobs():
     now = time.time()
     with _ZIP_JOBS_LOCK:
@@ -2735,7 +2441,6 @@ def _cleanup_old_zip_jobs():
                     os.remove(job['filepath'])
                 except Exception:
                     pass
-
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -2744,7 +2449,6 @@ def email_preview(token):
     response = supabase.table('candidats').select('*').eq('token', token).execute()
     if not response.data or len(response.data) == 0:
         return jsonify({'error': 'Candidat introuvable'}), 404
-
     data = response.data[0]
     body = request.get_json(silent=True) or {}
     msg_type = body.get('type', data.get('statut', 'en_attente'))
@@ -2752,7 +2456,6 @@ def email_preview(token):
     poste = data.get('poste', '')
     to_email = data.get('email', '')
     sign = "\nCordialement,\nL'equipe Ressources Humaines\nRecrutBank"
-
     if msg_type == 'retenu':
         sujet = f"Felicitations – Candidature retenue – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous avons le plaisir de vous informer que votre candidature pour le poste de {poste} a ete retenue.\nNous vous contacterons tres prochainement." + sign
@@ -2762,9 +2465,7 @@ def email_preview(token):
     else:
         sujet = f"Reponse a votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'interet que vous portez a notre institution.\nApres examen attentif de votre dossier pour le poste de {poste}, nous avons le regret de vous informer que votre candidature n'a pas ete retenue.\nNous vous encourageons a postuler a nouveau." + sign
-
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
-
 @app.route('/api/recruteur/uploads/<path:filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename.replace('/', '_'))
@@ -2774,7 +2475,6 @@ def serve_upload(filename):
     if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
     return redirect(url)
-
 @app.route('/api/recruteur/debug/analyse-ia', methods=['POST'])
 @jwt_required()
 def debug_analyse_ia():
@@ -2782,15 +2482,12 @@ def debug_analyse_ia():
     cv_text = data.get('cv_text', '')
     lettre_text = data.get('lettre_text', '')
     poste = data.get('poste', '')
-
     if not cv_text or poste not in GRILLE:
         return jsonify({'error': 'cv_text requis et poste doit exister dans GRILLE'}), 400
-
     result = analyze_cv_with_ia_only(cv_text, lettre_text, [], poste)
     if not result:
-        return jsonify({'error': "L'analyse IA a échoué"}), 500
+        return jsonify({'error': "L'analyse IA a echoue"}), 500
     return jsonify(result), 200
-
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     try:
@@ -2801,14 +2498,13 @@ def test_email():
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     return jsonify({
-        "version": "v11.1-ia-only",
+        "version": "v12.0-ia-stable",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
-        "analysis_method": "100% IA - Aucune analyse par mots-clés",
+        "analysis_method": "100% IA - Aucune analyse par mots-cles",
         "max_concurrent_downloads": DOWNLOAD_MAX_CONCURRENT,
         "zip_max_workers": _ZIP_MAX_WORKERS,
         "ia_provider": _PROVIDER,
@@ -2825,42 +2521,47 @@ def health_version():
         "scoring_max_chef_division": 14,
         "scoring_max_data_analyst": 14,
         "seuils": {"prioritaire": 11, "potentiel_min": 7, "rejet_max": 6},
+        "corrections_apportees": [
+            "Suppression de l'ajustement negatif (-12) dans le calcul du score",
+            "Validation stricte des criteres eliminatoires (seuls ceux definis dans la grille)",
+            "La certification n'est PLUS un critere eliminatoire",
+            "Les attestations ne sont PLUS des criteres eliminatoires",
+            "Le score est la SOMME des sous-scores (sans soustraction)"
+        ],
         "deployed_at": datetime.datetime.now().isoformat(),
-        "version_info": "v11.1-ia-only - 100% IA avec grilles officielles"
+        "version_info": "v12.0-ia-stable - Corrections des bugs de scoring"
     }), 200
-
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     import multiprocessing
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
-
     logger.info("=" * 60)
-    logger.info("🚀 RecrutBank API v11.1 - 100% IA Analysis")
+    logger.info("🚀 RecrutBank API v12.0 - 100% IA Stable")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
     logger.info(f"IA Provider: {'✅ ' + _PROVIDER if IA_ANALYSE_ACTIVE else '❌ Aucune'}")
-
     if IA_ANALYSE_ACTIVE:
         logger.info(f"Modele: {_MODEL}")
         logger.info(f"Gratuit: {'✅ Oui' if 'OpenRouter' in _PROVIDER else '❌ Non (payant)'}")
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
-        logger.info(f"Analyse: 100% IA - AUCUNE analyse par mots-clés")
+        logger.info(f"Analyse: 100% IA - AUCUNE analyse par mots-cles")
         logger.info(f"POSTES ACTIFS: {POSTES_ACTIFS}")
         logger.info(f"GRILLES DISPONIBLES: {len(GRILLE)} postes")
-        logger.info(f"  - Chef de Division Local Corporate (score max: 14)")
-        logger.info(f"  - Data Analyst Finance (score max: 14)")
-        logger.info(f"  - 14 autres postes avec grilles personnalisees")
+        logger.info("CORRECTIONS APPLIQUEES:")
+        logger.info("  ✅ Suppression de l'ajustement negatif (-12) dans le calcul du score")
+        logger.info("  ✅ Validation stricte des criteres eliminatoires")
+        logger.info("  ✅ La certification n'est PLUS un critere eliminatoire")
+        logger.info("  ✅ Les attestations ne sont PLUS des criteres eliminatoires")
+        logger.info("  ✅ Le score est la SOMME des sous-scores")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
     else:
-        logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le système ne peut pas fonctionner")
+        logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le systeme ne peut pas fonctionner")
         logger.warning("   Veuillez configurer OPENROUTER_API_KEY")
-
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
     logger.info(f"Workers ZIP max: {_ZIP_MAX_WORKERS}")
     logger.info("=" * 60)
-
     try:
         import gunicorn
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
