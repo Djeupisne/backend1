@@ -74,9 +74,8 @@ _MODEL = None
 IA_ANALYSE_ACTIVE = False
 ACTIVE_MODELS = []
 OPENROUTER_MODELS = [
-    {"name": "MiniMax M3", "model": os.getenv("IA_MODEL_1", "minimax/minimax-m3:free"), "priority": 1},
-    {"name": "GLM 5.2", "model": os.getenv("IA_MODEL_2", "z-ai/glm-5.2:free"), "priority": 2},
-    {"name": "Gemma 4 31B", "model": os.getenv("IA_MODEL_3", "google/gemma-4-31b-it:free"), "priority": 3}
+    {"name": "Nemotron 3 Ultra", "model": os.getenv("IA_MODEL_1", "nvidia/nemotron-3-ultra-550b-a55b:free"), "priority": 1, "supports_reasoning": True},
+    {"name": "MiniMax M3", "model": os.getenv("IA_MODEL_2", "minimax/minimax-m3:free"), "priority": 2, "supports_reasoning": False}
 ]
 IA_FALLBACK_ENABLED = os.getenv("IA_FALLBACK_ENABLED", "true").lower() == "true"
 IA_MAX_RETRIES = int(os.getenv("IA_MAX_RETRIES", "3"))
@@ -101,7 +100,8 @@ def initialize_ia_clients():
                         "name": f"OpenRouter - {model_config['name']}",
                         "provider": "OpenRouter",
                         "base_url": OPENROUTER_BASE_URL,
-                        "priority": model_config.get("priority", 10)
+                        "priority": model_config.get("priority", 10),
+                        "supports_reasoning": model_config.get("supports_reasoning", False)
                     })
                     logger.info(f"✅ {model_config['name']} initialise avec succes")
             except Exception as e:
@@ -122,7 +122,8 @@ def initialize_ia_clients():
                     "name": "DeepSeek",
                     "provider": "DeepSeek",
                     "base_url": "https://api.deepseek.com",
-                    "priority": 99
+                    "priority": 99,
+                    "supports_reasoning": False
                 })
                 logger.info(f"✅ DeepSeek initialise avec succes")
         except Exception as e:
@@ -135,7 +136,8 @@ def initialize_ia_clients():
         IA_ANALYSE_ACTIVE = True
         logger.info(f"✅ {len(ACTIVE_MODELS)} modele(s) IA actif(s):")
         for m in ACTIVE_MODELS:
-            logger.info(f"   - {m['name']} ({m['model']})")
+            supports = "🧠" if m.get("supports_reasoning", False) and OPENROUTER_REASONING_ENABLED else "📝"
+            logger.info(f"   {supports} {m['name']} ({m['model']})")
     else:
         IA_ANALYSE_ACTIVE = False
         logger.warning("⚠️ AUCUN MODELE IA DISPONIBLE")
@@ -176,7 +178,7 @@ def after_request(response):
     return response
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
-    active_models = [{"name": m["name"], "model": m["model"], "provider": m["provider"]} for m in ACTIVE_MODELS]
+    active_models = [{"name": m["name"], "model": m["model"], "provider": m["provider"], "supports_reasoning": m.get("supports_reasoning", False)} for m in ACTIVE_MODELS]
     return jsonify({
         'status': 'ok',
         'message': f'RecrutBank API with {len(ACTIVE_MODELS)} IA model(s)',
@@ -1288,7 +1290,10 @@ INTERPRETE RAISONNABLEMENT les postes de management et les certifications."""
     return system_prompt, user_message
 def call_ia_model(client, model, system_prompt, user_message):
     try:
-        api_params = {
+        is_nemotron = "nemotron" in model.lower()
+        is_minimax = "minimax" in model.lower()
+        supports_reasoning = is_nemotron
+        payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -1296,22 +1301,36 @@ def call_ia_model(client, model, system_prompt, user_message):
             ],
             "temperature": 0.1,
             "max_tokens": 4096,
-            "response_format": {"type": "json_object"},
             "extra_headers": {
                 "HTTP-Referer": "https://recrutment.onrender.com",
                 "X-Title": "RecrutBank CV Analyzer"
             }
         }
-        if OPENROUTER_REASONING_ENABLED and "OpenRouter" in str(client.base_url):
-            api_params["extra_body"] = {"reasoning": {"enabled": True}}
-        response = client.chat.completions.create(**api_params)
+        if OPENROUTER_REASONING_ENABLED and supports_reasoning:
+            payload["reasoning"] = {"enabled": True}
+            logger.info(f"🧠 Reasoning activé pour {model}")
+        else:
+            payload["response_format"] = {"type": "json_object"}
+        response = client.chat.completions.create(**payload)
         if response is None:
             return None
         if not hasattr(response, 'choices') or response.choices is None or len(response.choices) == 0:
             return None
         if response.choices[0].message is None:
             return None
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        if not content or len(content.strip()) < 10:
+            return None
+        if supports_reasoning and OPENROUTER_REASONING_ENABLED:
+            import re as re_json
+            json_match = re_json.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                try:
+                    json.loads(json_match.group(1))
+                    return json_match.group(1)
+                except:
+                    pass
+        return content
     except Exception as e:
         logger.warning(f"⚠️ Erreur avec ce modele: {e}")
         return None
@@ -1394,8 +1413,7 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
             "verif_3": sous_scores.get(keys_list[3], 0) >= 1 if len(keys_list) > 3 else False,
             "verif_4": sous_scores.get(keys_list[4], 0) >= 1 if len(keys_list) > 4 else False,
             "verif_5": sous_scores.get(keys_list[5], 0) >= 1 if len(keys_list) > 5 else False,
-            "verif_6": sous_scores.get(keys_list[6], 0) >= 1 if len(keys_list) > 6 else False
-        }
+            "verif_6": sous_scores.get(keys_list[6], 0) >= 1 if len(keys_list) > 6 else False        }
     decision = get_recommandation_from_score(score_total, flags_elim, score_max_total)
     statut = get_statut_from_decision(decision, flags_elim)
     profils = analyse.get('profils_detectes', {})
@@ -2628,7 +2646,7 @@ def test_email():
         return jsonify({'error': str(e)}), 500
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
-    active_models = [{"name": m["name"], "model": m["model"]} for m in ACTIVE_MODELS]
+    active_models = [{"name": m["name"], "model": m["model"], "supports_reasoning": m.get("supports_reasoning", False)} for m in ACTIVE_MODELS]
     return jsonify({
         "version": "v13.1-ia-multi-fallback",
         "postes_actifs": POSTES_ACTIFS,
@@ -2676,7 +2694,8 @@ if __name__ == '__main__':
     if ACTIVE_MODELS:
         logger.info(f"✅ {len(ACTIVE_MODELS)} modele(s) IA actif(s):")
         for m in ACTIVE_MODELS:
-            logger.info(f"   - {m['name']} ({m['model']})")
+            supports = "🧠" if m.get("supports_reasoning", False) and OPENROUTER_REASONING_ENABLED else "📝"
+            logger.info(f"   {supports} {m['name']} ({m['model']})")
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
         logger.info(f"Analyse: 100% IA avec fallback automatique")
         logger.info(f"POSTES ACTIFS: {POSTES_ACTIFS}")
