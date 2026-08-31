@@ -192,7 +192,8 @@ def health_check():
             'active_models_count': len(ACTIVE_MODELS),
             'analysis_method': '100% IA avec fallback multi-modeles',
             'scoring_max': 14,
-            'postes_actifs': ["Chef de Division Local Corporate", "Data Analyst Finance"],
+            'postes_actifs': ["Data Analyst Finance"],
+            'postes_clotures': ["Chef de Division Local Corporate"],
             'version': 'v13.1-ia-multi-fallback'
         }
     }), 200
@@ -493,7 +494,7 @@ POSTES = [
     "Chef de Section Compensation",
     "Charge(e) d'Administration de Credit"
 ]
-POSTES_ACTIFS = ["Chef de Division Local Corporate", "Data Analyst Finance"]
+POSTES_ACTIFS = ["Data Analyst Finance"]
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
@@ -1188,6 +1189,13 @@ def get_statut_from_decision(decision, flags_elim=None):
         return "entretien"
     else:
         return "rejete"
+def sort_candidats(candidats):
+    """Trie les candidats par statut (retenu en premier) puis par score decroissant"""
+    statut_order = {'retenu': 0, 'entretien': 1, 'en_attente': 2, 'rejete': 3}
+    return sorted(candidats, key=lambda x: (
+        statut_order.get(x.get('statut', 'en_attente'), 99),
+        -int(x.get('score', 0))
+    ))
 def build_ia_prompt(poste, cv_text, lettre_text, attestation_texts_list):
     grille = GRILLE.get(poste, {})
     if not grille:
@@ -1569,43 +1577,32 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 }).eq('token', token).execute()
             except:
                 pass
-
-# ============================================================
-# FONCTIONS D'EXPORT AMÉLIORÉES
-# ============================================================
-
 def generate_excel_report_enhanced(candidats, poste_filter=""):
     if not OPENPYXL_AVAILABLE:
         return None
     try:
+        sorted_candidats = sort_candidats(candidats)
         wb = Workbook()
         ws = wb.active
         ws.title = "Candidats"
-        
-        # Définir les styles
         header_font = Font(bold=True, size=12, color="FFFFFF")
         header_fill = PatternFill(start_color="1a3a5c", end_color="1a3a5c", fill_type="solid")
         header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        
         cell_alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         center_alignment = Alignment(horizontal="center", vertical="center")
         number_alignment = Alignment(horizontal="center", vertical="center")
-        
         thin_border = Border(
             left=Side(style='thin', color='000000'),
             right=Side(style='thin', color='000000'),
             top=Side(style='thin', color='000000'),
             bottom=Side(style='thin', color='000000')
         )
-        
-        # Définir les colonnes
         headers = [
-            "Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone", 
-            "Poste", "Date Candidature", "Statut", "Score", "Décision", 
+            "Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone",
+            "Poste", "Statut", "Score", "Décision",
             "Points Forts", "Points de Vigilance", "Synthèse"
         ]
-        col_widths = [5, 12, 18, 18, 25, 15, 30, 18, 12, 8, 20, 35, 35, 40]
-        
+        col_widths = [5, 12, 18, 18, 25, 15, 30, 12, 8, 20, 35, 35, 40]
         for col, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col, value=header)
             cell.font = header_font
@@ -1613,20 +1610,16 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             cell.alignment = header_alignment
             cell.border = thin_border
             ws.column_dimensions[get_column_letter(col)].width = col_widths[col-1]
-        
-        # Remplir les données
         row_idx = 2
         rank = 1
-        for c in candidats:
+        for c in sorted_candidats:
             score_breakdown = c.get('score_breakdown_parsed', {})
             analyse_details = c.get('analyse_details_parsed', {})
             points_forts = analyse_details.get('points_forts', []) or score_breakdown.get('points_forts', [])
             points_vigilance = analyse_details.get('points_vigilance', []) or score_breakdown.get('points_vigilance', [])
             synthese = analyse_details.get('synthese_recruteur', '') or c.get('synthese', '')
-            
             statut = c.get('statut', 'en_attente')
             score = int(c.get('score', 0))
-            
             ws.cell(row=row_idx, column=1, value=rank).alignment = number_alignment
             ws.cell(row=row_idx, column=2, value=c.get('numero_dossier', '')).alignment = center_alignment
             ws.cell(row=row_idx, column=3, value=c.get('nom', '')).alignment = cell_alignment
@@ -1634,34 +1627,25 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             ws.cell(row=row_idx, column=5, value=c.get('email', '')).alignment = cell_alignment
             ws.cell(row=row_idx, column=6, value=c.get('telephone', '')).alignment = cell_alignment
             ws.cell(row=row_idx, column=7, value=c.get('poste', '')).alignment = cell_alignment
-            ws.cell(row=row_idx, column=8, value=c.get('date_candidature', '')).alignment = center_alignment
-            ws.cell(row=row_idx, column=9, value=statut).alignment = center_alignment
-            ws.cell(row=row_idx, column=10, value=score).alignment = center_alignment
-            ws.cell(row=row_idx, column=11, value=c.get('decision', '')).alignment = cell_alignment
-            ws.cell(row=row_idx, column=12, value=", ".join(points_forts[:4]) if points_forts else '').alignment = cell_alignment
-            ws.cell(row=row_idx, column=13, value=", ".join(points_vigilance[:4]) if points_vigilance else '').alignment = cell_alignment
-            ws.cell(row=row_idx, column=14, value=synthese[:300] if synthese else '').alignment = cell_alignment
-            
-            # Appliquer les bordures à chaque cellule
+            ws.cell(row=row_idx, column=8, value=statut).alignment = center_alignment
+            ws.cell(row=row_idx, column=9, value=score).alignment = center_alignment
+            ws.cell(row=row_idx, column=10, value=c.get('decision', '')).alignment = cell_alignment
+            ws.cell(row=row_idx, column=11, value=", ".join(points_forts[:4]) if points_forts else '').alignment = cell_alignment
+            ws.cell(row=row_idx, column=12, value=", ".join(points_vigilance[:4]) if points_vigilance else '').alignment = cell_alignment
+            ws.cell(row=row_idx, column=13, value=synthese[:300] if synthese else '').alignment = cell_alignment
             for col in range(1, len(headers) + 1):
                 ws.cell(row=row_idx, column=col).border = thin_border
-            
-            # Colorier les lignes alternées
             if row_idx % 2 == 0:
                 for col in range(1, len(headers) + 1):
                     ws.cell(row=row_idx, column=col).fill = PatternFill(start_color="f8f9fa", end_color="f8f9fa", fill_type="solid")
-            
             row_idx += 1
             rank += 1
-        
-        # Ajouter un total en bas
         total_row = row_idx
-        if len(candidats) > 0:
-            total_cell = ws.cell(row=total_row, column=1, value=f"Total: {len(candidats)} candidats")
+        if len(sorted_candidats) > 0:
+            total_cell = ws.cell(row=total_row, column=1, value=f"Total: {len(sorted_candidats)} candidats")
             total_cell.font = Font(bold=True, size=11)
             ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=3)
             total_cell.alignment = Alignment(horizontal="left", vertical="center")
-        
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
@@ -1669,17 +1653,14 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
     except Exception as e:
         logger.error(f"Erreur generation Excel: {e}")
         return None
-
 def generate_pdf_report_enhanced(candidats, poste_filter=""):
     if not REPORTLAB_AVAILABLE:
         return None
     try:
+        sorted_candidats = sort_candidats(candidats)
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
-        
         styles = getSampleStyleSheet()
-        
-        # Styles personnalisés
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Title'],
@@ -1688,7 +1669,6 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             alignment=TA_CENTER,
             spaceAfter=6
         )
-        
         subtitle_style = ParagraphStyle(
             'CustomSubtitle',
             parent=styles['Normal'],
@@ -1697,7 +1677,6 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             alignment=TA_CENTER,
             spaceAfter=12
         )
-        
         header_style = ParagraphStyle(
             'CustomHeader',
             parent=styles['Normal'],
@@ -1706,7 +1685,6 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             alignment=TA_CENTER,
             backColor=colors.HexColor('#1a3a5c')
         )
-        
         cell_style = ParagraphStyle(
             'CustomCell',
             parent=styles['Normal'],
@@ -1714,7 +1692,6 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             alignment=TA_LEFT,
             leading=10
         )
-        
         cell_center = ParagraphStyle(
             'CustomCellCenter',
             parent=styles['Normal'],
@@ -1722,46 +1699,37 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             alignment=TA_CENTER,
             leading=10
         )
-        
         story = []
-        
-        # En-tête
         story.append(Paragraph("RAPPORT DE CANDIDATURES", title_style))
-        story.append(Paragraph(f"Poste: {poste_filter if poste_filter else 'Tous les postes'} | Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}", subtitle_style))
+        story.append(Paragraph(f"Poste: {poste_filter if poste_filter else 'Tous les postes'} | Genere le {datetime.datetime.now().strftime('%d/%m/%Y a %H:%M')}", subtitle_style))
         story.append(Spacer(1, 0.3*cm))
-        
-        if not candidats:
-            story.append(Paragraph("Aucun candidat trouvé.", styles['Normal']))
+        if not sorted_candidats:
+            story.append(Paragraph("Aucun candidat trouve.", styles['Normal']))
         else:
-            # Créer le tableau
             data = [
                 [
                     Paragraph("Rang", header_style),
                     Paragraph("N° Dossier", header_style),
                     Paragraph("Nom", header_style),
-                    Paragraph("Prénom", header_style),
+                    Paragraph("Prenom", header_style),
                     Paragraph("Email", header_style),
                     Paragraph("Poste", header_style),
                     Paragraph("Statut", header_style),
                     Paragraph("Score", header_style)
                 ]
             ]
-            
             rank = 1
-            for c in candidats[:100]:  # Limite à 100 pour le PDF
+            for c in sorted_candidats[:100]:
                 statut = c.get('statut', 'en_attente')
                 score = int(c.get('score', 0))
-                
-                # Couleur du statut
                 if statut == 'retenu':
                     statut_text = f'<font color="#16a34a">✅ Retenu</font>'
                 elif statut == 'entretien':
                     statut_text = f'<font color="#d97706">📅 Entretien</font>'
                 elif statut == 'rejete':
-                    statut_text = f'<font color="#dc2626">❌ Rejeté</font>'
+                    statut_text = f'<font color="#dc2626">❌ Rejete</font>'
                 else:
                     statut_text = f'<font color="#d97706">⏳ En attente</font>'
-                
                 data.append([
                     Paragraph(str(rank), cell_center),
                     Paragraph(c.get('numero_dossier', ''), cell_center),
@@ -1773,14 +1741,9 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                     Paragraph(str(score), cell_center)
                 ])
                 rank += 1
-            
-            # Configurer les largeurs des colonnes
             col_widths = [1.2*cm, 2.5*cm, 3.5*cm, 3.5*cm, 4.5*cm, 4.5*cm, 2.8*cm, 1.5*cm]
-            
             table = Table(data, colWidths=col_widths, repeatRows=1)
-            
             table.setStyle(TableStyle([
-                # En-tête
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -1790,7 +1753,6 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
                 ('TOPPADDING', (0, 0), (-1, 0), 6),
                 ('GRID', (0, 0), (-1, 0), 0.5, colors.HexColor('#333333')),
-                # Corps
                 ('FONTSIZE', (0, 1), (-1, -1), 8),
                 ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
                 ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
@@ -1798,29 +1760,25 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 ('ALIGN', (1, 1), (1, -1), 'CENTER'),
                 ('ALIGN', (6, 1), (7, -1), 'CENTER'),
                 ('GRID', (0, 1), (-1, -1), 0.3, colors.HexColor('#CCCCCC')),
-                # Alternance des couleurs
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F8F9FA')]),
             ]))
-            
             story.append(table)
             story.append(Spacer(1, 0.5*cm))
-            story.append(Paragraph(f"Total: {len(candidats)} candidat(s)", styles['Normal']))
-        
+            story.append(Paragraph(f"Total: {len(sorted_candidats)} candidat(s)", styles['Normal']))
         doc.build(story)
         buf.seek(0)
         return buf
     except Exception as e:
         logger.error(f"Erreur generation PDF: {e}")
         return None
-
 def generate_csv_report_enhanced(candidats, poste_filter=""):
+    sorted_candidats = sort_candidats(candidats)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
-    headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Date Candidature", "Statut", "Score", "Décision"]
+    headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Statut", "Score", "Décision"]
     writer.writerow(headers)
-    
     rank = 1
-    for c in candidats:
+    for c in sorted_candidats:
         writer.writerow([
             rank,
             c.get('numero_dossier', ''),
@@ -1829,29 +1787,24 @@ def generate_csv_report_enhanced(candidats, poste_filter=""):
             c.get('email', ''),
             c.get('telephone', ''),
             c.get('poste', ''),
-            c.get('date_candidature', ''),
             c.get('statut', 'en_attente'),
             c.get('score', 0),
             c.get('decision', '')
         ])
         rank += 1
-    
     return output.getvalue()
-
 def generate_word_report_enhanced(candidats, poste_filter=""):
     if not DOCX_AVAILABLE:
         return None
     try:
+        sorted_candidats = sort_candidats(candidats)
         from docx import Document as DocxDocument
         from docx.shared import Inches, Pt, Cm, RGBColor
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.enum.table import WD_TABLE_ALIGNMENT
         from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
-        
         doc = DocxDocument()
-        
-        # Fonction pour ajouter des bordures de tableau
         def set_cell_border(cell, **kwargs):
             tc = cell._tc
             tcPr = tc.get_or_add_tcPr()
@@ -1864,24 +1817,17 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                     border.set(qn('w:space'), '0')
                     border.set(qn('w:color'), 'CCCCCC')
                     tcPr.append(border)
-        
-        # Titre
         title = doc.add_heading(f"RAPPORT DE CANDIDATURES", 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        doc.add_paragraph(f"Poste: {poste_filter if poste_filter else 'Tous les postes'} | Généré le {datetime.datetime.now().strftime('%d/%m/%Y à %H:%M')}")
+        doc.add_paragraph(f"Poste: {poste_filter if poste_filter else 'Tous les postes'} | Genere le {datetime.datetime.now().strftime('%d/%m/%Y a %H:%M')}")
         doc.add_paragraph()
-        
-        if not candidats:
-            doc.add_paragraph("Aucun candidat trouvé.")
+        if not sorted_candidats:
+            doc.add_paragraph("Aucun candidat trouve.")
         else:
             doc.add_heading("Liste des candidats", level=1)
-            
-            # Créer le tableau
             table = doc.add_table(rows=1, cols=9)
             table.style = 'Table Grid'
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            
-            # En-tête
             header_cells = table.rows[0].cells
             headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Email", "Poste", "Statut", "Score", "Décision"]
             for i, header in enumerate(headers):
@@ -1889,17 +1835,13 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 header_cells[i].paragraphs[0].runs[0].font.bold = True
                 header_cells[i].paragraphs[0].runs[0].font.size = Pt(10)
                 header_cells[i].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
-                
-                # Fond bleu pour l'en-tête
                 shading = OxmlElement('w:shd')
                 shading.set(qn('w:val'), 'solid')
                 shading.set(qn('w:color'), 'auto')
                 shading.set(qn('w:fill'), '1a3a5c')
                 header_cells[i]._tc.get_or_add_tcPr().append(shading)
-            
-            # Remplir les données
             rank = 1
-            for c in candidats[:200]:
+            for c in sorted_candidats[:200]:
                 row_cells = table.add_row().cells
                 row_cells[0].text = str(rank)
                 row_cells[1].text = c.get('numero_dossier', '')
@@ -1910,8 +1852,6 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 row_cells[6].text = c.get('statut', 'en_attente')
                 row_cells[7].text = str(c.get('score', 0))
                 row_cells[8].text = c.get('decision', '')[:30]
-                
-                # Centrer certaines colonnes
                 for idx in [0, 1, 6, 7]:
                     row_cells[idx].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 row_cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -1919,16 +1859,11 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
                 row_cells[5].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
                 row_cells[8].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-                
                 rank += 1
-            
-            # Ajuster les largeurs des colonnes
             for i, width in enumerate([1.2, 2.5, 3.5, 3.5, 4.5, 4.5, 2.8, 1.5, 4.0]):
                 table.columns[i].width = Cm(width)
-            
             doc.add_paragraph()
-            doc.add_paragraph(f"Total: {len(candidats)} candidat(s)")
-        
+            doc.add_paragraph(f"Total: {len(sorted_candidats)} candidat(s)")
         buf = io.BytesIO()
         doc.save(buf)
         buf.seek(0)
@@ -1936,26 +1871,18 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
     except Exception as e:
         logger.error(f"Erreur generation Word: {e}")
         return None
-
-# ============================================================
-# ROUTES API
-# ============================================================
-
 @app.route('/api/postes', methods=['GET'])
 def get_postes():
     return jsonify({"postes": POSTES, "postes_actifs": POSTES_ACTIFS, "postes_clotures": POSTES_CLOTURES}), 200
-
 @app.route('/api/postes/actifs', methods=['GET'])
 def get_postes_actifs():
     return jsonify(POSTES_ACTIFS), 200
-
 @app.route('/api/grille/<poste>', methods=['GET'])
 def get_grille(poste):
     g = GRILLE.get(poste)
     if not g:
         return jsonify({'error': 'Poste inconnu', 'postes_disponibles': list(GRILLE.keys())}), 404
     return jsonify(g), 200
-
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def login():
     if request.method == 'OPTIONS':
@@ -1981,7 +1908,6 @@ def login():
         except Exception as e:
             logger.error(f"Erreur login: {e}")
     return jsonify({'error': 'Identifiants incorrects'}), 401
-
 @app.route('/api/candidats/postuler', methods=['POST'])
 def postuler():
     try:
@@ -2084,7 +2010,6 @@ L'equipe RecrutBank"""
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/candidats/statut/<token>', methods=['GET'])
 def get_statut(token):
     if supabase:
@@ -2094,7 +2019,6 @@ def get_statut(token):
             hidden = {'cv_filename', 'lettre_filename', 'attestation_filenames', 'checklist', 'flags_eliminatoires', 'analyse_details', 'score_breakdown'}
             return jsonify({k: v for k, v in data.items() if k not in hidden}), 200
     return jsonify({'error': 'Candidature introuvable'}), 404
-
 @app.route('/api/recruteur/stats', methods=['GET'])
 @jwt_required()
 def get_stats():
@@ -2114,7 +2038,6 @@ def get_stats():
         counts[p] = counts.get(p, 0) + 1
     stats['by_poste'] = [{'poste': p, 'n': n} for p, n in sorted(counts.items(), key=lambda x: -x[1])]
     return jsonify(stats), 200
-
 @app.route('/api/recruteur/postes/stats', methods=['GET'])
 @jwt_required()
 def get_postes_stats():
@@ -2149,7 +2072,6 @@ def get_postes_stats():
             'eligible_reanalyse': False
         }
     }), 200
-
 @app.route('/api/recruteur/candidats', methods=['GET'])
 @jwt_required()
 def list_candidats():
@@ -2183,9 +2105,8 @@ def list_candidats():
                 except Exception:
                     pass
         result.append(c)
-    result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
+    result = sort_candidats(result)
     return jsonify(result), 200
-
 @app.route('/api/recruteur/candidats/<token>', methods=['GET'])
 @jwt_required()
 def get_candidat_detail(token):
@@ -2208,7 +2129,6 @@ def get_candidat_detail(token):
             except Exception:
                 pass
     return jsonify(data), 200
-
 @app.route('/api/recruteur/candidats/<token>/statut', methods=['PUT'])
 @jwt_required()
 def update_candidat(token):
@@ -2236,7 +2156,6 @@ def update_candidat(token):
         update_data["decision"] = "Entretien - Decision du recruteur"
     supabase.table('candidats').update(update_data).eq('token', token).execute()
     return jsonify({'message': 'Mis a jour avec succes', 'statut': statut}), 200
-
 @app.route('/api/recruteur/candidats/<token>/analyze', methods=['POST'])
 @jwt_required()
 def trigger_analyze(token):
@@ -2269,7 +2188,6 @@ def trigger_analyze(token):
         'token': token,
         'ia_engine': f"{len(ACTIVE_MODELS)} modeles"
     }), 202
-
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
 def get_reanalyze_status():
@@ -2300,7 +2218,6 @@ def get_reanalyze_status():
     except Exception as e:
         logger.error(f"Erreur reanalyze-status: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-one/<token>', methods=['POST'])
 @jwt_required()
 def reanalyze_one_candidate(token):
@@ -2333,7 +2250,6 @@ def reanalyze_one_candidate(token):
     except Exception as e:
         logger.error(f"Erreur reanalyze-one: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-all', methods=['POST'])
 @jwt_required()
 def reanalyze_all_candidates():
@@ -2405,7 +2321,6 @@ def reanalyze_all_candidates():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/reanalyze-poste/<poste>', methods=['POST'])
 @jwt_required()
 def reanalyze_by_poste(poste):
@@ -2481,7 +2396,6 @@ def reanalyze_by_poste(poste):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/cleanup-closed', methods=['POST'])
 @jwt_required()
 def cleanup_closed_statuses():
@@ -2498,11 +2412,6 @@ def cleanup_closed_statuses():
         'fixed': fixed,
         'postes_concernes': POSTES_CLOTURES
     }), 200
-
-# ============================================================
-# ROUTES D'EXPORT AMÉLIORÉES
-# ============================================================
-
 @app.route('/api/recruteur/export/<fmt>', methods=['GET'])
 @jwt_required()
 def export_candidates(fmt):
@@ -2542,7 +2451,7 @@ def export_candidates(fmt):
                     except Exception:
                         pass
             result.append(c)
-        result.sort(key=lambda x: x.get('date_candidature', ''), reverse=True)
+        result = sort_candidats(result)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         poste_suffix = f"_{poste_filter.replace(' ', '_')}" if poste_filter else "_global"
         filename_base = f"rapport{poste_suffix}_{ts}"
@@ -2569,7 +2478,6 @@ def export_candidates(fmt):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/recruteur/candidats/<token>', methods=['DELETE'])
 @jwt_required()
 def delete_candidat(token):
@@ -2619,7 +2527,6 @@ def delete_candidat(token):
             'poste': data.get('poste')
         }
     }), 200
-
 @app.route('/api/recruteur/dossiers/zip/start', methods=['GET'])
 @jwt_required()
 def start_zip_export():
@@ -2640,7 +2547,6 @@ def start_zip_export():
         }
     threading.Thread(target=_run_zip_export_job, args=(job_id, poste_filter, date_start, date_end), daemon=True).start()
     return jsonify({'job_id': job_id}), 202
-
 @app.route('/api/recruteur/dossiers/zip/status/<job_id>', methods=['GET'])
 @jwt_required()
 def zip_export_status(job_id):
@@ -2654,7 +2560,6 @@ def zip_export_status(job_id):
             'total': job.get('total', 0),
             'error': job.get('error')
         }), 200
-
 @app.route('/api/recruteur/dossiers/zip/download/<job_id>', methods=['GET'])
 @jwt_required()
 def zip_export_download(job_id):
@@ -2680,7 +2585,6 @@ def zip_export_download(job_id):
             with _ZIP_JOBS_LOCK:
                 _ZIP_JOBS.pop(job_id, None)
         return response_obj
-
 def _run_zip_export_job(job_id, poste_filter, date_start, date_end):
     tmp_zip_path = None
     start_time = time.time()
@@ -2822,7 +2726,6 @@ Date candidature: {cand.get('date_candidature', 'N/A')}"""
         with _ZIP_JOBS_LOCK:
             _ZIP_JOBS[job_id]['status'] = 'error'
             _ZIP_JOBS[job_id]['error'] = str(e)
-
 def _cleanup_old_zip_jobs():
     now = time.time()
     with _ZIP_JOBS_LOCK:
@@ -2834,7 +2737,6 @@ def _cleanup_old_zip_jobs():
                     os.remove(job['filepath'])
                 except Exception:
                     pass
-
 @app.route('/api/recruteur/candidats/<token>/email-preview', methods=['POST'])
 @jwt_required()
 def email_preview(token):
@@ -2860,7 +2762,6 @@ def email_preview(token):
         sujet = f"Reponse a votre candidature – {poste}"
         corps = f"Madame, Monsieur {nom_c},\nNous vous remercions de l'interet que vous portez a notre institution.\nApres examen attentif de votre dossier pour le poste de {poste}, nous avons le regret de vous informer que votre candidature n'a pas ete retenue.\nNous vous encourageons a postuler a nouveau." + sign
     return jsonify({'to': to_email, 'nom': nom_c, 'sujet': sujet, 'corps': corps}), 200
-
 @app.route('/api/recruteur/uploads/<path:filename>', methods=['GET'])
 def serve_upload(filename):
     safe = secure_filename(filename.replace('/', '_'))
@@ -2870,7 +2771,6 @@ def serve_upload(filename):
     if not url:
         return jsonify({'error': 'Fichier introuvable'}), 404
     return redirect(url)
-
 @app.route('/api/recruteur/debug/analyse-ia', methods=['POST'])
 @jwt_required()
 def debug_analyse_ia():
@@ -2884,7 +2784,6 @@ def debug_analyse_ia():
     if not result:
         return jsonify({'error': "L'analyse IA a echoue"}), 500
     return jsonify(result), 200
-
 @app.route('/api/test-email', methods=['GET'])
 def test_email():
     try:
@@ -2895,7 +2794,6 @@ def test_email():
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
     active_models = [{"name": m["name"], "model": m["model"], "supports_reasoning": m.get("supports_reasoning", False)} for m in ACTIVE_MODELS]
@@ -2923,7 +2821,6 @@ def health_version():
         "deployed_at": datetime.datetime.now().isoformat(),
         "version_info": "v13.1-ia-multi-fallback - Multi-modeles IA avec fallback automatique"
     }), 200
-
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
     import multiprocessing
@@ -2942,6 +2839,7 @@ if __name__ == '__main__':
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
         logger.info(f"Analyse: 100% IA avec fallback automatique")
         logger.info(f"POSTES ACTIFS: {POSTES_ACTIFS}")
+        logger.info(f"POSTES CLOTURES: {POSTES_CLOTURES}")
         logger.info(f"GRILLES DISPONIBLES: {len(GRILLE)} postes")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
     else:
