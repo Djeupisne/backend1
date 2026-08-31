@@ -1619,7 +1619,7 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             bottom=Side(style='thin', color='1565c0')
         )
         
-        # En-têtes - Sans mention "IA"
+        # En-têtes
         headers = [
             "Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone",
             "Poste", "Statut", "Score", "Décision",
@@ -1801,31 +1801,31 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
     try:
         sorted_candidats = sort_candidats(candidats)
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=1.2*cm, leftMargin=1.2*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+        doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=1.0*cm, leftMargin=1.0*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
         styles = getSampleStyleSheet()
         
         # Styles modernes
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Title'],
-            fontSize=20,
+            fontSize=16,
             textColor=colors.HexColor('#0d47a1'),
             alignment=TA_CENTER,
-            spaceAfter=6,
+            spaceAfter=4,
             fontName='Helvetica-Bold'
         )
         subtitle_style = ParagraphStyle(
             'CustomSubtitle',
             parent=styles['Normal'],
-            fontSize=10,
+            fontSize=9,
             textColor=colors.HexColor('#666666'),
             alignment=TA_CENTER,
-            spaceAfter=12
+            spaceAfter=8
         )
         header_style = ParagraphStyle(
             'CustomHeader',
             parent=styles['Normal'],
-            fontSize=8,
+            fontSize=7,
             textColor=colors.whitesmoke,
             alignment=TA_CENTER,
             backColor=colors.HexColor('#0d47a1'),
@@ -1834,22 +1834,30 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
         cell_style = ParagraphStyle(
             'CustomCell',
             parent=styles['Normal'],
-            fontSize=7,
+            fontSize=6,
             alignment=TA_LEFT,
-            leading=9
+            leading=8
         )
         cell_center = ParagraphStyle(
             'CustomCellCenter',
             parent=styles['Normal'],
-            fontSize=7,
+            fontSize=6,
             alignment=TA_CENTER,
-            leading=9
+            leading=8
+        )
+        stats_style = ParagraphStyle(
+            'StatsStyle',
+            parent=styles['Normal'],
+            fontSize=9,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor('#1a3a5c'),
+            fontName='Helvetica-Bold'
         )
         
         story = []
         story.append(Paragraph("📊 RAPPORT DE CANDIDATURES", title_style))
         story.append(Paragraph(f"Poste: {poste_filter if poste_filter else 'Tous les postes'} | Genere le {datetime.datetime.now().strftime('%d/%m/%Y a %H:%M')}", subtitle_style))
-        story.append(Spacer(1, 0.3*cm))
+        story.append(Spacer(1, 0.2*cm))
         
         # Statistiques
         total = len(sorted_candidats)
@@ -1858,18 +1866,18 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
         rejetes = sum(1 for c in sorted_candidats if c.get('statut') == 'rejete')
         en_attente = sum(1 for c in sorted_candidats if c.get('statut') == 'en_attente')
         
-        stats_text = f"<b>Total:</b> {total} | <b>Retenus:</b> {retenus} | <b>Entretien:</b> {entretien} | <b>En attente:</b> {en_attente} | <b>Rejetés:</b> {rejetes}"
-        story.append(Paragraph(stats_text, styles['Normal']))
+        stats_text = f"<b>Total:</b> {total}   |   <b>Retenus:</b> {retenus}   |   <b>Entretien:</b> {entretien}   |   <b>En attente:</b> {en_attente}   |   <b>Rejetés:</b> {rejetes}"
+        story.append(Paragraph(stats_text, stats_style))
         story.append(Spacer(1, 0.3*cm))
         
         if not sorted_candidats:
             story.append(Paragraph("Aucun candidat trouve.", styles['Normal']))
         else:
-            # Tableau avec colonnes sans mention "IA"
+            # Tableau avec Rang en première colonne
             data = [
                 [
                     Paragraph("<b>Rang</b>", header_style),
-                    Paragraph("<b>N° Doss.</b>", header_style),
+                    Paragraph("<b>N°</b>", header_style),
                     Paragraph("<b>Nom</b>", header_style),
                     Paragraph("<b>Prenom</b>", header_style),
                     Paragraph("<b>Poste</b>", header_style),
@@ -1880,7 +1888,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             ]
             
             rank = 1
-            for c in sorted_candidats[:100]:
+            for c in sorted_candidats[:200]:
                 statut = c.get('statut', 'en_attente')
                 try:
                     score = float(c.get('score', 0))
@@ -1894,16 +1902,19 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 points_forts = analyse_details.get('points_forts', [])
                 synthese = analyse_details.get('synthese_recruteur', '')
                 
-                # Construction du motif
+                # Construction du motif complet
                 motif_parts = []
                 if flags_elim:
-                    motif_parts.append(f"❌ Éliminatoire: {', '.join(flags_elim[:2])}")
+                    for f in flags_elim[:3]:
+                        motif_parts.append(f"🚫 {f}")
                 if points_vigilance:
-                    motif_parts.append(f"⚠️ Vigilance: {', '.join(points_vigilance[:2])}")
+                    for p in points_vigilance[:3]:
+                        motif_parts.append(f"⚠️ {p}")
                 if points_forts:
-                    motif_parts.append(f"✅ Forces: {', '.join(points_forts[:2])}")
+                    for p in points_forts[:2]:
+                        motif_parts.append(f"✅ {p}")
                 if synthese:
-                    motif_parts.append(f"📝 Synthèse: {synthese[:80]}")
+                    motif_parts.append(f"📝 {synthese[:100]}")
                 
                 motif = " | ".join(motif_parts) if motif_parts else "Analyse en cours..."
                 
@@ -1928,34 +1939,36 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 data.append([
                     Paragraph(str(rank), cell_center),
                     Paragraph(c.get('numero_dossier', ''), cell_center),
-                    Paragraph(c.get('nom', '')[:20], cell_style),
-                    Paragraph(c.get('prenom', '')[:20], cell_style),
-                    Paragraph(c.get('poste', '')[:25], cell_style),
+                    Paragraph(c.get('nom', '')[:15], cell_style),
+                    Paragraph(c.get('prenom', '')[:15], cell_style),
+                    Paragraph(c.get('poste', '')[:20], cell_style),
                     Paragraph(statut_text, cell_center),
-                    Paragraph(f'<font color="{score_color}"><b>{score}</b></font>', cell_center),
-                    Paragraph(motif[:70], cell_style)
+                    Paragraph(f'<font color="{score_color}"><b>{score:.1f}</b></font>', cell_center),
+                    Paragraph(motif[:120], cell_style)
                 ])
                 rank += 1
             
-            col_widths = [1.0*cm, 2.0*cm, 3.0*cm, 3.0*cm, 4.0*cm, 2.5*cm, 1.5*cm, 5.5*cm]
+            # Largeurs des colonnes ajustées pour tout contenir
+            col_widths = [1.2*cm, 1.8*cm, 2.5*cm, 2.5*cm, 4.0*cm, 2.5*cm, 1.5*cm, 5.5*cm]
             table = Table(data, colWidths=col_widths, repeatRows=1)
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d47a1')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('FONTSIZE', (0, 0), (-1, 0), 7),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
                 ('TOPPADDING', (0, 0), (-1, 0), 4),
                 ('GRID', (0, 0), (-1, 0), 0.5, colors.HexColor('#333333')),
-                ('FONTSIZE', (0, 1), (-1, -1), 7),
+                ('FONTSIZE', (0, 1), (-1, -1), 6),
                 ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
                 ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
                 ('ALIGN', (0, 1), (0, -1), 'CENTER'),
                 ('ALIGN', (1, 1), (1, -1), 'CENTER'),
                 ('ALIGN', (5, 1), (6, -1), 'CENTER'),
                 ('GRID', (0, 1), (-1, -1), 0.3, colors.HexColor('#CCCCCC')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F8F9FA')]),
             ]))
             story.append(table)
             story.append(Spacer(1, 0.3*cm))
@@ -2065,7 +2078,7 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
             doc.add_paragraph("Aucun candidat trouve.")
         else:
             doc.add_heading("Liste des candidats", level=1)
-            # Tableau sans mention "IA"
+            # Tableau avec Rang en première colonne
             table = doc.add_table(rows=1, cols=9)
             table.style = 'Table Grid'
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
