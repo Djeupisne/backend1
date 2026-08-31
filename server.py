@@ -1619,11 +1619,11 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             bottom=Side(style='thin', color='1565c0')
         )
         
-        # En-têtes avec colonnes Rang et Motifs
+        # En-têtes - Sans mention "IA"
         headers = [
             "Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone",
             "Poste", "Statut", "Score", "Décision",
-            "Points Forts IA", "Points de Vigilance IA", "Synthèse IA", "Motifs IA"
+            "Points Forts", "Points de Vigilance", "Synthèse", "Motifs"
         ]
         col_widths = [5, 12, 18, 18, 25, 15, 30, 14, 8, 22, 35, 35, 40, 35]
         
@@ -1648,7 +1648,7 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             decision = c.get('decision', '')
             flags_elim = analyse_details.get('flags_eliminatoires', []) or score_breakdown.get('flags_eliminatoires', [])
             
-            # Construction du motif IA avec les vrais motifs
+            # Construction du motif
             motif_parts = []
             if flags_elim:
                 motif_parts.append(f"CRITÈRES ÉLIMINATOIRES: {', '.join(flags_elim[:3])}")
@@ -1659,7 +1659,7 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             if synthese:
                 motif_parts.append(f"SYNTHÈSE: {synthese[:150]}")
             
-            motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
+            motif = " | ".join(motif_parts) if motif_parts else "Analyse en cours..."
             
             try:
                 score = float(c.get('score', 0))
@@ -1865,7 +1865,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
         if not sorted_candidats:
             story.append(Paragraph("Aucun candidat trouve.", styles['Normal']))
         else:
-            # Tableau avec Rang, N° Dossier, Nom, Prénom, Poste, Statut, Score, Motifs IA
+            # Tableau avec colonnes sans mention "IA"
             data = [
                 [
                     Paragraph("<b>Rang</b>", header_style),
@@ -1875,7 +1875,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                     Paragraph("<b>Poste</b>", header_style),
                     Paragraph("<b>Statut</b>", header_style),
                     Paragraph("<b>Score</b>", header_style),
-                    Paragraph("<b>Motifs IA</b>", header_style)
+                    Paragraph("<b>Motifs</b>", header_style)
                 ]
             ]
             
@@ -1887,14 +1887,14 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 except (ValueError, TypeError):
                     score = 0.0
                 
-                # Récupération des motifs IA
+                # Récupération des motifs
                 analyse_details = c.get('analyse_details_parsed', {})
                 flags_elim = analyse_details.get('flags_eliminatoires', [])
                 points_vigilance = analyse_details.get('points_vigilance', [])
                 points_forts = analyse_details.get('points_forts', [])
                 synthese = analyse_details.get('synthese_recruteur', '')
                 
-                # Construction du motif IA
+                # Construction du motif
                 motif_parts = []
                 if flags_elim:
                     motif_parts.append(f"❌ Éliminatoire: {', '.join(flags_elim[:2])}")
@@ -1905,7 +1905,7 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
                 if synthese:
                     motif_parts.append(f"📝 Synthèse: {synthese[:80]}")
                 
-                motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
+                motif = " | ".join(motif_parts) if motif_parts else "Analyse en cours..."
                 
                 # Statut avec couleur
                 if statut == 'retenu':
@@ -1975,7 +1975,7 @@ def generate_csv_report_enhanced(candidats, poste_filter=""):
     sorted_candidats = sort_candidats(candidats)
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
-    headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Statut", "Score", "Décision", "Motifs IA"]
+    headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Email", "Téléphone", "Poste", "Statut", "Score", "Décision", "Motifs"]
     writer.writerow(headers)
     rank = 1
     for c in sorted_candidats:
@@ -1986,7 +1986,7 @@ def generate_csv_report_enhanced(candidats, poste_filter=""):
         synthese = analyse_details.get('synthese_recruteur', '')
         statut = c.get('statut', 'en_attente')
         
-        # Construction du motif IA
+        # Construction du motif
         motif_parts = []
         if flags_elim:
             motif_parts.append(f"Eliminatoire: {', '.join(flags_elim[:2])}")
@@ -1997,7 +1997,7 @@ def generate_csv_report_enhanced(candidats, poste_filter=""):
         if synthese:
             motif_parts.append(f"Synthèse: {synthese[:100]}")
         
-        motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
+        motif = " | ".join(motif_parts) if motif_parts else "Analyse en cours..."
         
         writer.writerow([
             rank,
@@ -2065,12 +2065,12 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
             doc.add_paragraph("Aucun candidat trouve.")
         else:
             doc.add_heading("Liste des candidats", level=1)
-            # Tableau avec Rang, N° Dossier, Nom, Prénom, Email, Poste, Statut, Score, Motifs IA
+            # Tableau sans mention "IA"
             table = doc.add_table(rows=1, cols=9)
             table.style = 'Table Grid'
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
             header_cells = table.rows[0].cells
-            headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Poste", "Statut", "Score", "Décision", "Motifs IA"]
+            headers = ["Rang", "N° Dossier", "Nom", "Prénom", "Poste", "Statut", "Score", "Décision", "Motifs"]
             for i, header in enumerate(headers):
                 header_cells[i].text = header
                 header_cells[i].paragraphs[0].runs[0].font.bold = True
@@ -2092,7 +2092,7 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 synthese = analyse_details.get('synthese_recruteur', '')
                 statut = c.get('statut', 'en_attente')
                 
-                # Construction du motif IA
+                # Construction du motif
                 motif_parts = []
                 if flags_elim:
                     motif_parts.append(f"Eliminatoire: {', '.join(flags_elim[:2])}")
@@ -2103,7 +2103,7 @@ def generate_word_report_enhanced(candidats, poste_filter=""):
                 if synthese:
                     motif_parts.append(f"Synthèse: {synthese[:100]}")
                 
-                motif = " | ".join(motif_parts) if motif_parts else "Analyse IA en cours..."
+                motif = " | ".join(motif_parts) if motif_parts else "Analyse en cours..."
                 
                 row_cells[0].text = str(rank)
                 row_cells[1].text = c.get('numero_dossier', '')
