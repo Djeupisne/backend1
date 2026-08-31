@@ -61,45 +61,85 @@ except ImportError as e:
     OPENAI_AVAILABLE = False
     logger.error(f"❌ Erreur import OpenAI: {e}")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "minimax/minimax-m3:free")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_REASONING_ENABLED = os.getenv("OPENROUTER_REASONING_ENABLED", "false").lower() == "true"
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 logger.info(f"🔑 OPENROUTER_API_KEY: {'✅ Presente' if OPENROUTER_API_KEY else '❌ Manquante'}")
-logger.info(f"📦 OPENROUTER_MODEL: {OPENROUTER_MODEL}")
 logger.info(f"🧠 OPENROUTER_REASONING: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
 logger.info(f"🔑 DEEPSEEK_API_KEY: {'✅ Presente' if DEEPSEEK_API_KEY else '❌ Manquante'}")
 _client = None
 _PROVIDER = "None"
 _MODEL = None
 IA_ANALYSE_ACTIVE = False
-if OPENAI_AVAILABLE and OPENROUTER_API_KEY:
-    try:
-        _client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
-        _MODEL = OPENROUTER_MODEL
-        _PROVIDER = "OpenRouter (MiniMax M3)"
+ACTIVE_MODELS = []
+OPENROUTER_MODELS = [
+    {"name": "MiniMax M3", "model": os.getenv("IA_MODEL_1", "minimax/minimax-m3:free"), "priority": 1},
+    {"name": "GLM 5.2", "model": os.getenv("IA_MODEL_2", "z-ai/glm-5.2:free"), "priority": 2},
+    {"name": "Gemma 4 31B", "model": os.getenv("IA_MODEL_3", "google/gemma-4-31b-it:free"), "priority": 3}
+]
+IA_FALLBACK_ENABLED = os.getenv("IA_FALLBACK_ENABLED", "true").lower() == "true"
+IA_MAX_RETRIES = int(os.getenv("IA_MAX_RETRIES", "3"))
+IA_MODEL_TIMEOUT = int(os.getenv("IA_MODEL_TIMEOUT", "120"))
+def initialize_ia_clients():
+    global _client, _PROVIDER, _MODEL, IA_ANALYSE_ACTIVE, ACTIVE_MODELS
+    ACTIVE_MODELS = []
+    for model_config in OPENROUTER_MODELS:
+        if OPENROUTER_API_KEY:
+            try:
+                client = OpenAI(api_key=OPENROUTER_API_KEY, base_url=OPENROUTER_BASE_URL)
+                test_response = client.chat.completions.create(
+                    model=model_config["model"],
+                    messages=[{"role": "user", "content": "Test"}],
+                    max_tokens=5,
+                    temperature=0
+                )
+                if test_response and test_response.choices:
+                    ACTIVE_MODELS.append({
+                        "client": client,
+                        "model": model_config["model"],
+                        "name": f"OpenRouter - {model_config['name']}",
+                        "provider": "OpenRouter",
+                        "base_url": OPENROUTER_BASE_URL,
+                        "priority": model_config.get("priority", 10)
+                    })
+                    logger.info(f"✅ {model_config['name']} initialise avec succes")
+            except Exception as e:
+                logger.warning(f"⚠️ {model_config['name']} indisponible: {e}")
+    if DEEPSEEK_API_KEY:
+        try:
+            client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+            test_response = client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[{"role": "user", "content": "Test"}],
+                max_tokens=5,
+                temperature=0
+            )
+            if test_response and test_response.choices:
+                ACTIVE_MODELS.append({
+                    "client": client,
+                    "model": DEEPSEEK_MODEL,
+                    "name": "DeepSeek",
+                    "provider": "DeepSeek",
+                    "base_url": "https://api.deepseek.com",
+                    "priority": 99
+                })
+                logger.info(f"✅ DeepSeek initialise avec succes")
+        except Exception as e:
+            logger.warning(f"⚠️ DeepSeek indisponible: {e}")
+    ACTIVE_MODELS.sort(key=lambda x: x.get("priority", 10))
+    if ACTIVE_MODELS:
+        _client = ACTIVE_MODELS[0]["client"]
+        _MODEL = ACTIVE_MODELS[0]["model"]
+        _PROVIDER = ACTIVE_MODELS[0]["name"]
         IA_ANALYSE_ACTIVE = True
-        logger.info("✅ Client OpenRouter initialise avec succes")
-        logger.info(f"   Modele: {_MODEL}")
-    except Exception as e:
-        logger.error(f"❌ Erreur initialisation OpenRouter: {e}")
-        _client = None
+        logger.info(f"✅ {len(ACTIVE_MODELS)} modele(s) IA actif(s):")
+        for m in ACTIVE_MODELS:
+            logger.info(f"   - {m['name']} ({m['model']})")
+    else:
         IA_ANALYSE_ACTIVE = False
-if not IA_ANALYSE_ACTIVE and OPENAI_AVAILABLE and DEEPSEEK_API_KEY:
-    try:
-        _client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
-        _MODEL = DEEPSEEK_MODEL
-        _PROVIDER = "DeepSeek"
-        IA_ANALYSE_ACTIVE = True
-        logger.info("✅ Client DeepSeek initialise avec succes")
-    except Exception as e:
-        logger.error(f"❌ Erreur initialisation DeepSeek: {e}")
-        _client = None
-        IA_ANALYSE_ACTIVE = False
-if not IA_ANALYSE_ACTIVE:
-    logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le systeme ne peut pas fonctionner sans IA")
-    logger.warning("   Veuillez configurer OPENROUTER_API_KEY")
+        logger.warning("⚠️ AUCUN MODELE IA DISPONIBLE")
+initialize_ia_clients()
 _ia_semaphore = threading.Semaphore(int(os.getenv("IA_MAX_CONCURRENCY", "5")))
 DOWNLOAD_MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "3"))
 DOWNLOAD_BASE_DELAY = float(os.getenv("DOWNLOAD_BASE_DELAY", "0.5"))
@@ -136,19 +176,19 @@ def after_request(response):
     return response
 @app.route('/', methods=['GET', 'HEAD'])
 def health_check():
+    active_models = [{"name": m["name"], "model": m["model"], "provider": m["provider"]} for m in ACTIVE_MODELS]
     return jsonify({
         'status': 'ok',
-        'message': f'RecrutBank API running with {_PROVIDER} - 100% IA Analysis',
-        'version': 'v13.0-ia-reasonable',
+        'message': f'RecrutBank API with {len(ACTIVE_MODELS)} IA model(s)',
+        'version': 'v13.1-ia-multi-fallback',
         'features': {
             'ia_available': IA_ANALYSE_ACTIVE,
-            'ia_provider': _PROVIDER,
-            'ia_model': _MODEL,
-            'reasoning_mode': OPENROUTER_REASONING_ENABLED,
-            'analysis_method': '100% IA',
+            'ia_models': active_models,
+            'active_models_count': len(ACTIVE_MODELS),
+            'analysis_method': '100% IA avec fallback multi-modeles',
             'scoring_max': 14,
             'postes_actifs': ["Chef de Division Local Corporate", "Data Analyst Finance"],
-            'version': 'v13.0-ia-reasonable',
+            'version': 'v13.1-ia-multi-fallback',
             'score_calculation': 'SOMME des sous-scores (sans ajustement negatif)',
             'eliminatoire_only': 'Seuls les criteres definis dans la grille sont eliminatoires',
             'management_recognition': 'Acting Branch Manager, Profit Center Manager, Chef de service = management valide',
@@ -1154,19 +1194,16 @@ def build_ia_prompt(poste, cv_text, lettre_text, attestation_texts_list):
         return None, None
     regles_interpretation = """
 🔴 REGLES D'INTERPRETATION DES POSTES (A RESPECTER ABSOLUMENT) :
-
 1. "Acting Branch Manager" ou "Chef d'Agence" = CHEF D'AGENCE → MANAGEMENT VALIDE (3/3)
 2. "Profit Center Manager" = MANAGEMENT D'EQUIPE AVEC P&L → MANAGEMENT VALIDE (3/3)
 3. "Chef de service" + "Supervision de l'equipe" = MANAGEMENT D'EQUIPE VALIDE (2-3/3)
 4. "Supervision des activites commerciales" = MANAGEMENT VALIDE
 5. "Encadrer, diriger et motiver les gestionnaires" = MANAGEMENT D'EQUIPE VALIDE
-
 🔴 REGLES D'INTERPRETATION DES CERTIFICATIONS :
 1. "Frankfurt School" = CERTIFICATION BANCAIRE VALABLE (+1)
 2. "Moody's" = CERTIFICATION RISQUE VALABLE (+1)
 3. "ITB" = CERTIFICATION BANCAIRE VALABLE (+1)
 4. "Certificat d'Expert en Financement des PME" = CERTIFICATION VALABLE (+1)
-
 🔴 CAS PARTICULIERS :
 1. Chef d'agence (meme interimaire) = EXEMPTE des criteres eliminatoires 4, 5, 6
 2. Bac+3 + 10+ ans d'experience = DIPLOME VALIDE (compensation)
@@ -1176,14 +1213,10 @@ def build_ia_prompt(poste, cv_text, lettre_text, attestation_texts_list):
 6. L'analyse et montage de dossiers de credit valide le critere risque de credit
 """
     system_prompt = f"""Tu es un consultant senior en recrutement bancaire avec 20 ans d'experience en Afrique centrale et de l'Ouest (CEMAC/UEMOA).
-
 POSTE ANALYSE : {poste}
 DESCRIPTION : {grille.get('description', 'Poste bancaire')}
-
 Tu dois analyser STRICTEMENT selon la grille officielle fournie. Tu es le SEUL moteur d'analyse.
-
 {regles_interpretation}
-
 REGLES ABSOLUES D'ANALYSE :
 1. Tu DOIS comprendre le SENS des phrases et le CONTEXTE METIER.
 2. Tu ne JAMAIS inventer des faits qui ne sont PAS dans les documents.
@@ -1193,25 +1226,18 @@ REGLES ABSOLUES D'ANALYSE :
 6. Tu utilises le contexte CEMAC/UEMOA (COBAC, BEAC, reglementation locale).
 7. Une interpretation RAISONNABLE est attendue : un profil avec 17 ans d'experience bancaire est senior.
 8. Les postes de management (Acting Branch Manager, Profit Center Manager, Chef de service) sont consideres comme de l'experience manageriale VALIDE.
-
 🔴 CRITERES ELIMINATOIRES (rejet immediat si non satisfaits) :
 {chr(10).join(f"- {c}" for c in grille.get('eliminatoire', []))}
-
 🟠 POINTS A VERIFIER dans le CV :
 {chr(10).join(f"- {c}" for c in grille.get('a_verifier', []))}
-
 🟡 SIGNAUX FORTS - candidat prioritaire :
 {chr(10).join(f"- {c}" for c in grille.get('signaux_forts', []))}
-
 ⚠️ POINTS D'ATTENTION :
 {chr(10).join(f"- {c}" for c in grille.get('points_attention', []))}
-
 📊 GRILLE DE SCORING (MAX {grille.get('score_max_total', 14)}) :
 {chr(10).join(f"- {k}: {v}/max" for k, v in grille.get('scores_max', {}).items())}
-
 REGLES METIER SPECIFIQUES :
 {chr(10).join(f"- {r}" for r in grille.get('regles_metier', []))}
-
 FORMAT DE SORTIE : UNIQUEMENT du JSON valide.
 {{
   "flags_eliminatoires": ["liste des criteres eliminatoires non satisfaits"],
@@ -1260,9 +1286,41 @@ Fournis une checklist complete avec true/false pour chaque critere.
 Sois rigoureux et professionnel.
 INTERPRETE RAISONNABLEMENT les postes de management et les certifications."""
     return system_prompt, user_message
+def call_ia_model(client, model, system_prompt, user_message):
+    try:
+        api_params = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 4096,
+            "response_format": {"type": "json_object"},
+            "extra_headers": {
+                "HTTP-Referer": "https://recrutment.onrender.com",
+                "X-Title": "RecrutBank CV Analyzer"
+            }
+        }
+        if OPENROUTER_REASONING_ENABLED and "OpenRouter" in str(client.base_url):
+            api_params["extra_body"] = {"reasoning": {"enabled": True}}
+        response = client.chat.completions.create(**api_params)
+        if response is None:
+            return None
+        if not hasattr(response, 'choices') or response.choices is None or len(response.choices) == 0:
+            return None
+        if response.choices[0].message is None:
+            return None
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.warning(f"⚠️ Erreur avec ce modele: {e}")
+        return None
 def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste):
-    if not IA_ANALYSE_ACTIVE or not _client or not cv_text or len(cv_text.strip()) < 50:
-        logger.error("❌ IA non disponible ou CV trop court")
+    if not IA_ANALYSE_ACTIVE or not ACTIVE_MODELS:
+        logger.error("❌ Aucun modele IA disponible")
+        return None
+    if not cv_text or len(cv_text.strip()) < 50:
+        logger.error("❌ CV trop court")
         return None
     if poste not in GRILLE:
         logger.error(f"❌ Poste non trouve dans la grille: {poste}")
@@ -1271,136 +1329,121 @@ def analyze_cv_with_ia_only(cv_text, lettre_text, attestation_texts_list, poste)
     system_prompt, user_message = build_ia_prompt(poste, cv_text, lettre_text, attestation_texts_list)
     if not system_prompt or not user_message:
         return None
-    try:
+    result_text = None
+    used_model = None
+    for model_config in ACTIVE_MODELS:
         with _ia_semaphore:
-            api_params = {
-                "model": _MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 4096,
-                "response_format": {"type": "json_object"},
-                "extra_headers": {
-                    "HTTP-Referer": "https://recrutment.onrender.com",
-                    "X-Title": "RecrutBank CV Analyzer"
-                } if "OpenRouter" in _PROVIDER else {}
-            }
-            if OPENROUTER_REASONING_ENABLED and "OpenRouter" in _PROVIDER:
-                api_params["extra_body"] = {"reasoning": {"enabled": True}}
-            response = _client.chat.completions.create(**api_params)
-            if response is None:
-                logger.error("❌ La reponse de l'API est None")
-                return None
-            if not hasattr(response, 'choices') or response.choices is None or len(response.choices) == 0:
-                logger.error("❌ La reponse n'a pas de 'choices' ou est vide")
-                return None
-            if response.choices[0].message is None:
-                logger.error("❌ Le message dans la reponse est None")
-                return None
-            result_text = response.choices[0].message.content
-            if not result_text or len(result_text.strip()) < 10:
-                logger.error(f"❌ Contenu de la reponse vide ou trop court")
-                return None
-            logger.info(f"✅ Analyse IA terminee: {len(result_text)} caracteres")
-            analyse = parse_json_robust(result_text)
-            if analyse is None:
-                logger.error("❌ Echec de l'extraction JSON")
-                return None
-            sous_scores = analyse.get('sous_scores', {})
-            max_scores = grille.get('scores_max', {})
-            score_max_total = grille.get('score_max_total', 14)
-            score_total = 0
-            for key, max_val in max_scores.items():
-                val = sous_scores.get(key, 0)
-                if val > max_val:
-                    val = max_val
-                if val < 0:
-                    val = 0
-                sous_scores[key] = val
-                score_total += val
-            score_total = min(score_max_total, max(0, score_total))
-            flags_elim = analyse.get('flags_eliminatoires', [])
-            if not isinstance(flags_elim, list):
-                flags_elim = []
-            veritable_eliminatoire = grille.get('eliminatoire', [])
-            flags_elim_corriges = []
-            for flag in flags_elim:
-                for critere in veritable_eliminatoire:
-                    if critere.lower() in flag.lower() or flag.lower() in critere.lower():
-                        flags_elim_corriges.append(flag)
-                        break
-            flags_elim = flags_elim_corriges
-            checklist = analyse.get('checklist', {})
-            if not checklist or len(checklist) == 0:
-                checklist = {
-                    "elim_0": len(flags_elim) == 0,
-                    "elim_1": len(flags_elim) == 0,
-                    "elim_2": len(flags_elim) == 0,
-                    "elim_3": len(flags_elim) == 0,
-                    "elim_4": len(flags_elim) == 0,
-                    "elim_5": len(flags_elim) == 0,
-                    "verif_0": sous_scores.get(list(max_scores.keys())[0], 0) >= 2 if max_scores else False,
-                    "verif_1": sous_scores.get(list(max_scores.keys())[1], 0) >= 2 if len(max_scores) > 1 else False,
-                    "verif_2": sous_scores.get(list(max_scores.keys())[2], 0) >= 1 if len(max_scores) > 2 else False,
-                    "verif_3": sous_scores.get(list(max_scores.keys())[3], 0) >= 1 if len(max_scores) > 3 else False,
-                    "verif_4": sous_scores.get(list(max_scores.keys())[4], 0) >= 1 if len(max_scores) > 4 else False,
-                    "verif_5": sous_scores.get(list(max_scores.keys())[5], 0) >= 1 if len(max_scores) > 5 else False,
-                    "verif_6": sous_scores.get(list(max_scores.keys())[6], 0) >= 1 if len(max_scores) > 6 else False
-                }
-            decision = get_recommandation_from_score(score_total, flags_elim, score_max_total)
-            statut = get_statut_from_decision(decision, flags_elim)
-            profils = analyse.get('profils_detectes', {})
-            banking_years = analyse.get('banking_years', 0)
-            result = {
-                'poste': poste,
-                'score': score_total,
-                'score_max': score_max_total,
-                'decision': decision,
-                'statut': statut,
-                'flags_eliminatoires': flags_elim,
-                'sous_scores': sous_scores,
-                'checklist': checklist,
-                'points_forts': analyse.get('points_forts', []),
-                'points_vigilance': analyse.get('points_vigilance', []),
-                'synthese': analyse.get('synthese_recruteur', ''),
-                'score_breakdown': {
-                    'score_final': score_total,
-                    'score_max': score_max_total,
-                    'decision': decision,
-                    'statut': statut,
-                    'sous_scores': sous_scores,
-                    'chef_agence_detecte': profils.get('chef_agence', False),
-                    'gestionnaire_portefeuille_detecte': profils.get('gestionnaire_portefeuille', False),
-                    'local_corporate_detecte': profils.get('local_corporate', False),
-                    'cross_selling_detecte': profils.get('cross_selling', False),
-                    'banking_years_detecte': banking_years,
-                    'nb_eliminatoires': len(flags_elim),
-                    'eliminatoires_passes': len(flags_elim) == 0,
-                    'grille_version': 'v13.0-ia-reasonable',
-                    'moteur': 'IA_100%'
-                },
-                'analyse_details': {
-                    'moteur': 'IA_100%',
-                    'provider': _PROVIDER,
-                    'model': _MODEL,
-                    'sous_scores': sous_scores,
-                    'flags_eliminatoires': flags_elim,
-                    'points_forts': analyse.get('points_forts', []),
-                    'points_vigilance': analyse.get('points_vigilance', []),
-                    'synthese_recruteur': analyse.get('synthese_recruteur', ''),
-                    'profils_detectes': profils,
-                    'banking_years': banking_years,
-                    'diplome_niveau': analyse.get('diplome_niveau', 'Non specifie')
-                }
-            }
-            return result
-    except Exception as e:
-        logger.error(f"❌ Erreur analyse IA: {e}")
-        import traceback
-        traceback.print_exc()
+            logger.info(f"🔄 Tentative avec {model_config['name']}...")
+            result_text = call_ia_model(
+                model_config["client"],
+                model_config["model"],
+                system_prompt,
+                user_message
+            )
+            if result_text and len(result_text.strip()) > 50:
+                used_model = model_config["name"]
+                logger.info(f"✅ Analyse reussie avec {used_model}")
+                break
+            else:
+                logger.warning(f"⚠️ {model_config['name']} n'a pas retourne de reponse valide")
+    if not result_text or len(result_text.strip()) < 50:
+        logger.error("❌ Tous les modeles IA ont echoue")
         return None
+    logger.info(f"✅ Analyse IA terminee: {len(result_text)} caracteres avec {used_model}")
+    analyse = parse_json_robust(result_text)
+    if analyse is None:
+        logger.error("❌ Echec de l'extraction JSON")
+        return None
+    sous_scores = analyse.get('sous_scores', {})
+    max_scores = grille.get('scores_max', {})
+    score_max_total = grille.get('score_max_total', 14)
+    score_total = 0
+    for key, max_val in max_scores.items():
+        val = sous_scores.get(key, 0)
+        if val > max_val:
+            val = max_val
+        if val < 0:
+            val = 0
+        sous_scores[key] = val
+        score_total += val
+    score_total = min(score_max_total, max(0, score_total))
+    flags_elim = analyse.get('flags_eliminatoires', [])
+    if not isinstance(flags_elim, list):
+        flags_elim = []
+    veritable_eliminatoire = grille.get('eliminatoire', [])
+    flags_elim_corriges = []
+    for flag in flags_elim:
+        for critere in veritable_eliminatoire:
+            if critere.lower() in flag.lower() or flag.lower() in critere.lower():
+                flags_elim_corriges.append(flag)
+                break
+    flags_elim = flags_elim_corriges
+    checklist = analyse.get('checklist', {})
+    if not checklist or len(checklist) == 0:
+        keys_list = list(max_scores.keys())
+        checklist = {
+            "elim_0": len(flags_elim) == 0,
+            "elim_1": len(flags_elim) == 0,
+            "elim_2": len(flags_elim) == 0,
+            "elim_3": len(flags_elim) == 0,
+            "elim_4": len(flags_elim) == 0,
+            "elim_5": len(flags_elim) == 0,
+            "verif_0": sous_scores.get(keys_list[0], 0) >= 2 if keys_list else False,
+            "verif_1": sous_scores.get(keys_list[1], 0) >= 2 if len(keys_list) > 1 else False,
+            "verif_2": sous_scores.get(keys_list[2], 0) >= 1 if len(keys_list) > 2 else False,
+            "verif_3": sous_scores.get(keys_list[3], 0) >= 1 if len(keys_list) > 3 else False,
+            "verif_4": sous_scores.get(keys_list[4], 0) >= 1 if len(keys_list) > 4 else False,
+            "verif_5": sous_scores.get(keys_list[5], 0) >= 1 if len(keys_list) > 5 else False,
+            "verif_6": sous_scores.get(keys_list[6], 0) >= 1 if len(keys_list) > 6 else False
+        }
+    decision = get_recommandation_from_score(score_total, flags_elim, score_max_total)
+    statut = get_statut_from_decision(decision, flags_elim)
+    profils = analyse.get('profils_detectes', {})
+    banking_years = analyse.get('banking_years', 0)
+    result = {
+        'poste': poste,
+        'score': score_total,
+        'score_max': score_max_total,
+        'decision': decision,
+        'statut': statut,
+        'flags_eliminatoires': flags_elim,
+        'sous_scores': sous_scores,
+        'checklist': checklist,
+        'points_forts': analyse.get('points_forts', []),
+        'points_vigilance': analyse.get('points_vigilance', []),
+        'synthese': analyse.get('synthese_recruteur', ''),
+        'score_breakdown': {
+            'score_final': score_total,
+            'score_max': score_max_total,
+            'decision': decision,
+            'statut': statut,
+            'sous_scores': sous_scores,
+            'chef_agence_detecte': profils.get('chef_agence', False),
+            'gestionnaire_portefeuille_detecte': profils.get('gestionnaire_portefeuille', False),
+            'local_corporate_detecte': profils.get('local_corporate', False),
+            'cross_selling_detecte': profils.get('cross_selling', False),
+            'banking_years_detecte': banking_years,
+            'nb_eliminatoires': len(flags_elim),
+            'eliminatoires_passes': len(flags_elim) == 0,
+            'grille_version': 'v13.1-ia-multi-fallback',
+            'moteur': 'IA_100%',
+            'model_used': used_model
+        },
+        'analyse_details': {
+            'moteur': 'IA_100%',
+            'provider': used_model,
+            'model_used': used_model,
+            'sous_scores': sous_scores,
+            'flags_eliminatoires': flags_elim,
+            'points_forts': analyse.get('points_forts', []),
+            'points_vigilance': analyse.get('points_vigilance', []),
+            'synthese_recruteur': analyse.get('synthese_recruteur', ''),
+            'profils_detectes': profils,
+            'banking_years': banking_years,
+            'diplome_niveau': analyse.get('diplome_niveau', 'Non specifie')
+        }
+    }
+    return result
 def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_filenames, poste, force=False):
     try:
         if not force and not is_poste_actif(poste):
@@ -1452,8 +1495,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                         t = t[:MAX_TEXT_SIZE]
                     if t:
                         att_texts.append(t)
-        if not IA_ANALYSE_ACTIVE:
-            logger.error("❌ IA non disponible - impossible d'analyser")
+        if not IA_ANALYSE_ACTIVE or not ACTIVE_MODELS:
+            logger.error("❌ Aucun modele IA disponible - impossible d'analyser")
             if supabase:
                 supabase.table('candidats').update({
                     "score": "0",
@@ -1464,11 +1507,11 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
             return
         result = analyze_cv_with_ia_only(cv_text, lm_text, att_texts, poste)
         if not result:
-            logger.error(f"❌ Analyse IA echouee pour {token}")
+            logger.error(f"❌ Analyse IA echouee pour {token} (tous les modeles)")
             if supabase:
                 supabase.table('candidats').update({
                     "analyse_status": "error",
-                    "analyse_error": "L'analyse IA a echoue"
+                    "analyse_error": "L'analyse IA a echoue avec tous les modeles"
                 }).eq('token', token).execute()
             return
         score = result.get('score', 0)
@@ -1496,7 +1539,8 @@ def run_analysis_for_candidat(token, cv_filename, lettre_filename, attestation_f
                 "checklist": json.dumps(checklist, ensure_ascii=False)
             }
             supabase.table('candidats').update(update_data).eq('token', token).execute()
-        logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut} (flags: {len(flags_elim)})")
+        model_used = analyse_details.get('model_used', 'Inconnu')
+        logger.info(f"[{decision}] Score {token}: {score}/{score_max} → statut: {statut} (modele: {model_used}, flags: {len(flags_elim)})")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1618,7 +1662,7 @@ def postuler():
         }).execute()
         if is_poste_actif(poste):
             threading.Thread(target=run_analysis_for_candidat, args=(token, cv_filename, lettre_filename, att_filenames, poste, False), daemon=True).start()
-            analyse_msg = f'Analyse automatique en cours avec {_PROVIDER} (100% IA)'
+            analyse_msg = f'Analyse automatique en cours avec {len(ACTIVE_MODELS)} modele(s) IA'
         else:
             analyse_msg = 'Poste cloture — candidature enregistree sans analyse'
             supabase.table('candidats').update({
@@ -1642,7 +1686,7 @@ L'equipe RecrutBank"""
             'numero_dossier': numero_dossier,
             'analyse': analyse_msg,
             'poste_statut': 'actif' if is_poste_actif(poste) else 'cloture',
-            'ia_engine': _PROVIDER
+            'ia_engine': f"{len(ACTIVE_MODELS)} modeles IA"
         }), 201
     except Exception as e:
         import traceback
@@ -1822,9 +1866,9 @@ def trigger_analyze(token):
     }).eq('token', token).execute()
     threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, force), daemon=True).start()
     return jsonify({
-        'message': f'Analyse relancee avec {_PROVIDER} (100% IA)',
+        'message': f'Analyse relancee avec {len(ACTIVE_MODELS)} modele(s) IA',
         'token': token,
-        'ia_engine': _PROVIDER
+        'ia_engine': f"{len(ACTIVE_MODELS)} modeles"
     }), 202
 @app.route('/api/recruteur/reanalyze-status', methods=['GET'])
 @jwt_required()
@@ -1884,7 +1928,7 @@ def reanalyze_one_candidate(token):
             "reanalyze_reason": "Reanalyse manuelle (un seul candidat)"
         }).eq('token', token).execute()
         threading.Thread(target=run_analysis_for_candidat, args=(token, cv_fn, lm_fn, att_raw, poste, True), daemon=True).start()
-        return jsonify({'message': 'Reanalyse lancee (100% IA)', 'token': token, 'poste': poste}), 202
+        return jsonify({'message': 'Reanalyse lancee (multi-modeles IA)', 'token': token, 'poste': poste}), 202
     except Exception as e:
         logger.error(f"Erreur reanalyze-one: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2578,22 +2622,23 @@ def test_email():
         to = request.args.get('to', '')
         if not to:
             return jsonify({'error': 'Parametre ?to= requis'}), 400
-        ok = send_email(to, 'Test RecrutBank', f'Ceci est un email de test depuis RecrutBank avec {_PROVIDER} (100% IA).')
+        ok = send_email(to, 'Test RecrutBank', f'Ceci est un email de test depuis RecrutBank avec {len(ACTIVE_MODELS)} modele(s) IA.')
         return jsonify({'sent': ok}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 @app.route('/api/health-version', methods=['GET'])
 def health_version():
+    active_models = [{"name": m["name"], "model": m["model"]} for m in ACTIVE_MODELS]
     return jsonify({
-        "version": "v13.0-ia-reasonable",
+        "version": "v13.1-ia-multi-fallback",
         "postes_actifs": POSTES_ACTIFS,
         "postes_count": len(POSTES),
-        "analysis_method": "100% IA - Interpretation raisonnable",
+        "analysis_method": "100% IA avec fallback multi-modeles",
+        "active_models": active_models,
+        "active_models_count": len(ACTIVE_MODELS),
         "max_concurrent_downloads": DOWNLOAD_MAX_CONCURRENT,
         "zip_max_workers": _ZIP_MAX_WORKERS,
-        "ia_provider": _PROVIDER,
-        "ia_model": _MODEL,
-        "ia_free": "OpenRouter" in _PROVIDER,
+        "ia_provider": "OpenRouter + DeepSeek",
         "reasoning_enabled": OPENROUTER_REASONING_ENABLED,
         "json_robust_parsing": True,
         "sous_scores_complets": True,
@@ -2616,7 +2661,7 @@ def health_version():
             "Interpretation raisonnable des profils seniors"
         ],
         "deployed_at": datetime.datetime.now().isoformat(),
-        "version_info": "v13.0-ia-reasonable - Interpretation raisonnable des profils"
+        "version_info": "v13.1-ia-multi-fallback - Multi-modeles IA avec fallback automatique"
     }), 200
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 10000))
@@ -2624,16 +2669,16 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     suggested_workers = min(4, cpu_count * 2)
     logger.info("=" * 60)
-    logger.info("🚀 RecrutBank API v13.0 - 100% IA Reasonable")
+    logger.info("🚀 RecrutBank API v13.1 - Multi-modeles IA avec fallback")
     logger.info("=" * 60)
     logger.info(f"Port: {port}")
     logger.info(f"Workers suggeres: {suggested_workers}")
-    logger.info(f"IA Provider: {'✅ ' + _PROVIDER if IA_ANALYSE_ACTIVE else '❌ Aucune'}")
-    if IA_ANALYSE_ACTIVE:
-        logger.info(f"Modele: {_MODEL}")
-        logger.info(f"Gratuit: {'✅ Oui' if 'OpenRouter' in _PROVIDER else '❌ Non (payant)'}")
+    if ACTIVE_MODELS:
+        logger.info(f"✅ {len(ACTIVE_MODELS)} modele(s) IA actif(s):")
+        for m in ACTIVE_MODELS:
+            logger.info(f"   - {m['name']} ({m['model']})")
         logger.info(f"Reasoning: {'✅ Active' if OPENROUTER_REASONING_ENABLED else '❌ Desactive'}")
-        logger.info(f"Analyse: 100% IA - Interpretation raisonnable")
+        logger.info(f"Analyse: 100% IA avec fallback automatique")
         logger.info(f"POSTES ACTIFS: {POSTES_ACTIFS}")
         logger.info(f"GRILLES DISPONIBLES: {len(GRILLE)} postes")
         logger.info("REGLES D'INTERPRETATION:")
@@ -2647,7 +2692,7 @@ if __name__ == '__main__':
         logger.info("  ✅ Interpretation raisonnable des profils seniors")
         logger.info(f"Concurrence IA max: {os.getenv('IA_MAX_CONCURRENCY', '5')}")
     else:
-        logger.warning("⚠️ AUCUNE IA DISPONIBLE - Le systeme ne peut pas fonctionner")
+        logger.warning("⚠️ AUCUN MODELE IA DISPONIBLE - Le systeme ne peut pas fonctionner")
         logger.warning("   Veuillez configurer OPENROUTER_API_KEY")
     logger.info(f"Telechargements concurrents: {DOWNLOAD_MAX_CONCURRENT}")
     logger.info(f"Workers ZIP max: {_ZIP_MAX_WORKERS}")
