@@ -1,4 +1,3 @@
-```python
 from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -1170,7 +1169,10 @@ def parse_json_robust(result_text):
             logger.error("❌ Aucun JSON trouve dans la reponse")
             return None
 def get_recommandation_from_score(score, flags_elim=None, score_max=14):
-    s = float(score) if score is not None else 0
+    try:
+        s = float(score) if score is not None else 0
+    except (ValueError, TypeError):
+        s = 0
     if flags_elim and len(flags_elim) > 0:
         return "Rejet - Critere(s) eliminatoire(s) non satisfait(s)"
     if s >= 11:
@@ -1197,13 +1199,11 @@ def sort_candidats(candidats):
     2. Score decroissant (plus eleve d'abord)
     """
     statut_order = {'retenu': 0, 'entretien': 1, 'en_attente': 2, 'rejete': 3}
-    
     def get_score(candidat):
         try:
             return float(candidat.get('score', 0))
         except (ValueError, TypeError):
             return 0.0
-    
     return sorted(candidats, key=lambda x: (
         statut_order.get(x.get('statut', 'en_attente'), 99),
         -get_score(x)
@@ -1631,7 +1631,10 @@ def generate_excel_report_enhanced(candidats, poste_filter=""):
             points_vigilance = analyse_details.get('points_vigilance', []) or score_breakdown.get('points_vigilance', [])
             synthese = analyse_details.get('synthese_recruteur', '') or c.get('synthese', '')
             statut = c.get('statut', 'en_attente')
-            score = float(c.get('score', 0))
+            try:
+                score = float(c.get('score', 0))
+            except (ValueError, TypeError):
+                score = 0.0
             ws.cell(row=row_idx, column=1, value=rank).alignment = number_alignment
             ws.cell(row=row_idx, column=2, value=c.get('numero_dossier', '')).alignment = center_alignment
             ws.cell(row=row_idx, column=3, value=c.get('nom', '')).alignment = cell_alignment
@@ -1733,7 +1736,10 @@ def generate_pdf_report_enhanced(candidats, poste_filter=""):
             rank = 1
             for c in sorted_candidats[:100]:
                 statut = c.get('statut', 'en_attente')
-                score = float(c.get('score', 0))
+                try:
+                    score = float(c.get('score', 0))
+                except (ValueError, TypeError):
+                    score = 0.0
                 if statut == 'retenu':
                     statut_text = f'<font color="#16a34a">✅ Retenu</font>'
                 elif statut == 'entretien':
@@ -2865,4 +2871,3 @@ if __name__ == '__main__':
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
     except ImportError:
         app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
-```
