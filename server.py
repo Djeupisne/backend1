@@ -194,8 +194,8 @@ def health_check():
             'active_models_count': len(ACTIVE_MODELS),
             'analysis_method': '100% IA avec fallback multi-modeles',
             'scoring_max': 14,
-            'postes_actifs': ["Data Analyst Finance"],
-            'postes_clotures': ["Chef de Division Local Corporate"],
+            'postes_actifs': ["Chef de Division Local Corporate", "Data Analyst Finance"],
+            'postes_clotures': ["Responsable Administration de Credit", "Analyste Credit CCB", "Archiviste (Administration Credit)", "Senior Finance Officer", "Market Risk Officer", "IT Reseau & Infrastructure", "Auditeur interne", "Chef service controle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marche", "Chef service reporting reglementaire", "Chef de Section Compensation", "Charge(e) d'Administration de Credit"],
             'version': 'v13.2-rapports-ameliiores'
         }
     }), 200
@@ -478,6 +478,8 @@ def init_recruteur():
     except Exception as e:
         logger.warning(f"Erreur initialisation recruteur : {e}")
 init_recruteur()
+
+# Liste de tous les postes
 POSTES = [
     "Chef de Division Local Corporate",
     "Data Analyst Finance",
@@ -496,10 +498,16 @@ POSTES = [
     "Chef de Section Compensation",
     "Charge(e) d'Administration de Credit"
 ]
-POSTES_ACTIFS = ["Data Analyst Finance"]
+
+# POSTES ACTIFS - Chef de Division Local Corporate réouvert
+POSTES_ACTIFS = ["Chef de Division Local Corporate", "Data Analyst Finance"]
+
+# POSTES CLOTURES - Tous les autres
 POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
+
 def is_poste_actif(poste):
     return poste in POSTES_ACTIFS
+
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": [
