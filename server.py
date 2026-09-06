@@ -194,8 +194,8 @@ def health_check():
             'active_models_count': len(ACTIVE_MODELS),
             'analysis_method': '100% IA avec fallback multi-modeles',
             'scoring_max': 14,
-            'postes_actifs': ["Data Analyst Finance"],
-            'postes_clotures': ["Chef de Division Local Corporate"],
+            'postes_actifs': [],
+            'postes_clotures': ["Chef de Division Local Corporate", "Data Analyst Finance", "Responsable Administration de Credit", "Analyste Credit CCB", "Archiviste (Administration Credit)", "Senior Finance Officer", "Market Risk Officer", "IT Reseau & Infrastructure", "Auditeur interne", "Chef service controle des engagements", "Chef service IT (maintenance/support)", "Chef service finance", "Chef service risques de marche", "Chef service reporting reglementaire", "Chef de Section Compensation", "Charge(e) d'Administration de Credit"],
             'version': 'v13.2-rapports-ameliiores'
         }
     }), 200
@@ -478,6 +478,8 @@ def init_recruteur():
     except Exception as e:
         logger.warning(f"Erreur initialisation recruteur : {e}")
 init_recruteur()
+
+# Liste de tous les postes
 POSTES = [
     "Chef de Division Local Corporate",
     "Data Analyst Finance",
@@ -496,10 +498,16 @@ POSTES = [
     "Chef de Section Compensation",
     "Charge(e) d'Administration de Credit"
 ]
-POSTES_ACTIFS = ["Data Analyst Finance"]
-POSTES_CLOTURES = [p for p in POSTES if p not in POSTES_ACTIFS]
+
+# TOUS LES POSTES SONT CLOTURES
+POSTES_ACTIFS = []
+
+# TOUS LES POSTES SONT CLOTURES
+POSTES_CLOTURES = POSTES  # Tous les postes sont clôturés
+
 def is_poste_actif(poste):
-    return poste in POSTES_ACTIFS
+    return poste in POSTES_ACTIFS  # Retourne toujours False car POSTES_ACTIFS est vide
+
 GRILLE = {
     "Chef de Division Local Corporate": {
         "eliminatoire": [
@@ -2298,7 +2306,7 @@ L'equipe RecrutBank"""
             'token': token,
             'numero_dossier': numero_dossier,
             'analyse': analyse_msg,
-            'poste_statut': 'actif' if is_poste_actif(poste) else 'cloture',
+            'poste_statut': 'cloture',
             'ia_engine': f"{len(ACTIVE_MODELS)} modeles IA"
         }), 201
     except Exception as e:
@@ -2358,7 +2366,7 @@ def get_postes_stats():
             'count': actifs_count,
             'liste': POSTES_ACTIFS,
             'par_poste': par_poste_actif,
-            'eligible_reanalyse': True
+            'eligible_reanalyse': False
         },
         'postes_clotures': {
             'count': clotures_count,
